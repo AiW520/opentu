@@ -3,12 +3,12 @@
  * 负责同步用户自定义的工具配置
  */
 
-import { toolboxService } from '../toolbox-service';
 import { gitHubApiService } from './github-api-service';
 import { cryptoService } from './crypto-service';
 import { logDebug, logInfo, logWarning, logSuccess } from './sync-log-service';
 import { SYNC_FILES } from './types';
 import type { ToolDefinition } from '../../types/toolbox.types';
+import type { toolboxService as ToolboxService } from '../toolbox-service';
 
 /** 同步数据格式 */
 interface CustomToolsSyncData {
@@ -23,6 +23,11 @@ const SYNC_VERSION = '1.0';
  * 自定义工具同步服务
  */
 class ToolSyncService {
+  private async getToolboxService(): Promise<typeof ToolboxService> {
+    const { toolboxService } = await import('../toolbox-service');
+    return toolboxService;
+  }
+
   /**
    * 同步自定义工具
    */
@@ -37,6 +42,7 @@ class ToolSyncService {
     logDebug('ToolSyncService: Starting tool sync');
 
     try {
+      const toolboxService = await this.getToolboxService();
       // 获取本地工具
       const localTools = toolboxService.getCustomTools();
       const localUpdatedAt = await toolboxService.getUpdatedAt();

@@ -1,9 +1,13 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { WorkflowMessageBubble } from './WorkflowMessageBubble';
 import { UserMessageBubble } from './UserMessageBubble';
 import type { WorkflowMessageData } from '../../types/chat.types';
 import type { ChatHandler, Message } from '../../types/chat-ui.types';
 import MarkdownReadonly from '../MarkdownReadonly';
+import {
+  UnifiedMediaViewer,
+  type MediaItem as UnifiedMediaItem,
+} from '../shared/media-preview';
 
 // 工作流消息的特殊标记前缀
 const WORKFLOW_MESSAGE_PREFIX = '[[WORKFLOW_MESSAGE]]';
@@ -27,6 +31,10 @@ export const ChatMessagesArea: React.FC<ChatMessagesAreaProps> = ({
   handleWorkflowRetry,
   className = 'chat-section',
 }) => {
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewItems, setPreviewItems] = useState<UnifiedMediaItem[]>([]);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+
   // 检查消息是否为工作流消息
   const isWorkflowMessage = useCallback((message: Message): string | null => {
     const textPart = message.parts.find((p) => p.type === 'text');
@@ -62,6 +70,16 @@ export const ChatMessagesArea: React.FC<ChatMessagesAreaProps> = ({
 
     return textParts ? textParts.join('') : firstText ?? '';
   }, []);
+
+  const handlePreviewImages = useCallback(
+    (items: UnifiedMediaItem[], initialIndex: number) => {
+      if (items.length === 0) return;
+      setPreviewItems(items);
+      setPreviewInitialIndex(initialIndex);
+      setPreviewVisible(true);
+    },
+    []
+  );
 
   const showLoading =
     handler.status === 'submitted' || handler.status === 'streaming';
@@ -105,7 +123,11 @@ export const ChatMessagesArea: React.FC<ChatMessagesAreaProps> = ({
             // 用户消息包含图片时使用自定义气泡
             if (message.role === 'user' && hasImages(message)) {
               return (
-                <UserMessageBubble key={message.id} message={message} />
+                <UserMessageBubble
+                  key={message.id}
+                  message={message}
+                  onPreviewImages={handlePreviewImages}
+                />
               );
             }
 
@@ -145,6 +167,14 @@ export const ChatMessagesArea: React.FC<ChatMessagesAreaProps> = ({
           )}
         </div>
       </div>
+      <UnifiedMediaViewer
+        visible={previewVisible}
+        items={previewItems}
+        initialIndex={previewInitialIndex}
+        onClose={() => setPreviewVisible(false)}
+        showThumbnails={previewItems.length > 1}
+        videoAutoPlay={true}
+      />
     </div>
   );
 };

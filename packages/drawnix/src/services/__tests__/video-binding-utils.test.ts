@@ -13,6 +13,7 @@ import {
   setRuntimeModelConfigs,
   type ModelConfig,
 } from '../../constants/model-config';
+import { getVideoModelConfig } from '../../constants/video-model-config';
 
 afterEach(() => {
   clearRuntimeModelConfigs();
@@ -228,6 +229,80 @@ describe('video binding utils', () => {
 
     expect(submission.duration).toBe('8');
     expect(submission.model).toBe('sora-2');
+  });
+
+  it('aligns Omni Flash video config with Veo 3.1 request controls', () => {
+    const omniFlashConfig = getEffectiveVideoModelConfig('omni-flash', null);
+    const omniComponentsConfig = getEffectiveVideoModelConfig(
+      'omni-flash-components',
+      null
+    );
+    const omniFlashParams = getEffectiveVideoCompatibleParams('omni-flash');
+    const omniComponentsParams = getEffectiveVideoCompatibleParams(
+      'omni-flash-components'
+    );
+
+    expect(omniFlashConfig).toMatchObject({
+      provider: 'veo',
+      defaultDuration: '8',
+      defaultSize: '1280x720',
+      imageUpload: {
+        maxCount: 2,
+        mode: 'frames',
+        labels: ['首帧', '尾帧'],
+      },
+    });
+    expect(
+      omniFlashConfig.durationOptions.map((option) => option.value)
+    ).toEqual(['8']);
+    expect(omniFlashConfig.sizeOptions.map((option) => option.value)).toEqual([
+      '1280x720',
+      '720x1280',
+    ]);
+    expect(omniComponentsConfig).toMatchObject({
+      provider: 'veo',
+      defaultDuration: '8',
+      defaultSize: '1280x720',
+      imageUpload: {
+        maxCount: 3,
+        mode: 'components',
+        labels: ['参考图1', '参考图2', '参考图3'],
+      },
+    });
+    expect(
+      omniComponentsConfig.sizeOptions.map((option) => option.value)
+    ).toEqual(['1280x720', '720x1280']);
+
+    for (const params of [omniFlashParams, omniComponentsParams]) {
+      expect(
+        params
+          .find((param) => param.id === 'duration')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['8']);
+      expect(
+        params
+          .find((param) => param.id === 'size')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['1280x720', '720x1280']);
+    }
+
+    expect(getVideoModelConfig('omni-flash').imageUpload.mode).toBe('frames');
+    expect(getVideoModelConfig('omni-flash-components').imageUpload.mode).toBe(
+      'components'
+    );
+
+    expect(resolveVideoSubmission('omni-flash', '8', null)).toMatchObject({
+      model: 'omni-flash',
+      duration: '8',
+      durationField: 'seconds',
+    });
+    expect(
+      resolveVideoSubmission('omni-flash-components', '8', null)
+    ).toMatchObject({
+      model: 'omni-flash-components',
+      duration: '8',
+      durationField: 'seconds',
+    });
   });
 
   it('uses Kling capability defaults and exposes model_name for runtime models', () => {

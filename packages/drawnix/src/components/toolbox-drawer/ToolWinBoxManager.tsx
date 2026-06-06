@@ -29,7 +29,6 @@ import { useDeviceType } from '../../hooks/useDeviceType';
 import { toolRegistry } from '../../tools/registry';
 import { winboxManagerService } from '../../services/winbox-manager-service';
 import { analytics } from '../../utils/posthog-analytics';
-import { isBuiltInToolId } from '../../constants/built-in-tools';
 
 /**
  * 工具弹窗管理器组件
@@ -47,7 +46,7 @@ export const ToolWinBoxManager: React.FC = () => {
       status: 'start' | 'success' | 'failed',
       extras: Record<string, unknown> = {}
     ) => {
-      const isCustomTool = !isBuiltInToolId(tool.id);
+      const isCustomTool = !toolRegistry.isBuiltInTool(tool.id);
       analytics.trackUIInteraction({
         area: 'toolbox_window',
         action: 'insert_to_canvas',

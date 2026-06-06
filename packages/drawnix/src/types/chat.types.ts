@@ -5,7 +5,7 @@
  */
 
 import type { ModelRef } from '../utils/settings-manager';
-import type { KnowledgeContextRef } from './task.types';
+import type { KnowledgeContextRef, Task } from './task.types';
 
 // ============================================================================
 // Enums
@@ -304,6 +304,8 @@ export interface WorkflowMessageParams {
   textModel?: string;
   /** 是否自动打开 ChatDrawer，默认 true */
   autoOpen?: boolean;
+  /** 是否追加到当前会话，默认保持创建新会话 */
+  appendToCurrentSession?: boolean;
 }
 
 /** ChatDrawer Ref API - 用于外部控制 ChatDrawer */
@@ -320,6 +322,8 @@ export interface ChatDrawerRef {
   sendWorkflowMessage: (params: WorkflowMessageParams) => Promise<void>;
   /** 更新当前工作流消息 */
   updateWorkflowMessage: (workflow: WorkflowMessageData) => void;
+  /** 根据任务队列事件同步已有工作流消息 */
+  syncWorkflowTaskUpdate: (task: Task) => boolean;
   /** 追加 Agent 执行日志 */
   appendAgentLog: (log: AgentLogEntry) => void;
   /** 更新 AI 思考内容（流式追加） */

@@ -33,7 +33,6 @@ import { withDraw, BasicShapes, DrawTransforms } from '@plait/draw';
 import { MindThemeColors, withMind } from '@plait/mind';
 import { withMindExtend } from './plugins/with-mind-extend';
 import { withCommonPlugin } from './plugins/with-common';
-import { PopupToolbar } from './components/toolbar/popup-toolbar/popup-toolbar';
 import { UnifiedToolbar } from './components/toolbar/unified-toolbar';
 import classNames from 'classnames';
 import './styles/index.scss';
@@ -49,14 +48,7 @@ import {
   useDrawnix,
 } from './hooks/use-drawnix';
 import { ClosePencilToolbar } from './components/toolbar/pencil-mode-toolbar';
-import {
-  PencilSettingsToolbar,
-  EraserSettingsToolbar,
-} from './components/toolbar/pencil-settings-toolbar';
-import { PenSettingsToolbar } from './components/toolbar/pen-settings-toolbar';
-import { CleanConfirm } from './components/clean-confirm/clean-confirm';
 import { buildTextLinkPlugin } from './plugins/with-text-link';
-import { LinkPopup } from './components/popup/link-popup/link-popup';
 import { I18nProvider } from './i18n';
 import { withVideo, isVideoElement } from './plugins/with-video';
 import {
@@ -91,7 +83,6 @@ import { ViewNavigation } from './components/view-navigation';
 import { AssetProvider } from './contexts/AssetContext';
 import { AudioPlaylistProvider } from './contexts/AudioPlaylistContext';
 import { ToolbarConfigProvider } from './hooks/use-toolbar-config';
-import { QuickCreationToolbar } from './components/toolbar/quick-creation-toolbar/quick-creation-toolbar';
 import { CacheQuotaProvider } from './components/cache-quota-provider/CacheQuotaProvider';
 import { RecentColorsProvider } from './components/unified-color-picker';
 import { usePencilCursor } from './hooks/usePencilCursor';
@@ -102,7 +93,6 @@ import { withCard } from './plugins/with-card';
 import { withCardResize } from './plugins/with-card-resize';
 import { withAudioNode } from './plugins/with-audio-node';
 import { withAudioNodeResize } from './plugins/with-audio-node-resize';
-import { AutoCompleteShapePicker } from './components/auto-complete-shape-picker';
 import { useAutoCompleteShapePicker } from './hooks/useAutoCompleteShapePicker';
 import { withDefaultFill } from './plugins/with-default-fill';
 import { withGradientFill } from './plugins/with-gradient-fill';
@@ -137,6 +127,48 @@ import {
 import { syncEditedPPTSlideImage } from './utils/frame-insertion-utils';
 import type { MediaLibraryModalProps } from './types/asset.types';
 import { SelectionMode } from './types/asset.types';
+const PopupToolbar = lazy(() =>
+  import('./components/toolbar/popup-toolbar/popup-toolbar').then((module) => ({
+    default: module.PopupToolbar,
+  }))
+);
+const LinkPopup = lazy(() =>
+  import('./components/popup/link-popup/link-popup').then((module) => ({
+    default: module.LinkPopup,
+  }))
+);
+const PencilSettingsToolbar = lazy(() =>
+  import('./components/toolbar/pencil-settings-toolbar').then((module) => ({
+    default: module.PencilSettingsToolbar,
+  }))
+);
+const EraserSettingsToolbar = lazy(() =>
+  import('./components/toolbar/pencil-settings-toolbar').then((module) => ({
+    default: module.EraserSettingsToolbar,
+  }))
+);
+const PenSettingsToolbar = lazy(() =>
+  import('./components/toolbar/pen-settings-toolbar').then((module) => ({
+    default: module.PenSettingsToolbar,
+  }))
+);
+const CleanConfirm = lazy(() =>
+  import('./components/clean-confirm/clean-confirm').then((module) => ({
+    default: module.CleanConfirm,
+  }))
+);
+const QuickCreationToolbar = lazy(() =>
+  import(
+    './components/toolbar/quick-creation-toolbar/quick-creation-toolbar'
+  ).then((module) => ({
+    default: module.QuickCreationToolbar,
+  }))
+);
+const AutoCompleteShapePicker = lazy(() =>
+  import('./components/auto-complete-shape-picker').then((module) => ({
+    default: module.AutoCompleteShapePicker,
+  }))
+);
 const DeferredAIInputBar = lazy(() =>
   import('./components/startup/DeferredAIInputBar').then((module) => ({
     default: module.DeferredAIInputBar,
@@ -373,11 +405,9 @@ export const Drawnix: React.FC<DrawnixProps> = ({
     enableToolWindows(TOOL_WINDOW_GROUPS);
     void Promise.all([
       import('./services/tool-window-service'),
-      import('./constants/built-in-tools'),
-    ]).then(([{ toolWindowService }, { BUILT_IN_TOOLS }]) => {
-      const kbTool = BUILT_IN_TOOLS.find(
-        (tool) => tool.id === 'knowledge-base'
-      );
+      import('./tools/registry'),
+    ]).then(([{ toolWindowService }, { toolRegistry }]) => {
+      const kbTool = toolRegistry.getManifestById('knowledge-base');
       if (!kbTool) {
         return;
       }
@@ -398,11 +428,9 @@ export const Drawnix: React.FC<DrawnixProps> = ({
       enableToolWindows(TOOL_WINDOW_GROUPS);
       void Promise.all([
         import('./services/tool-window-service'),
-        import('./constants/built-in-tools'),
-      ]).then(([{ toolWindowService }, { BUILT_IN_TOOLS }]) => {
-        const kbTool = BUILT_IN_TOOLS.find(
-          (tool) => tool.id === 'knowledge-base'
-        );
+        import('./tools/registry'),
+      ]).then(([{ toolWindowService }, { toolRegistry }]) => {
+        const kbTool = toolRegistry.getManifestById('knowledge-base');
         if (!kbTool) {
           return;
         }
@@ -1615,12 +1643,22 @@ const DrawnixContent: React.FC<DrawnixContentProps> = ({
             </Suspense>
           )}
 
-          <PopupToolbar></PopupToolbar>
-          <LinkPopup></LinkPopup>
+          <Suspense fallback={null}>
+            <PopupToolbar></PopupToolbar>
+          </Suspense>
+          <Suspense fallback={null}>
+            <LinkPopup></LinkPopup>
+          </Suspense>
           <ClosePencilToolbar></ClosePencilToolbar>
-          <PencilSettingsToolbar></PencilSettingsToolbar>
-          <PenSettingsToolbar></PenSettingsToolbar>
-          <EraserSettingsToolbar></EraserSettingsToolbar>
+          <Suspense fallback={null}>
+            <PencilSettingsToolbar></PencilSettingsToolbar>
+          </Suspense>
+          <Suspense fallback={null}>
+            <PenSettingsToolbar></PenSettingsToolbar>
+          </Suspense>
+          <Suspense fallback={null}>
+            <EraserSettingsToolbar></EraserSettingsToolbar>
+          </Suspense>
           {appState.openDialogTypes.size > 0 && (
             <Suspense fallback={null}>
               <TTDDialog container={containerRef.current}></TTDDialog>
@@ -1631,7 +1669,9 @@ const DrawnixContent: React.FC<DrawnixContentProps> = ({
               <SettingsDialog container={containerRef.current}></SettingsDialog>
             </Suspense>
           )}
-          <CleanConfirm container={containerRef.current}></CleanConfirm>
+          <Suspense fallback={null}>
+            <CleanConfirm container={containerRef.current}></CleanConfirm>
+          </Suspense>
           <Suspense fallback={null}>
             <DeferredAIInputBar
               isDataReady={isDataReady}
@@ -1641,12 +1681,16 @@ const DrawnixContent: React.FC<DrawnixContentProps> = ({
             />
           </Suspense>
           {/* Quick Creation Toolbar - 双击空白区域显示的快捷工具栏 */}
-          <QuickCreationToolbar
-            position={quickToolbarPosition}
-            visible={quickToolbarVisible}
-            onClose={() => setQuickToolbarVisible(false)}
-            onOpenMediaLibrary={handleOpenMediaLibrary}
-          />
+          {quickToolbarVisible && (
+            <Suspense fallback={null}>
+              <QuickCreationToolbar
+                position={quickToolbarPosition}
+                visible={quickToolbarVisible}
+                onClose={() => setQuickToolbarVisible(false)}
+                onOpenMediaLibrary={handleOpenMediaLibrary}
+              />
+            </Suspense>
+          )}
           {/* 浮动文本输入 - 文本工具双击画布时出现 */}
           {inlineTextInput && (
             <div
@@ -1696,14 +1740,18 @@ const DrawnixContent: React.FC<DrawnixContentProps> = ({
             </Suspense>
           )}
           {/* Auto Complete Shape Picker - 自动完成形状选择器 */}
-          <AutoCompleteShapePicker
-            visible={autoCompleteState.visible}
-            position={autoCompleteState.position}
-            currentShape={autoCompleteState.currentShape || undefined}
-            onSelectShape={selectAutoCompleteShape}
-            onClose={closeAutoCompletePicker}
-            container={containerRef.current}
-          />
+          {autoCompleteState.visible && (
+            <Suspense fallback={null}>
+              <AutoCompleteShapePicker
+                visible={autoCompleteState.visible}
+                position={autoCompleteState.position}
+                currentShape={autoCompleteState.currentShape || undefined}
+                onSelectShape={selectAutoCompleteShape}
+                onClose={closeAutoCompletePicker}
+                container={containerRef.current}
+              />
+            </Suspense>
+          )}
           {/* ViewNavigation - 视图导航（缩放 + 小地图） */}
           <ViewNavigation />
         </Wrapper>

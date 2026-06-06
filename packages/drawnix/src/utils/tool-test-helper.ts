@@ -12,7 +12,7 @@
 import { PlaitBoard } from '@plait/core';
 import { ToolTransforms } from '../plugins/with-tool';
 import { toolboxService } from '../services/toolbox-service';
-import { DEFAULT_TOOL_CONFIG } from '../constants/built-in-tools';
+import { DEFAULT_TOOL_CONFIG } from '../constants/toolbox-shared';
 
 /**
  * 工具箱测试助手类

@@ -3,7 +3,10 @@ import {
   clearModelAdapters,
   registerModelAdapter,
   resolveAdapterForBinding,
+  resolveAdapterForModel,
 } from '../model-adapters/registry';
+import { ModelVendor } from '../../constants/model-config';
+import { inferBindingsForProviderModel } from '../provider-routing';
 import type {
   ImageModelAdapter,
   VideoModelAdapter,
@@ -102,6 +105,28 @@ const happyHorseVideoAdapter: VideoModelAdapter = {
   },
 };
 
+const genericVideoAdapter: VideoModelAdapter = {
+  id: 'generic-video',
+  label: 'Generic Video',
+  kind: 'video',
+  matchProtocols: ['openai.async.video'],
+  matchRequestSchemas: ['openai.video.form-input-reference'],
+  matchPredicate(modelConfig) {
+    if (modelConfig.type !== 'video') {
+      return false;
+    }
+    const lowerId = modelConfig.id.toLowerCase();
+    return (
+      !lowerId.includes('kling') &&
+      !lowerId.includes('seedance') &&
+      !lowerId.includes('happyhorse')
+    );
+  },
+  async generateVideo() {
+    throw new Error('not implemented');
+  },
+};
+
 describe('model adapter registry', () => {
   beforeEach(() => {
     clearModelAdapters();
@@ -111,6 +136,7 @@ describe('model adapter registry', () => {
     registerModelAdapter(tuziGptImageAdapter);
     registerModelAdapter(seedanceVideoAdapter);
     registerModelAdapter(happyHorseVideoAdapter);
+    registerModelAdapter(genericVideoAdapter);
   });
 
   afterEach(() => {
@@ -221,5 +247,44 @@ describe('model adapter registry', () => {
     );
 
     expect(adapter?.id).toBe('happyhorse-video');
+  });
+
+  it('routes Omni Flash video models to the generic async video adapter', () => {
+    expect(resolveAdapterForModel('omni-flash', 'video')?.id).toBe(
+      'generic-video'
+    );
+    expect(resolveAdapterForModel('omni-flash-components', 'video')?.id).toBe(
+      'generic-video'
+    );
+  });
+
+  it('routes Omni Flash provider bindings to the generic async video adapter', () => {
+    const bindings = inferBindingsForProviderModel(
+      {
+        id: 'provider-video',
+        name: 'Video Provider',
+        providerType: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'test-key',
+        authType: 'bearer',
+      },
+      {
+        id: 'omni-flash-components',
+        label: 'Gemini Omni Flash Components',
+        type: 'video',
+        vendor: ModelVendor.GEMINI,
+      }
+    );
+    const binding = bindings.find(
+      (candidate) => candidate.protocol === 'openai.async.video'
+    );
+
+    expect(binding).toMatchObject({
+      modelId: 'omni-flash-components',
+      requestSchema: 'openai.video.form-input-reference',
+    });
+    expect(resolveAdapterForBinding(binding!, 'video')?.id).toBe(
+      'generic-video'
+    );
   });
 });

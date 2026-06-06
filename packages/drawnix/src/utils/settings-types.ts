@@ -43,6 +43,7 @@ export interface ProviderProfile {
   apiKey: string;
   authType: ProviderAuthType;
   imageApiCompatibility?: ImageApiCompatibility;
+  preferAsyncImageEndpoint?: boolean;
   extraHeaders?: Record<string, string>;
   enabled: boolean;
   capabilities: ProviderCapabilities;

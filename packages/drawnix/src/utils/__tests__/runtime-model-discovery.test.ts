@@ -261,4 +261,215 @@ describe('runtime-model-discovery', () => {
       vendor: 'HAPPYHORSE',
     });
   });
+
+  it('运行时发现 Omni Flash 系列会识别为 Gemini 供应商', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            data: [
+              {
+                id: 'omni-flash',
+                owned_by: 'openai',
+                supported_endpoint_types: ['videos.generate'],
+              },
+              {
+                id: 'omni-flash-components',
+                owned_by: 'openai',
+                supported_endpoint_types: ['videos.generate'],
+              },
+            ],
+          }),
+      }))
+    );
+
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [
+          {
+            id: 'provider-video',
+            name: 'Video Provider',
+            enabled: true,
+          },
+        ],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+
+    const models = await runtimeModelDiscovery.discover(
+      'provider-video',
+      'https://api.example.com/v1',
+      'test-key'
+    );
+
+    expect(models.map((model) => model.vendor)).toEqual(['GEMINI', 'GEMINI']);
+    expect(models.map((model) => model.type)).toEqual(['video', 'video']);
+  });
+
+  it('不会把 OpenAI 自有 omni 模型误归类为 Gemini', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            data: [
+              {
+                id: 'omni-moderation-latest',
+                owned_by: 'openai',
+                supported_endpoint_types: ['moderations'],
+              },
+            ],
+          }),
+      }))
+    );
+
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [
+          {
+            id: 'provider-openai',
+            name: 'OpenAI',
+            enabled: true,
+          },
+        ],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+
+    const models = await runtimeModelDiscovery.discover(
+      'provider-openai',
+      'https://api.example.com/v1',
+      'test-key'
+    );
+
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({
+      id: 'omni-moderation-latest',
+      vendor: 'GPT',
+    });
+  });
+
+  it('优先按接口 category 分类模型', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            data: [
+              {
+                id: 'gpt-4o-image-async',
+                owned_by: 'openai',
+                category: '生图',
+                supported_endpoint_types: [
+                  'OpenAI-Chat',
+                  'edit',
+                  'generate',
+                  'openai-video',
+                ],
+              },
+              {
+                id: 'research-video-preview',
+                owned_by: 'openai',
+                category: '文本',
+                supported_endpoint_types: ['openai-video'],
+              },
+            ],
+          }),
+      }))
+    );
+
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [
+          {
+            id: 'provider-openai',
+            name: 'OpenAI',
+            enabled: true,
+          },
+        ],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+
+    const models = await runtimeModelDiscovery.discover(
+      'provider-openai',
+      'https://api.example.com/v1',
+      'test-key'
+    );
+
+    expect(models).toHaveLength(2);
+    expect(models.find((model) => model.id === 'gpt-4o-image-async')).toMatchObject(
+      {
+        type: 'image',
+        vendor: 'GPT',
+      }
+    );
+    expect(models.find((model) => model.id === 'research-video-preview')).toMatchObject(
+      {
+        type: 'text',
+        vendor: 'GPT',
+      }
+    );
+  });
 });

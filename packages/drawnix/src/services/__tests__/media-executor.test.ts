@@ -23,6 +23,7 @@ describe('Media Executor Module', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.doUnmock('../media-executor/task-storage-writer');
+    vi.doUnmock('../media-executor/fallback-adapter-routes');
     vi.doUnmock('../../utils/settings-manager');
     vi.doUnmock('../sw-channel/client');
     vi.doUnmock('../task-storage-reader');
@@ -30,6 +31,7 @@ describe('Media Executor Module', () => {
     vi.doUnmock('../unified-cache-service');
     vi.doUnmock('../../utils/api-auth-error-event');
     vi.doUnmock('../model-adapters');
+    vi.doUnmock('../provider-routing');
   });
 
   describe('IMediaExecutor Interface', () => {
@@ -190,6 +192,7 @@ describe('Media Executor Module', () => {
       }));
       vi.doMock('../media-executor/task-storage-writer', () => ({
         taskStorageWriter: {
+          updateStatus: vi.fn(async () => {}),
           completeTask: vi.fn(async () => {}),
           failTask: vi.fn(async () => {}),
         },
@@ -271,6 +274,107 @@ describe('Media Executor Module', () => {
           maskImage: 'data:image/png;base64,mask',
           outputFormat: 'png',
         })
+      );
+    }, 15000);
+
+    it('routes Midjourney runtime image models through the MJ adapter', async () => {
+      const executeImageViaAdapter = vi.fn(async () => undefined);
+      const resolveAdapterForInvocation = vi.fn(() => ({
+        id: 'mj-image-adapter',
+        kind: 'image',
+      }));
+
+      vi.doMock('../media-executor/llm-api-logger', () => ({
+        startLLMApiLog: vi.fn(() => 'log-id'),
+        completeLLMApiLog: vi.fn(),
+        failLLMApiLog: vi.fn(),
+      }));
+      vi.doMock('../media-executor/task-storage-writer', () => ({
+        taskStorageWriter: {
+          updateStatus: vi.fn(async () => {}),
+          completeTask: vi.fn(async () => {}),
+          failTask: vi.fn(async () => {}),
+        },
+      }));
+      vi.doMock('../unified-cache-service', () => ({
+        unifiedCacheService: {
+          getImageForAI: vi.fn(),
+          isCached: vi.fn(async () => false),
+          cacheMediaFromBlob: vi.fn(async () => {}),
+        },
+      }));
+      vi.doMock('../../utils/api-auth-error-event', () => ({
+        isAuthError: vi.fn(() => false),
+        dispatchApiAuthError: vi.fn(),
+      }));
+      vi.doMock('../../utils/settings-manager', async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import('../../utils/settings-manager')
+        >();
+        return {
+          ...actual,
+          geminiSettings: {
+            get: () => ({
+              apiKey: 'test-key',
+              baseUrl: 'https://api.example.com/v1',
+            }),
+          },
+        };
+      });
+      vi.doMock('../provider-routing', () => ({
+        resolveInvocationPlanFromRoute: vi.fn(() => null),
+      }));
+      vi.doMock('../model-adapters', () => ({
+        resolveAdapterForInvocation,
+        getAdapterContextFromSettings: vi.fn(),
+        GPT_IMAGE_EDIT_REQUEST_SCHEMAS: ['openai.image.gpt-edit-form'],
+      }));
+      vi.doMock('../media-executor/fallback-adapter-routes', () => ({
+        executeImageViaAdapter,
+        executeVideoViaAdapter: vi.fn(async () => undefined),
+      }));
+
+      const { FallbackMediaExecutor } = await import(
+        '../media-executor/fallback-executor'
+      );
+      const executor = new FallbackMediaExecutor();
+
+      await executor.generateImage({
+        taskId: 'task-mj-1',
+        prompt: '生成一个兔子',
+        model: 'mj_fast_background_eraser',
+        modelRef: {
+          profileId: 'tuzi',
+          modelId: 'mj_fast_background_eraser',
+        },
+      });
+
+      expect(resolveAdapterForInvocation).toHaveBeenCalledWith(
+        'image',
+        'mj_fast_background_eraser',
+        {
+          profileId: 'tuzi',
+          modelId: 'mj_fast_background_eraser',
+        },
+        {
+          preferredRequestSchema: undefined,
+        }
+      );
+      expect(executeImageViaAdapter).toHaveBeenCalledWith(
+        'task-mj-1',
+        expect.objectContaining({
+          id: 'mj-image-adapter',
+          kind: 'image',
+        }),
+        expect.objectContaining({
+          model: 'mj_fast_background_eraser',
+          modelRef: {
+            profileId: 'tuzi',
+            modelId: 'mj_fast_background_eraser',
+          },
+        }),
+        undefined,
+        expect.any(Number)
       );
     }, 15000);
 

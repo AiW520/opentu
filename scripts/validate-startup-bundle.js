@@ -9,6 +9,7 @@ const DISALLOWED_PREFIXES = [
   'tool-windows-',
   'external-skills-',
 ];
+const MAX_STARTUP_ASSET_BYTES = 500 * 1024;
 const STATIC_IMPORT_RE =
   /(?:\bimport\s*(?:[^"'`]*?\bfrom\s*)?|\bexport\s*[^"'`]*?\bfrom\s*)["']\.\/([^"']+)["']/g;
 const DYNAMIC_IMPORT_RE = /\bimport\(["']\.\/([^"']+)["']\)/g;
@@ -238,6 +239,36 @@ if (chunkCycles.length > 0) {
   fail(`构建产物存在静态 chunk 循环依赖：\n${formattedCycles}`);
 }
 
+const startupAssetGraph = new Set([
+  ...directAssets,
+  ...entryDependencyGraph,
+]);
+const startupBudgetReport = Array.from(startupAssetGraph)
+  .filter((asset) => asset && (asset.endsWith('.js') || asset.endsWith('.css')))
+  .map((asset) => {
+    const fullPath = path.join(DIST_DIR, asset);
+    const size = fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0;
+    return {
+      asset,
+      size,
+      limit: MAX_STARTUP_ASSET_BYTES,
+      ok: size <= MAX_STARTUP_ASSET_BYTES,
+    };
+  })
+  .sort((a, b) => b.size - a.size);
+
+const oversizedStartupAssets = startupBudgetReport.filter((item) => !item.ok);
+if (oversizedStartupAssets.length > 0) {
+  fail(
+    `首屏依赖链存在超过 500KB 的资源：\n${oversizedStartupAssets
+      .map(
+        ({ asset, size, limit }) =>
+          `- ${asset}: ${size} bytes > ${limit} bytes`
+      )
+      .join('\n')}`
+  );
+}
+
 const sizeReport = directAssets.map((asset) => {
   const fullPath = path.join(DIST_DIR, asset);
   const size = fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0;
@@ -252,6 +283,7 @@ console.log(
     {
       directAssets: sizeReport,
       entryDependencyGraph: Array.from(entryDependencyGraph).sort(),
+      startupBudget: startupBudgetReport,
       chunkCycles: [],
       idlePrefetchGroups: Object.keys(idleManifest.groups || {}),
     },

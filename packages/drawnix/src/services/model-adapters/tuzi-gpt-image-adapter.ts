@@ -45,9 +45,11 @@ function getRequestedCount(request: ImageGenerationRequest): number | undefined 
 
 function getResponseFormat(
   request: ImageGenerationRequest
-): TuziResponseFormat {
+): TuziResponseFormat | undefined {
   const responseFormat = getStringParam(request.params, 'response_format');
-  return responseFormat === 'b64_json' ? 'b64_json' : 'url';
+  return responseFormat === 'url' || responseFormat === 'b64_json'
+    ? responseFormat
+    : undefined;
 }
 
 export function buildTuziGPTImageRequestOptions(
@@ -55,7 +57,7 @@ export function buildTuziGPTImageRequestOptions(
 ): {
   size?: string;
   image?: string[];
-  response_format: TuziResponseFormat;
+  response_format?: TuziResponseFormat;
   quality?: 'auto' | 'low' | 'medium' | 'high';
   count?: number;
   model: string;
@@ -84,8 +86,10 @@ export function buildTuziGPTImageRequestBody(
   const body: Record<string, unknown> = {
     model: options.model,
     prompt: request.prompt,
-    response_format: options.response_format,
   };
+  if (options.response_format) {
+    body.response_format = options.response_format;
+  }
 
   if (options.size) {
     body.size = options.size;

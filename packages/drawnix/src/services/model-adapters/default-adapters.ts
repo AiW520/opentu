@@ -14,7 +14,6 @@ import {
   IMAGE_MODEL_MORE_OPTIONS,
   IMAGE_MODEL_VIP_OPTIONS,
   VIDEO_MODELS,
-  isAsyncImageModel,
   ModelVendor,
 } from '../../constants/model-config';
 import type { UploadedVideoImage } from '../../types/video.types';
@@ -59,6 +58,11 @@ const videoModelIds = VIDEO_MODELS.map((model) => model.id).filter(
 );
 
 const audioModelIds = AUDIO_MODELS.map((model) => model.id);
+
+function isGptImageModel(model: string): boolean {
+  const lowerId = model.toLowerCase();
+  return lowerId.startsWith('gpt-image') || lowerId.includes('gpt-image');
+}
 
 const extractImageUrl = (
   response: any,
@@ -125,10 +129,9 @@ const toUploadedVideoImages = (
 
 function shouldUseAsyncImageEndpoint(
   context: AdapterContext,
-  model: string
+  _model: string
 ): boolean {
   return (
-    isAsyncImageModel(model) ||
     context.binding?.protocol === 'openai.async.media' ||
     context.binding?.requestSchema === 'openai.async.image.form'
   );
@@ -187,16 +190,26 @@ export const geminiImageAdapter: ImageModelAdapter = {
       | 'b64_json'
       | undefined;
 
-    const result = await defaultGeminiClient.generateImage(request.prompt, {
+    const imageOptions: Parameters<
+      typeof defaultGeminiClient.generateImage
+    >[1] = {
       size: request.size,
       image: request.referenceImages,
-      response_format: responseFormat || 'url',
+      omitDefaultResponseFormat: isGptImageModel(model),
       quality,
       count:
         typeof request.params?.n === 'number' ? request.params.n : undefined,
       model,
       modelRef: request.modelRef || null,
-    });
+    };
+    if (responseFormat) {
+      imageOptions.response_format = responseFormat;
+    }
+
+    const result = await defaultGeminiClient.generateImage(
+      request.prompt,
+      imageOptions
+    );
 
     return extractImageUrl(result, request.prompt);
   },

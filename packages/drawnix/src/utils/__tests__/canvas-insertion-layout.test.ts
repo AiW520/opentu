@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  advanceBatchInsertionFlow,
+  createBatchInsertionFlowState,
   estimateCanvasTextSize,
+  getBatchInsertionFlowCenter,
   getBottomMostInsertionPoint,
   getInsertionPointFromSavedSelection,
+  getViewportAwareCardWidth,
   groupInsertionItems,
 } from '../canvas-insertion-layout';
 
 vi.mock('@plait/core', () => ({
+  PlaitBoard: {
+    getBoardContainer: (board: any) => board.container,
+  },
   getRectangleByElements: (_board: any, elements: any[]) => {
     const element = elements[0];
 
@@ -29,12 +36,23 @@ vi.mock('@plait/core', () => ({
   },
 }));
 
-function createBoard(children: any[], selectedIds: string[] = []) {
+function createBoard(
+  children: any[],
+  selectedIds: string[] = [],
+  container = { width: 1000, height: 700 },
+  zoom = 1
+) {
   return {
     appState: {
       lastSelectedElementIds: selectedIds,
     },
     children,
+    container: {
+      getBoundingClientRect: () => container,
+    },
+    viewport: {
+      zoom,
+    },
   } as any;
 }
 
@@ -114,5 +132,61 @@ describe('canvas-insertion-layout', () => {
       [items[2]],
       [items[3], items[4]],
     ]);
+  });
+
+  it('flows items horizontally until viewport canvas width is full', () => {
+    const board = createBoard([], [], { width: 900, height: 600 }, 1);
+    let state = createBatchInsertionFlowState(board, [100, 200], {
+      horizontalGap: 20,
+      verticalGap: 50,
+    });
+
+    const first = advanceBatchInsertionFlow(state, { width: 400, height: 300 });
+    state = first.state;
+    const second = advanceBatchInsertionFlow(state, { width: 400, height: 240 });
+    state = second.state;
+    const third = advanceBatchInsertionFlow(state, { width: 400, height: 260 });
+    state = third.state;
+
+    expect(first.point).toEqual([100, 200]);
+    expect(second.point).toEqual([520, 200]);
+    expect(third.point).toEqual([100, 550]);
+    expect(third.wrapped).toBe(true);
+  });
+
+  it('uses zoom-adjusted viewport width for wrapping', () => {
+    const board = createBoard([], [], { width: 900, height: 600 }, 2);
+    let state = createBatchInsertionFlowState(board, [100, 100], {
+      horizontalGap: 20,
+      verticalGap: 50,
+    });
+
+    const first = advanceBatchInsertionFlow(state, { width: 400, height: 300 });
+    state = first.state;
+    const second = advanceBatchInsertionFlow(state, { width: 400, height: 300 });
+
+    expect(first.point).toEqual([100, 100]);
+    expect(second.point).toEqual([100, 450]);
+    expect(second.wrapped).toBe(true);
+  });
+
+  it('calculates flow center from the full batch bounds', () => {
+    const board = createBoard([], [], { width: 900, height: 600 }, 1);
+    let state = createBatchInsertionFlowState(board, [100, 200], {
+      horizontalGap: 20,
+      verticalGap: 50,
+    });
+
+    state = advanceBatchInsertionFlow(state, { width: 400, height: 300 }).state;
+    state = advanceBatchInsertionFlow(state, { width: 400, height: 240 }).state;
+    state = advanceBatchInsertionFlow(state, { width: 400, height: 260 }).state;
+
+    expect(getBatchInsertionFlowCenter(state)).toEqual([510, 505]);
+  });
+
+  it('uses viewport canvas width for markdown card width', () => {
+    const board = createBoard([], [], { width: 900, height: 600 }, 1.5);
+
+    expect(getViewportAwareCardWidth(board)).toBe(300);
   });
 });

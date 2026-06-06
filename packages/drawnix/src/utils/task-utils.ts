@@ -57,11 +57,7 @@ function hasAsyncImageInvocationRoute(
 export function isResumableAsyncImageTask(
   task: Pick<Task, 'type' | 'remoteId' | 'params' | 'invocationRoute'>
 ): boolean {
-  return (
-    task.type === TaskType.IMAGE &&
-    Boolean(task.remoteId) &&
-    (isAsyncImageModel(task.params?.model) || hasAsyncImageInvocationRoute(task))
-  );
+  return task.type === TaskType.IMAGE && Boolean(task.remoteId);
 }
 
 /**

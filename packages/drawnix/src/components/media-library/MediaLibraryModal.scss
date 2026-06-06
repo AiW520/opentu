@@ -6,28 +6,19 @@
 @import '../../styles/z-index.scss';
 
 // ========================================
-// 品牌色变量（仅用于强调元素）
-// ========================================
-$brand-orange: #F39C12;
-$brand-orange-light: #FBBF24;
-$brand-orange-dark: #E67E22;
-
-// ========================================
 // WinBox 素材库专用样式 - 素雅风格
 // ========================================
 .winbox-media-library {
   border-radius: 12px !important;
   overflow: hidden;
-  box-shadow: 
-    0 25px 50px -12px rgba(0, 0, 0, 0.25),
-    0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+  box-shadow: var(--aitu-ui-shadow-popover, 0 16px 40px rgba(15, 23, 42, 0.14)) !important;
 
   // 标题栏 - 白色简洁风格
   .wb-header {
-    background: #ffffff !important;
+    background: var(--aitu-ui-surface, #ffffff) !important;
     border-radius: 12px 12px 0 0;
     height: 44px;
-    border-bottom: 1px solid #e5e5e5;
+    border-bottom: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
   }
 
   // 标题文字
@@ -35,7 +26,7 @@ $brand-orange-dark: #E67E22;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 14px;
     font-weight: 600;
-    color: #333333;
+    color: var(--aitu-ui-text-primary, #1e293b);
     padding: 0 8px 0 12px;
     display: block !important;
     min-width: 48px;
@@ -50,7 +41,7 @@ $brand-orange-dark: #E67E22;
     margin-left: 4px;
 
     .wb-icon-content {
-      color: #666666;
+      color: var(--aitu-ui-text-secondary, #64748b);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -70,19 +61,19 @@ $brand-orange-dark: #E67E22;
     transition: all 0.15s ease-out;
 
     &:hover {
-      background-color: rgba(0, 0, 0, 0.08);
+      background-color: var(--aitu-ui-brand-softer, rgba(243, 156, 18, 0.06));
       filter: invert(1) brightness(0.2);
     }
   }
 
   .wb-close:hover {
-    background-color: rgba(255, 59, 48, 0.15);
+    background-color: var(--aitu-ui-danger-soft, rgba(233, 30, 99, 0.08));
     filter: invert(1) brightness(0.2);
   }
 
   // 窗口主体
   .wb-body {
-    background: #ffffff;
+    background: var(--aitu-ui-surface, #ffffff);
     border-radius: 0 0 12px 12px;
     overflow: hidden;
     padding: 0;
@@ -96,7 +87,7 @@ $brand-orange-dark: #E67E22;
     width: 100% !important;
     height: 100% !important;
     overflow: hidden !important;
-    background: #f8fafc !important;
+    background: var(--aitu-ui-surface-subtle, #f8fafc) !important;
     display: flex !important;
     flex-direction: column !important;
     flex: 1 !important;
@@ -104,9 +95,7 @@ $brand-orange-dark: #E67E22;
 
   // 聚焦状态
   &.focus {
-    box-shadow: 
-      0 25px 50px -12px rgba(0, 0, 0, 0.25),
-      0 0 0 1px rgba(0, 0, 0, 0.1) !important;
+    box-shadow: var(--aitu-ui-shadow-popover, 0 16px 40px rgba(15, 23, 42, 0.14)), 0 0 0 1px var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28)) !important;
   }
 
   // 最大化状态
@@ -127,7 +116,7 @@ $brand-orange-dark: #E67E22;
 .media-library-header-content {
   display: flex;
   align-items: center;
-  color: #666666;
+  color: var(--aitu-ui-text-secondary, #64748b);
   
   svg {
     width: 16px;
@@ -143,7 +132,7 @@ $brand-orange-dark: #E67E22;
   flex: 1;
   height: 100%;
   min-height: 0;
-  background: #ffffff;
+  background: var(--aitu-ui-surface, #ffffff);
   overflow: hidden;
 
   &__main {
@@ -151,14 +140,14 @@ $brand-orange-dark: #E67E22;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: #ffffff;
+    background: var(--aitu-ui-surface, #ffffff);
     min-width: 0;
   }
 
   &__inspector {
     width: 300px;
-    border-left: 1px solid rgba(0, 0, 0, 0.06);
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-left: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
+    background: linear-gradient(180deg, var(--aitu-ui-surface, #ffffff) 0%, var(--aitu-ui-surface-subtle, #f8fafc) 100%);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -174,11 +163,11 @@ $brand-orange-dark: #E67E22;
     }
 
     &::-webkit-scrollbar-thumb {
-      background: #e2e8f0;
+      background: var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
       border-radius: 3px;
 
       &:hover {
-        background: #cbd5e1;
+        background: var(--aitu-ui-border-hover, rgba(15, 23, 42, 0.18));
       }
     }
   }
@@ -203,7 +192,7 @@ $brand-orange-dark: #E67E22;
       height: auto;
       max-height: 100px;
       border-right: none;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      border-bottom: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
       padding: 10px;
       overflow-y: auto;
     }
@@ -219,7 +208,7 @@ $brand-orange-dark: #E67E22;
       height: auto;
       max-height: 40vh;
       border-left: none;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      border-top: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
       min-width: auto;
     }
   }
@@ -238,15 +227,15 @@ $brand-orange-dark: #E67E22;
 .media-library-mobile-drawer {
   .t-drawer__body {
     padding: 0;
-    background: #f8fafc;
+    background: var(--aitu-ui-surface-subtle, #f8fafc);
   }
 
   .t-drawer__header {
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     padding: 16px 20px;
-    background: white;
+    background: var(--aitu-ui-surface, #ffffff);
     font-weight: 600;
-    color: #1e293b;
+    color: var(--aitu-ui-text-primary, #1e293b);
   }
 
   .t-drawer {

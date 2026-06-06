@@ -1,4 +1,3 @@
-import { toolWindowService } from './tool-window-service';
 import {
   canvasAudioPlaybackService,
   type CanvasAudioPlaybackSource,
@@ -10,7 +9,7 @@ import type { ReadingPlaybackSource } from './reading-playback-source';
 
 type MusicPlayerSource = CanvasAudioPlaybackSource | ReadingPlaybackSource;
 
-export function openMusicPlayerTool(): boolean {
+export async function openMusicPlayerTool(): Promise<boolean> {
   const tool: ToolDefinition = {
     id: MUSIC_PLAYER_TOOL_ID,
     name: '音乐播放器',
@@ -22,6 +21,7 @@ export function openMusicPlayerTool(): boolean {
     defaultHeight: 640,
   };
 
+  const { toolWindowService } = await import('./tool-window-service');
   toolWindowService.openTool(tool, { autoPin: true });
   return true;
 }
@@ -42,7 +42,7 @@ interface OpenMusicPlayerAndPlayOptions {
 export async function openMusicPlayerToolAndPlay(
   options: OpenMusicPlayerAndPlayOptions
 ): Promise<boolean> {
-  openMusicPlayerTool();
+  await openMusicPlayerTool();
 
   if (options.queue && options.queue.length > 0) {
     if (options.queue.every((item) => isReadingPlaybackSource(item))) {

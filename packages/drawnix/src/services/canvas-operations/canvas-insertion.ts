@@ -22,10 +22,15 @@ import { insertMediaIntoSelectedFrame } from '../../utils/frame-insertion-utils'
 import { getCanvasBoard as readCanvasBoard } from './canvas-board-ref';
 import {
   CANVAS_INSERTION_LAYOUT as LAYOUT_CONSTANTS,
+  createBatchInsertionFlowState,
   estimateCanvasTextSize,
+  getBatchInsertionFlowCenter,
   getBottomMostInsertionPoint,
   getInsertionPointFromSavedSelection,
-  groupInsertionItems,
+  getViewportAwareCardWidth,
+  getViewportCanvasMetrics,
+  logCanvasInsertionDebug,
+  precalculateGridLayout,
 } from '../../utils/canvas-insertion-layout';
 import {
   normalizeSvg,
@@ -105,11 +110,11 @@ async function insertTextToCanvas(
   board: PlaitBoard,
   text: string,
   point: Point,
-  title?: string
+  title?: string,
+  cardWidth: number = getViewportAwareCardWidth(board)
 ): Promise<{ width: number; height: number }> {
   // 有 title 时，直接以 Card 方式插入（跳过 Markdown 检测）
   if (title) {
-    const cardWidth = Math.round(window.innerWidth * 0.5);
     insertCardsToCanvas(board, [{ title, body: text }], point, cardWidth);
     return { width: cardWidth, height: 120 };
   }
@@ -117,7 +122,6 @@ async function insertTextToCanvas(
   // 尝试解析为 Markdown Card 块
   const cardBlocks = parseMarkdownToCards(text);
   if (cardBlocks && cardBlocks.length > 0) {
-    const cardWidth = Math.round(window.innerWidth * 0.5);
     insertCardsToCanvas(board, cardBlocks, point, cardWidth);
     const cols = Math.min(cardBlocks.length, 3);
     const rows = Math.ceil(cardBlocks.length / 3);
@@ -132,6 +136,73 @@ async function insertTextToCanvas(
   return estimateCanvasTextSize(text);
 }
 
+function estimateTextInsertionSize(
+  board: PlaitBoard,
+  text: string,
+  title?: string
+): { width: number; height: number } {
+  const cardWidth = getViewportAwareCardWidth(board);
+
+  if (title) {
+    return { width: cardWidth, height: 120 };
+  }
+
+  const cardBlocks = parseMarkdownToCards(text);
+  if (cardBlocks && cardBlocks.length > 0) {
+    const cols = Math.min(cardBlocks.length, 3);
+    const rows = Math.ceil(cardBlocks.length / 3);
+    return {
+      width: cols * (cardWidth + 20) - 20,
+      height: rows * (120 + 20) - 20,
+    };
+  }
+
+  return estimateCanvasTextSize(text);
+}
+
+function estimateInsertionItemSize(
+  board: PlaitBoard,
+  item: InsertionItem
+): { width: number; height: number } {
+  if (item.type === 'text') {
+    return estimateTextInsertionSize(board, item.content, item.label);
+  }
+
+  if (item.type === 'video') {
+    return (
+      item.dimensions || {
+        width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE,
+        height: Math.round(LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE * (9 / 16)),
+      }
+    );
+  }
+
+  if (item.type === 'audio') {
+    return resolveAudioCardDimensions({
+      ...(item.metadata as AudioCardMetadata | undefined),
+      width: item.dimensions?.width,
+      height: item.dimensions?.height,
+    });
+  }
+
+  if (item.type === 'svg') {
+    const dimensions = parseSvgDimensions(normalizeSvg(item.content));
+    const targetWidth = Math.min(
+      dimensions.width,
+      LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE
+    );
+    const aspectRatio = dimensions.height / dimensions.width;
+    return { width: targetWidth, height: targetWidth * aspectRatio };
+  }
+
+  return (
+    item.dimensions || {
+      width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE,
+      height: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE,
+    }
+  );
+}
+
 /**
  * 插入单个图片到画布
  * 使用传入的尺寸或默认尺寸立即插入，不等待图片下载完成
@@ -143,8 +214,16 @@ async function insertImageToCanvas(
   dimensions?: { width: number; height: number }
 ): Promise<{ width: number; height: number }> {
   const size = dimensions || { width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE, height: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE };
-  // 传入 skipImageLoad=true 和尺寸，立即插入图片不等待下载
-  await insertImageFromUrl(board, imageUrl, point, false, size, true, true);
+  logCanvasInsertionDebug('[CanvasInsertion][Service] image insert with size', {
+    point,
+    size,
+    lockReferenceDimensions: false,
+    skipImageLoad: true,
+  });
+  // 使用默认尺寸立即插入，图片加载后会自动根据真实尺寸更新
+  // skipSelect=true: 自动插入时不选中新图片，避免覆盖用户当前选中状态
+  // lockReferenceDimensions=false: 图片加载后根据真实尺寸更新
+  await insertImageFromUrl(board, imageUrl, point, false, size, true, true, false, true);
   return size;
 }
 
@@ -225,6 +304,52 @@ async function insertSvgToCanvas(
   return { width: targetWidth, height: targetHeight };
 }
 
+async function insertItemToCanvas(
+  board: PlaitBoard,
+  item: InsertionItem,
+  point: Point
+): Promise<{ elementId?: string; size: { width: number; height: number } }> {
+  const childrenCountBefore = board.children.length;
+  let size: { width: number; height: number } | undefined;
+
+  if (item.type === 'text') {
+    size = await insertTextToCanvas(board, item.content, point, item.label);
+  } else if (item.type === 'image') {
+    size = await insertImageToCanvas(
+      board,
+      item.content,
+      point,
+      item.dimensions
+    );
+  } else if (item.type === 'video') {
+    size = await insertVideoToCanvas(
+      board,
+      item.content,
+      point,
+      item.dimensions
+    );
+  } else if (item.type === 'audio') {
+    size = await insertAudioToCanvas(
+      board,
+      item.content,
+      point,
+      item.dimensions,
+      item.metadata
+    );
+  } else if (item.type === 'svg') {
+    size = await insertSvgToCanvas(board, item.content, point);
+  }
+
+  const insertedElement = board.children[childrenCountBefore] as
+    | { id?: string }
+    | undefined;
+
+  return {
+    elementId: insertedElement?.id,
+    size: size || estimateInsertionItemSize(board, item),
+  };
+}
+
 /**
  * 执行画布插入
  */
@@ -282,6 +407,8 @@ export async function executeCanvasInsertion(params: CanvasInsertionParams): Pro
       }
     }
 
+    const viewportMetrics = getViewportCanvasMetrics(board);
+
     let startPoint = params.startPoint;
     if (!startPoint) {
       startPoint = getInsertionPointFromSavedSelection(board, {
@@ -297,190 +424,70 @@ export async function executeCanvasInsertion(params: CanvasInsertionParams): Pro
         }) || LAYOUT_CONSTANTS.DEFAULT_POINT;
     }
 
-    const groupedItems = groupInsertionItems(items);
+    logCanvasInsertionDebug('[CanvasInsertion][Service] batch begin', {
+      itemsCount: items.length,
+      inputStartPoint: params.startPoint || null,
+      resolvedStartPoint: startPoint,
+      viewport: viewportMetrics,
+      verticalGap,
+      horizontalGap,
+    });
 
-    let currentY = startPoint[1];
-    const leftX = startPoint[0];
+    const flowState = createBatchInsertionFlowState(board, startPoint, {
+      horizontalGap,
+      verticalGap,
+    });
+    logCanvasInsertionDebug('[CanvasInsertion][Service] flow initialized', {
+      startX: flowState.startX,
+      startY: flowState.startY,
+      rowRightLimit: flowState.rowRightLimit,
+      zoom: viewportMetrics.zoom,
+    });
+
+    // 预计算所有素材的尺寸
+    const estimatedSizes = items.map((item) =>
+      estimateInsertionItemSize(board, item)
+    );
+
+    // 使用网格布局预计算所有位置，确保不同比例的素材间距均匀、不叠加
+    const gridLayout = precalculateGridLayout(startPoint, estimatedSizes, {
+      canvasWidth: viewportMetrics.width,
+      horizontalGap,
+      verticalGap,
+    });
+    flowState.bounds = gridLayout.bounds;
+
     const insertedItems: CanvasInsertionResultItem[] = [];
 
-    for (const group of groupedItems) {
-      if (group.length === 1) {
-        const item = group[0];
-        const point: Point = [leftX, currentY];
+    for (const [index, item] of items.entries()) {
+      const point = gridLayout.positions[index];
 
-        if (item.type === 'text') {
-          const childrenCountBefore = board.children.length;
-          const textSize = await insertTextToCanvas(
-            board,
-            item.content,
-            point,
-            item.label
-          );
-          const insertedElement = board.children[childrenCountBefore] as
-            | { id?: string }
-            | undefined;
-          currentY += textSize.height + verticalGap;
-          insertedItems.push({
-            type: item.type,
-            point,
-            elementId: insertedElement?.id,
-            size: textSize,
-          });
-        } else if (item.type === 'image') {
-          const childrenCountBefore = board.children.length;
-          const imgSize = await insertImageToCanvas(board, item.content, point, item.dimensions);
-          const insertedElement = board.children[childrenCountBefore] as
-            | { id?: string }
-            | undefined;
-          currentY += imgSize.height + verticalGap;
-          insertedItems.push({
-            type: item.type,
-            point,
-            elementId: insertedElement?.id,
-            size: imgSize,
-          });
-        } else if (item.type === 'video') {
-          const childrenCountBefore = board.children.length;
-          const vidSize = await insertVideoToCanvas(board, item.content, point, item.dimensions);
-          const insertedElement = board.children[childrenCountBefore] as
-            | { id?: string }
-            | undefined;
-          currentY += vidSize.height + verticalGap;
-          insertedItems.push({
-            type: item.type,
-            point,
-            elementId: insertedElement?.id,
-            size: vidSize,
-          });
-        } else if (item.type === 'audio') {
-          const childrenCountBefore = board.children.length;
-          const audioSize = await insertAudioToCanvas(
-            board,
-            item.content,
-            point,
-            item.dimensions,
-            item.metadata
-          );
-          const insertedElement = board.children[childrenCountBefore] as
-            | { id?: string }
-            | undefined;
-          currentY += audioSize.height + verticalGap;
-          insertedItems.push({
-            type: item.type,
-            point,
-            elementId: insertedElement?.id,
-            size: audioSize,
-          });
-        } else if (item.type === 'svg') {
-          const childrenCountBefore = board.children.length;
-          const svgSize = await insertSvgToCanvas(board, item.content, point);
-          const insertedElement = board.children[childrenCountBefore] as
-            | { id?: string }
-            | undefined;
-          currentY += svgSize.height + verticalGap;
-          insertedItems.push({
-            type: item.type,
-            point,
-            elementId: insertedElement?.id,
-            size: svgSize,
-          });
-        }
-      } else {
-        let currentX = leftX;
-        let maxHeight = 0;
+      logCanvasInsertionDebug('[CanvasInsertion][Service] item layout', {
+        index,
+        type: item.type,
+        groupId: item.groupId || null,
+        estimatedSize: estimatedSizes[index],
+        point,
+      });
 
-        for (const item of group) {
-          const point: Point = [currentX, currentY];
-
-          if (item.type === 'text') {
-            const childrenCountBefore = board.children.length;
-            const size = await insertTextToCanvas(board, item.content, point, item.label);
-            const insertedElement = board.children[childrenCountBefore] as
-              | { id?: string }
-              | undefined;
-            maxHeight = Math.max(maxHeight, size.height);
-            currentX += size.width + horizontalGap;
-            insertedItems.push({
-              type: item.type,
-              point,
-              elementId: insertedElement?.id,
-              size,
-            });
-          } else if (item.type === 'image') {
-            const childrenCountBefore = board.children.length;
-            const imgSize = await insertImageToCanvas(board, item.content, point, item.dimensions);
-            const insertedElement = board.children[childrenCountBefore] as
-              | { id?: string }
-              | undefined;
-            maxHeight = Math.max(maxHeight, imgSize.height);
-            currentX += imgSize.width + horizontalGap;
-            insertedItems.push({
-              type: item.type,
-              point,
-              elementId: insertedElement?.id,
-              size: imgSize,
-            });
-          } else if (item.type === 'video') {
-            const childrenCountBefore = board.children.length;
-            const vidSize = await insertVideoToCanvas(board, item.content, point, item.dimensions);
-            const insertedElement = board.children[childrenCountBefore] as
-              | { id?: string }
-              | undefined;
-            maxHeight = Math.max(maxHeight, vidSize.height);
-            currentX += vidSize.width + horizontalGap;
-            insertedItems.push({
-              type: item.type,
-              point,
-              elementId: insertedElement?.id,
-              size: vidSize,
-            });
-          } else if (item.type === 'audio') {
-            const childrenCountBefore = board.children.length;
-            const audioSize = await insertAudioToCanvas(
-              board,
-              item.content,
-              point,
-              item.dimensions,
-              item.metadata
-            );
-            const insertedElement = board.children[childrenCountBefore] as
-              | { id?: string }
-              | undefined;
-            maxHeight = Math.max(maxHeight, audioSize.height);
-            currentX += audioSize.width + horizontalGap;
-            insertedItems.push({
-              type: item.type,
-              point,
-              elementId: insertedElement?.id,
-              size: audioSize,
-            });
-          } else if (item.type === 'svg') {
-            const childrenCountBefore = board.children.length;
-            const svgSize = await insertSvgToCanvas(board, item.content, point);
-            const insertedElement = board.children[childrenCountBefore] as
-              | { id?: string }
-              | undefined;
-            maxHeight = Math.max(maxHeight, svgSize.height);
-            currentX += svgSize.width + horizontalGap;
-            insertedItems.push({
-              type: item.type,
-              point,
-              elementId: insertedElement?.id,
-              size: svgSize,
-            });
-          }
-        }
-
-        currentY += maxHeight + verticalGap;
-      }
+      const inserted = await insertItemToCanvas(board, item, point);
+      insertedItems.push({
+        type: item.type,
+        point,
+        elementId: inserted.elementId,
+        size: inserted.size,
+      });
     }
 
     if (insertedItems.length > 0) {
-      const firstItem = insertedItems[0];
-      const centerPoint: Point = [
-        firstItem.point[0] + LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE / 2,
-        firstItem.point[1] + LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE / 2,
-      ];
+      const centerPoint =
+        getBatchInsertionFlowCenter(flowState) ||
+        ([insertedItems[0].point[0], insertedItems[0].point[1]] as Point);
+      logCanvasInsertionDebug('[CanvasInsertion][Service] batch complete', {
+        insertedCount: insertedItems.length,
+        centerPoint,
+        bounds: flowState.bounds,
+      });
       requestAnimationFrame(() => {
         scrollToPointIfNeeded(board, centerPoint);
       });

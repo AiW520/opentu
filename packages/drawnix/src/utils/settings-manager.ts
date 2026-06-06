@@ -510,6 +510,7 @@ class SettingsManager {
         profile?.imageApiCompatibility,
         this.getLegacyDefaultImageApiCompatibilityFallback(baseUrl)
       ),
+      preferAsyncImageEndpoint: profile?.preferAsyncImageEndpoint === true,
       enabled: true,
       capabilities: { ...DEFAULT_PROVIDER_CAPABILITIES },
     };
@@ -545,6 +546,7 @@ class SettingsManager {
       imageApiCompatibility: this.normalizeStoredImageApiCompatibility(
         profile?.imageApiCompatibility
       ),
+      preferAsyncImageEndpoint: profile?.preferAsyncImageEndpoint === true,
       extraHeaders: this.normalizeStringRecord(profile?.extraHeaders),
       enabled: profile?.enabled !== false,
       capabilities: this.normalizeCapabilities(profile?.capabilities),
@@ -585,6 +587,7 @@ class SettingsManager {
       imageApiCompatibility: this.normalizeStoredImageApiCompatibility(
         profile?.imageApiCompatibility
       ),
+      preferAsyncImageEndpoint: profile?.preferAsyncImageEndpoint === true,
       extraHeaders: this.normalizeStringRecord(profile?.extraHeaders),
       enabled: profile?.enabled !== false,
       capabilities: this.normalizeCapabilities(profile?.capabilities),
@@ -625,6 +628,7 @@ class SettingsManager {
       imageApiCompatibility: this.normalizeStoredImageApiCompatibility(
         profile?.imageApiCompatibility
       ),
+      preferAsyncImageEndpoint: profile?.preferAsyncImageEndpoint === true,
       extraHeaders: this.normalizeStringRecord(profile?.extraHeaders),
       enabled: profile?.enabled !== false,
       capabilities: this.normalizeCapabilities(profile?.capabilities),
@@ -666,6 +670,7 @@ class SettingsManager {
         profile?.imageApiCompatibility,
         LEGACY_DEFAULT_PROVIDER_IMAGE_API_COMPATIBILITY
       ),
+      preferAsyncImageEndpoint: profile?.preferAsyncImageEndpoint === true,
       extraHeaders: this.normalizeStringRecord(profile?.extraHeaders),
       enabled: profile?.enabled !== false,
       capabilities: this.normalizeCapabilities(profile?.capabilities),
@@ -760,6 +765,7 @@ class SettingsManager {
           imageApiCompatibility: this.normalizeStoredImageApiCompatibility(
             profile.imageApiCompatibility
           ),
+          preferAsyncImageEndpoint: profile.preferAsyncImageEndpoint === true,
           extraHeaders: this.normalizeStringRecord(profile.extraHeaders),
           enabled: profile.enabled !== false,
           capabilities: this.normalizeCapabilities(profile.capabilities),

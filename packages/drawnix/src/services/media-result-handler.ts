@@ -16,7 +16,6 @@ import {
   executeCanvasInsertion,
   getCanvasBoard,
   quickInsert,
-  insertImageGroup,
   insertAIFlow,
   parseSizeToPixels,
 } from './canvas-operations';
@@ -147,7 +146,10 @@ export async function handleSplitAndInsertTask(
       // 拆分失败，回退到直接插入原图
       console.warn(`[MediaResultHandler] Split failed: ${result.error}, falling back to direct insert`);
 
-      const insertResult = await insertImageGroup([url], insertionPoint);
+      const insertResult = await executeCanvasInsertion({
+        items: [{ type: 'image', content: url }],
+        startPoint: insertionPoint,
+      });
       if (insertResult.success) {
         // console.log(`[MediaResultHandler] Fallback insert success, calling completePostProcessing for task ${taskId}`);
         workflowCompletionService.completePostProcessing(taskId, 1, insertionPoint);
@@ -276,7 +278,14 @@ export async function handleGroupMediaInsert(
       );
     } else {
       if (firstTask.type === 'image') {
-        await insertImageGroup(urls, insertionPoint, dimensions);
+        await executeCanvasInsertion({
+          items: urls.map((url) => ({
+            type: 'image',
+            content: url,
+            dimensions,
+          })),
+          startPoint: insertionPoint,
+        });
       } else {
         // 视频逐个插入
         for (const url of urls) {
@@ -394,7 +403,14 @@ export async function handleMediaResult(
           startPoint: insertionPoint,
         });
       } else {
-        await insertImageGroup(resultUrls, insertionPoint, dimensions);
+        await executeCanvasInsertion({
+          items: resultUrls.map((imageUrl) => ({
+            type: 'image',
+            content: imageUrl,
+            dimensions,
+          })),
+          startPoint: insertionPoint,
+        });
       }
       workflowCompletionService.completePostProcessing(taskId, resultUrls.length, insertionPoint);
       return { success: true, count: resultUrls.length };

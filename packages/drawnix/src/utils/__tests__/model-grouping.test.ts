@@ -63,4 +63,33 @@ describe('model-grouping', () => {
     expect(groups[1]?.totalCount).toBe(1);
     expect(groups[1]?.vendorCategories[0]?.models).toHaveLength(1);
   });
+
+  it('Omni Flash 系列归到 Gemini 厂商分类', () => {
+    const groups = groupModelsByProvider(
+      [
+        {
+          id: 'omni-flash',
+          label: 'Gemini Omni Flash',
+          type: 'video',
+          vendor: ModelVendor.GEMINI,
+        },
+        {
+          id: 'omni-flash-components',
+          label: 'Gemini Omni Flash Components',
+          type: 'video',
+          vendor: ModelVendor.GEMINI,
+        },
+      ],
+      []
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.vendorCategories).toHaveLength(1);
+    expect(groups[0]?.vendorCategories[0]?.vendor).toBe(ModelVendor.GEMINI);
+    expect(groups[0]?.vendorCategories[0]?.label).toBe('Gemini');
+    expect(groups[0]?.vendorCategories[0]?.models.map((model) => model.id)).toEqual([
+      'omni-flash-components',
+      'omni-flash',
+    ]);
+  });
 });

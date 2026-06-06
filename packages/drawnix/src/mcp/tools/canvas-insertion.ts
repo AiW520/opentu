@@ -13,8 +13,6 @@ import { DrawTransforms } from '@plait/draw';
 import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
 import {
-  AUDIO_CARD_DEFAULT_HEIGHT,
-  AUDIO_CARD_DEFAULT_WIDTH,
   insertAudioFromUrl,
   resolveAudioCardDimensions,
   type AudioCardMetadata,
@@ -25,10 +23,15 @@ import { insertCardsToCanvas } from '../../utils/insert-cards';
 import { insertMediaIntoSelectedFrame } from '../../utils/frame-insertion-utils';
 import {
   CANVAS_INSERTION_LAYOUT as LAYOUT_CONSTANTS,
+  createBatchInsertionFlowState,
   estimateCanvasTextSize,
+  getBatchInsertionFlowCenter,
   getBottomMostInsertionPoint,
   getInsertionPointFromSavedSelection,
-  groupInsertionItems,
+  getViewportAwareCardWidth,
+  getViewportCanvasMetrics,
+  logCanvasInsertionDebug,
+  precalculateGridLayout,
 } from '../../utils/canvas-insertion-layout';
 import {
   normalizeSvg,
@@ -103,11 +106,11 @@ async function insertTextToCanvas(
   board: PlaitBoard,
   text: string,
   point: Point,
-  title?: string
+  title?: string,
+  cardWidth: number = getViewportAwareCardWidth(board)
 ): Promise<{ width: number; height: number }> {
   // 有 title 时，直接以 Card 方式插入（跳过 Markdown 检测）
   if (title) {
-    const cardWidth = Math.round(window.innerWidth * 0.5);
     insertCardsToCanvas(board, [{ title, body: text }], point, cardWidth);
     return { width: cardWidth, height: 120 };
   }
@@ -116,7 +119,6 @@ async function insertTextToCanvas(
   const cardBlocks = parseMarkdownToCards(text);
   if (cardBlocks && cardBlocks.length > 0) {
     // 有 Markdown 特征 → 插入为 Card 标签贴，宽度为屏幕宽度的 50%
-    const cardWidth = Math.round(window.innerWidth * 0.5);
     insertCardsToCanvas(board, cardBlocks, point, cardWidth);
     // 返回估算的总尺寸（3列布局）
     const cols = Math.min(cardBlocks.length, 3);
@@ -132,6 +134,73 @@ async function insertTextToCanvas(
   return estimateCanvasTextSize(text);
 }
 
+function estimateTextInsertionSize(
+  board: PlaitBoard,
+  text: string,
+  title?: string
+): { width: number; height: number } {
+  const cardWidth = getViewportAwareCardWidth(board);
+
+  if (title) {
+    return { width: cardWidth, height: 120 };
+  }
+
+  const cardBlocks = parseMarkdownToCards(text);
+  if (cardBlocks && cardBlocks.length > 0) {
+    const cols = Math.min(cardBlocks.length, 3);
+    const rows = Math.ceil(cardBlocks.length / 3);
+    return {
+      width: cols * (cardWidth + 20) - 20,
+      height: rows * (120 + 20) - 20,
+    };
+  }
+
+  return estimateCanvasTextSize(text);
+}
+
+function estimateInsertionItemSize(
+  board: PlaitBoard,
+  item: InsertionItem
+): { width: number; height: number } {
+  if (item.type === 'text') {
+    return estimateTextInsertionSize(board, item.content, item.label);
+  }
+
+  if (item.type === 'video') {
+    return (
+      item.dimensions || {
+        width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE,
+        height: Math.round(LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE * (9 / 16)),
+      }
+    );
+  }
+
+  if (item.type === 'audio') {
+    return resolveAudioCardDimensions({
+      ...(item.metadata as AudioCardMetadata | undefined),
+      width: item.dimensions?.width,
+      height: item.dimensions?.height,
+    });
+  }
+
+  if (item.type === 'svg') {
+    const dimensions = parseSvgDimensions(normalizeSvg(item.content));
+    const targetWidth = Math.min(
+      dimensions.width,
+      LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE
+    );
+    const aspectRatio = dimensions.height / dimensions.width;
+    return { width: targetWidth, height: targetWidth * aspectRatio };
+  }
+
+  return (
+    item.dimensions || {
+      width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE,
+      height: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE,
+    }
+  );
+}
+
 /**
  * 插入单个图片到画布
  */
@@ -142,11 +211,18 @@ async function insertImageToCanvas(
   dimensions?: { width: number; height: number }
 ): Promise<{ width: number; height: number }> {
   const size = dimensions || { width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE, height: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE };
-  // console.log(`[CanvasInsertion] insertImageToCanvas: url=${imageUrl.substring(0, 80)}, point=`, point, 'size=', size);
+  logCanvasInsertionDebug('[CanvasInsertion][MCP] image insert fixed size', {
+    point,
+    size,
+    lockReferenceDimensions: false,
+    skipImageLoad: true,
+  });
   // skipScroll: true - 由 executeCanvasInsertion 统一处理滚动
   // skipImageLoad: true - 使用传入的尺寸，不等待图片加载
+  // lockReferenceDimensions=false: 图片加载后根据真实尺寸更新
+  // skipSelect=true: 自动插入时不选中新图片，避免覆盖用户当前选中状态
   try {
-    await insertImageFromUrl(board, imageUrl, point, false, size, true, true);
+    await insertImageFromUrl(board, imageUrl, point, false, size, true, true, false, true);
     // console.log(`[CanvasInsertion] insertImageFromUrl completed successfully`);
   } catch (error) {
     console.error(`[CanvasInsertion] insertImageFromUrl failed:`, error);
@@ -232,6 +308,40 @@ async function insertSvgToCanvas(
   return { width: targetWidth, height: targetHeight };
 }
 
+async function insertItemToCanvas(
+  board: PlaitBoard,
+  item: InsertionItem,
+  point: Point
+): Promise<{ width: number; height: number }> {
+  if (item.type === 'text') {
+    return insertTextToCanvas(board, item.content, point, item.label);
+  }
+
+  if (item.type === 'image') {
+    return insertImageToCanvas(board, item.content, point, item.dimensions);
+  }
+
+  if (item.type === 'video') {
+    return insertVideoToCanvas(board, item.content, point, item.dimensions);
+  }
+
+  if (item.type === 'audio') {
+    return insertAudioToCanvas(
+      board,
+      item.content,
+      point,
+      item.dimensions,
+      item.metadata
+    );
+  }
+
+  if (item.type === 'svg') {
+    return insertSvgToCanvas(board, item.content, point);
+  }
+
+  return estimateInsertionItemSize(board, item);
+}
+
 /**
  * 执行画布插入
  */
@@ -287,6 +397,8 @@ async function executeCanvasInsertion(params: CanvasInsertionParams): Promise<MC
       }
     }
 
+    const viewportMetrics = getViewportCanvasMetrics(board);
+
     // 确定起始位置
     let startPoint = params.startPoint;
     if (!startPoint) {
@@ -303,119 +415,68 @@ async function executeCanvasInsertion(params: CanvasInsertionParams): Promise<MC
         }) || LAYOUT_CONSTANTS.DEFAULT_POINT;
     }
 
-    // 按组分组
-    const groupedItems = groupInsertionItems(items);
+    logCanvasInsertionDebug('[CanvasInsertion][MCP] batch begin', {
+      itemsCount: items.length,
+      inputStartPoint: params.startPoint || null,
+      resolvedStartPoint: startPoint,
+      viewport: viewportMetrics,
+      verticalGap,
+      horizontalGap,
+    });
 
-    let currentY = startPoint[1];
-    const leftX = startPoint[0]; // 改为左对齐：startPoint[0] 是左边缘X坐标
+    const flowState = createBatchInsertionFlowState(board, startPoint, {
+      horizontalGap,
+      verticalGap,
+    });
+    logCanvasInsertionDebug('[CanvasInsertion][MCP] flow initialized', {
+      startX: flowState.startX,
+      startY: flowState.startY,
+      rowRightLimit: flowState.rowRightLimit,
+      zoom: viewportMetrics.zoom,
+    });
+
+    // 预计算所有素材的尺寸
+    const estimatedSizes = items.map((item) =>
+      estimateInsertionItemSize(board, item)
+    );
+
+    // 使用网格布局预计算所有位置，确保不同比例的素材间距均匀、不叠加
+    const gridLayout = precalculateGridLayout(startPoint, estimatedSizes, {
+      canvasWidth: viewportMetrics.width,
+      horizontalGap,
+      verticalGap,
+    });
+    flowState.bounds = gridLayout.bounds;
+
     const insertedItems: { type: ContentType; point: Point }[] = [];
 
-    // 逐组插入
-    for (const group of groupedItems) {
-      if (group.length === 1) {
-        // 单个项，垂直插入
-        const item = group[0];
-        let itemSize = { width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE, height: 225 };
+    for (const [index, item] of items.entries()) {
+      const point = gridLayout.positions[index];
 
-        // 使用传入的尺寸或默认尺寸，不等待下载
-        if (item.type === 'text') {
-          itemSize = estimateCanvasTextSize(item.content);
-        } else if (item.type === 'image') {
-          // 优先使用传入的尺寸，避免等待图片下载
-          itemSize = item.dimensions || { width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE, height: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE };
-        } else if (item.type === 'video') {
-          // 优先使用传入的尺寸，避免等待视频元数据下载
-          itemSize = item.dimensions || { width: LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE, height: Math.round(LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE * (9 / 16)) };
-        } else if (item.type === 'audio') {
-          itemSize = item.dimensions || {
-            width: AUDIO_CARD_DEFAULT_WIDTH,
-            height: AUDIO_CARD_DEFAULT_HEIGHT,
-          };
-        }
+      logCanvasInsertionDebug('[CanvasInsertion][MCP] item layout', {
+        index,
+        type: item.type,
+        groupId: item.groupId || null,
+        estimatedSize: estimatedSizes[index],
+        point,
+      });
 
-        const point: Point = [leftX, currentY]; // 左对齐：直接使用 leftX
-
-        // console.log(`[CanvasInsertion] Inserting item type: ${item.type}, point:`, point, 'content:', item.content?.substring(0, 80));
-
-        if (item.type === 'text') {
-          await insertTextToCanvas(board, item.content, point, item.label);
-          currentY += itemSize.height + verticalGap;
-        } else if (item.type === 'image') {
-          // console.log(`[CanvasInsertion] Calling insertImageToCanvas with dimensions:`, item.dimensions);
-          const imgSize = await insertImageToCanvas(board, item.content, point, item.dimensions);
-          // console.log(`[CanvasInsertion] insertImageToCanvas returned:`, imgSize);
-          currentY += imgSize.height + verticalGap;
-        } else if (item.type === 'video') {
-          await insertVideoToCanvas(board, item.content, point, item.dimensions);
-          currentY += itemSize.height + verticalGap;
-        } else if (item.type === 'audio') {
-          const audioSize = await insertAudioToCanvas(
-            board,
-            item.content,
-            point,
-            item.dimensions,
-            item.metadata
-          );
-          currentY += audioSize.height + verticalGap;
-        } else if (item.type === 'svg') {
-          const svgSize = await insertSvgToCanvas(board, item.content, point);
-          currentY += svgSize.height + verticalGap;
-        }
-
-        insertedItems.push({ type: item.type, point });
-      } else {
-        // 多个项（同组），水平排列，从左边缘开始
-        let currentX = leftX; // 左对齐：从 leftX 开始
-        let maxHeight = 0;
-
-        for (const item of group) {
-          const point: Point = [currentX, currentY];
-
-          if (item.type === 'text') {
-            const size = await insertTextToCanvas(board, item.content, point, item.label);
-            maxHeight = Math.max(maxHeight, size.height);
-            currentX += size.width + horizontalGap;
-          } else if (item.type === 'image') {
-            const imgSize = await insertImageToCanvas(board, item.content, point, item.dimensions);
-            maxHeight = Math.max(maxHeight, imgSize.height);
-            currentX += imgSize.width + horizontalGap;
-          } else if (item.type === 'video') {
-            await insertVideoToCanvas(board, item.content, point);
-            maxHeight = Math.max(maxHeight, 225);
-            currentX += LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE + horizontalGap;
-          } else if (item.type === 'audio') {
-            const audioSize = await insertAudioToCanvas(
-              board,
-              item.content,
-              point,
-              item.dimensions,
-              item.metadata
-            );
-            maxHeight = Math.max(maxHeight, audioSize.height);
-            currentX += audioSize.width + horizontalGap;
-          } else if (item.type === 'svg') {
-            const svgSize = await insertSvgToCanvas(board, item.content, point);
-            maxHeight = Math.max(maxHeight, svgSize.height);
-            currentX += svgSize.width + horizontalGap;
-          }
-
-          insertedItems.push({ type: item.type, point });
-        }
-
-        currentY += maxHeight + verticalGap;
-      }
+      await insertItemToCanvas(board, item, point);
+      insertedItems.push({ type: item.type, point });
     }
 
     // console.log('[CanvasInsertion] Successfully inserted', insertedItems.length, 'items');
 
-    // 插入完成后，滚动到第一个插入元素的位置
+    // 插入完成后，滚动到整批内容中心位置
     if (insertedItems.length > 0) {
-      const firstItem = insertedItems[0];
-      // 计算第一个元素的中心点
-      const centerPoint: Point = [
-        firstItem.point[0] + LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE / 2,
-        firstItem.point[1] + LAYOUT_CONSTANTS.MEDIA_DEFAULT_SIZE / 2,
-      ];
+      const centerPoint =
+        getBatchInsertionFlowCenter(flowState) ||
+        ([insertedItems[0].point[0], insertedItems[0].point[1]] as Point);
+      logCanvasInsertionDebug('[CanvasInsertion][MCP] batch complete', {
+        insertedCount: insertedItems.length,
+        centerPoint,
+        bounds: flowState.bounds,
+      });
       requestAnimationFrame(() => {
         scrollToPointIfNeeded(board, centerPoint);
       });

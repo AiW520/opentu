@@ -9,9 +9,12 @@ import {
   AssetSource,
 } from '../../../types/asset.types';
 import { useAssets } from '../../../contexts/AssetContext';
-import { compressImageBlob, getCompressionStrategy } from '@aitu/utils';
 import { HoverCard } from '../../shared';
 import { Z_INDEX } from '../../../constants/z-index';
+
+const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024;
+const COMPRESSION_THRESHOLD_BYTES = 10 * 1024 * 1024;
+const MAX_MEDIA_LIBRARY_BATCH_COUNT = 10;
 
 export interface ImageFile {
   file?: File;
@@ -55,7 +58,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
         file.type.startsWith('image/')
       );
       const sizeValidFiles = formatValidFiles.filter(
-        (file) => file.size <= 25 * 1024 * 1024
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES
       );
 
       if (sizeValidFiles.length === 0) {
@@ -76,7 +79,8 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
           let fileToAdd: Blob = file;
 
           // Compress if file is 10-25MB
-          if (file.size > 10 * 1024 * 1024) {
+          if (file.size > COMPRESSION_THRESHOLD_BYTES) {
+            const { compressImageBlob, getCompressionStrategy } = await import('@aitu/utils');
             const strategy = getCompressionStrategy(file.size / (1024 * 1024));
             const msgId = MessagePlugin.loading({
               content:
@@ -197,8 +201,22 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
   };
 
   const assetToImageFile = async (asset: Asset): Promise<ImageFile> => {
+    if (asset.size && asset.size > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
+    }
+
     const response = await fetch(asset.url);
-    const blob = await response.blob();
+    let blob = await response.blob();
+
+    if (blob.size > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
+    }
+
+    if (blob.size > COMPRESSION_THRESHOLD_BYTES) {
+      const { compressImageBlob, getCompressionStrategy } = await import('@aitu/utils');
+      const strategy = getCompressionStrategy(blob.size / (1024 * 1024));
+      blob = await compressImageBlob(blob, strategy.targetSizeMB);
+    }
 
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -236,7 +254,32 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     if (assets.length === 0) return;
 
     try {
-      const newImages = await Promise.all(assets.map(assetToImageFile));
+      const selectedAssets = assets.slice(0, MAX_MEDIA_LIBRARY_BATCH_COUNT);
+      const newImages: ImageFile[] = [];
+
+      if (assets.length > MAX_MEDIA_LIBRARY_BATCH_COUNT) {
+        MessagePlugin.warning({
+          content:
+            language === 'zh'
+              ? `最多可批量使用 ${MAX_MEDIA_LIBRARY_BATCH_COUNT} 张图片，已自动截取`
+              : `Up to ${MAX_MEDIA_LIBRARY_BATCH_COUNT} images can be used at once`,
+          duration: 3,
+        });
+      }
+
+      for (const asset of selectedAssets) {
+        try {
+          newImages.push(await assetToImageFile(asset));
+        } catch (err) {
+          console.error('[ImageUpload] Failed to convert asset:', asset.name, err);
+        }
+      }
+
+      if (newImages.length === 0) {
+        onError?.(language === 'zh' ? '加载图片失败' : 'Failed to load image');
+        setShowMediaLibrary(false);
+        return;
+      }
 
       if (multiple) {
         onImagesChange([...images, ...newImages]);

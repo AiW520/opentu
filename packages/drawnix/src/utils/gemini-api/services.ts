@@ -185,6 +185,7 @@ export async function generateImageWithGemini(
     size?: string;
     image?: string | string[]; // 支持单图或多图
     response_format?: 'url' | 'b64_json';
+    omitDefaultResponseFormat?: boolean;
     quality?: '1k' | '2k' | '4k';
     count?: number;
     model?: string; // 支持指定模型
@@ -215,6 +216,7 @@ async function generateImageDirect(
     size?: string;
     image?: string | string[];
     response_format?: 'url' | 'b64_json';
+    omitDefaultResponseFormat?: boolean;
     quality?: '1k' | '2k' | '4k';
     count?: number;
     model?: string;
@@ -313,11 +315,15 @@ async function generateImageDirect(
 
     // 构建请求体 - 强调生成图片
     const enhancedPrompt = `Generate an image: ${prompt}`;
-    const data: any = {
-      model: validatedConfig.modelName || 'gemini-3-pro-image-preview-vip',
-      prompt: enhancedPrompt,
-      response_format: options.response_format || 'url', // 默认返回 url
-    };
+  const data: any = {
+    model: validatedConfig.modelName || 'gemini-3-pro-image-preview-vip',
+    prompt: enhancedPrompt,
+  };
+  if (options.response_format) {
+    data.response_format = options.response_format;
+  } else if (!options.omitDefaultResponseFormat) {
+    data.response_format = 'url'; // 默认返回 url
+  }
 
     // size 参数可选，不传则由 API 自动决定（对应 auto）
     if (options.size && options.size !== 'auto') {

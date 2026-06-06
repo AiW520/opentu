@@ -3,7 +3,7 @@ import { PlaitDrawElement } from '@plait/draw';
 import { Freehand, FreehandShape } from '../plugins/freehand/type';
 import { BrushShape } from '../plugins/freehand/freehand-settings';
 import { getFreehandRectangle } from '../plugins/freehand/utils';
-import { getImageNaturalSize as loadImageNaturalSize } from './image';
+import { getImageNaturalSize as loadImageNaturalSize } from './image-natural-size';
 import { isPlaitVideo } from '../interfaces/video';
 import { sanitizeImage3DTransform } from './image-3d-transform';
 import { unifiedCacheService } from '../services/unified-cache-service';

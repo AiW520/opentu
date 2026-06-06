@@ -6,7 +6,11 @@ import {
   type Asset,
   type FilterState,
 } from '../../types/asset.types';
-import { filterAssets, matchesAssetSearchQuery } from '../asset-utils';
+import {
+  filterAssets,
+  isInternalLibraryExcludedCache,
+  matchesAssetSearchQuery,
+} from '../asset-utils';
 
 function createAsset(overrides: Partial<Asset> = {}): Asset {
   return {
@@ -98,5 +102,23 @@ describe('asset-utils', () => {
     );
 
     expect(result.assets.map((asset) => asset.id)).toEqual(['character']);
+  });
+
+  it('excludes internal mask preview caches from media library', () => {
+    expect(
+      isInternalLibraryExcludedCache({
+        metadata: { source: 'ai-mask-brush' },
+      })
+    ).toBe(true);
+    expect(
+      isInternalLibraryExcludedCache({
+        metadata: { source: 'ai-mask-reference-resize' },
+      })
+    ).toBe(true);
+    expect(
+      isInternalLibraryExcludedCache({
+        metadata: { source: 'AI_GENERATED' },
+      })
+    ).toBe(false);
   });
 });

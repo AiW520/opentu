@@ -22,6 +22,7 @@
 
 - [品牌规范](./BRAND_GUIDELINES.md)：Logo、色彩和品牌用法。
 - [品牌设计](./BRAND_DESIGN.md)：品牌方向与设计方案。
+- [UI 配色系统与素材库状态架构经验](./UI_COLOR_SYSTEM_LESSONS.md)：全局 token、选中态、多选入口收敛和 AI 编程约束。
 - [PWA 图标](./PWA_ICONS.md)：图标生成和 manifest 相关配置。
 - [Z-Index 指南](./Z_INDEX_GUIDE.md)：弹层层级和遮挡问题处理。
 - [TDesign 主题接入](./TDESIGN_THEME_INTEGRATION.md)：组件主题集成经验。
@@ -33,6 +34,7 @@
 - [素材库插入经验](./MEDIA_LIBRARY_INSERTION_LESSONS.md)：素材插入、选择和画布联动。
 - [素材库渲染性能经验](./MEDIA_LIBRARY_RENDER_PERFORMANCE_LESSONS.md)：列表、预览和性能优化。
 - [异步任务供应商路由经验](./ASYNC_TASK_PROVIDER_ROUTE_LESSONS.md)：多供应商异步任务提交、恢复查询和路由快照规则。
+- [模型分类优先级经验](./MODEL_CATEGORY_PRIORITY_LESSONS.md)：接口 `category`、`image` 词根和 endpoint 的判定顺序。
 - [PPT 能力规划](./PPT_CAPABILITY_PLAN.md)：PPT 生成、编辑和导出路线。
 - [PPT Prompt](./PPT_Prompt.md)：PPT 相关提示词资产。
 

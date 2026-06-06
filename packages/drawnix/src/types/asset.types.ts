@@ -375,6 +375,8 @@ export interface MediaLibrarySidebarProps {
 
 export interface MediaLibraryInspectorProps {
   asset: Asset | null;
+  selectedAssets?: Asset[];
+  isSelectionMode?: boolean;
   onRename: (assetId: string, newName: string) => void;
   onDelete: (assetId: string) => void;
   onDownload: (asset: Asset) => void;
@@ -383,6 +385,7 @@ export interface MediaLibraryInspectorProps {
     mark: { name: string; prompt?: string }
   ) => void | Promise<void>;
   onSelect?: (asset: Asset) => void | Promise<void>;
+  onSelectMultiple?: (assets: Asset[]) => void | Promise<void>;
   showSelectButton: boolean;
   selecting?: boolean;
   /** 自定义选择按钮文本，默认为"使用到画板" */
@@ -398,8 +401,7 @@ export interface MediaLibraryGridProps {
   onFileUpload?: (files: FileList) => void;
   onUploadClick?: () => void;
   storageStatus?: StorageStatus | null;
-  onSelectMultiple?: (assets: Asset[]) => void | Promise<void>;
-  batchSelectButtonText?: string;
+  onSelectionChange?: (assets: Asset[], isSelectionMode: boolean) => void;
 }
 
 export interface MediaLibraryStorageBarProps {

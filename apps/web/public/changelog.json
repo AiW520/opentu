@@ -1,6 +1,63 @@
 {
   "versions": [
     {
+      "version": "0.9.9",
+      "date": "2026-05-18",
+      "changes": {
+        "features": [
+          "供应商设置增加「图片优先使用异步接口」开关"
+        ],
+        "fixes": [
+          "异步接口开关持久化 + 图片任务刷新后恢复轮询"
+        ],
+        "improvements": [
+          "修复：同步聊天抽屉素材库批量选择",
+          "更新应用版本到 0.9.8"
+        ]
+      },
+      "type": "patch",
+      "highlights": "供应商设置增加「图片优先使用异步接口」开关"
+    },
+    {
+      "version": "0.9.8",
+      "date": "2026-05-17",
+      "changes": {
+        "features": [
+          "添加批量插入功能"
+        ],
+        "fixes": [
+          "split batch media action copy by target context",
+          "support bulk media insertion and image generation compatibility"
+        ],
+        "improvements": [
+          "Refactor canvas batch insertion to viewport flow layout",
+          "修复对话输入框内层描边并抽出共享壳",
+          "聊天抽屉图片预览收口到列表层",
+          "补充首屏壳层与 chunk 守门经验",
+          "修复素材库配色与多选架构，补充UI规范和架构说明",
+          "修复：蒙版预览缓存不进入素材库",
+          "Bump web app version to 0.9.7"
+        ]
+      },
+      "type": "patch",
+      "highlights": "添加批量插入功能"
+    },
+    {
+      "version": "0.9.7",
+      "date": "2026-05-09",
+      "changes": {
+        "features": [],
+        "fixes": [
+          "修复批量导入图片弹窗显示异常"
+        ],
+        "improvements": [
+          "更新版本号至0.9.6并同步构建时间"
+        ]
+      },
+      "type": "patch",
+      "highlights": "修复批量导入图片弹窗显示异常"
+    },
+    {
       "version": "0.9.6",
       "date": "2026-05-06",
       "changes": {
@@ -741,53 +798,6 @@
       },
       "type": "patch",
       "highlights": "关闭页面时兜底恢复画布快照"
-    },
-    {
-      "version": "0.6.45",
-      "date": "2026-04-22",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "提前显示常驻工具图标",
-          "处理打开文件取消后的空返回"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "提前显示常驻工具图标"
-    },
-    {
-      "version": "0.6.44",
-      "date": "2026-04-22",
-      "changes": {
-        "features": [
-          "增强提示词优化器并修复画布输入框交互"
-        ],
-        "fixes": [
-          "收敛 PostHog error tracking 噪音并补齐运行时容错"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "增强提示词优化器并修复画布输入框交互"
-    },
-    {
-      "version": "0.6.43",
-      "date": "2026-04-21",
-      "changes": {
-        "features": [
-          "add keyboard shortcuts during pen creation",
-          "扩展 gpt-image-2 图片比例支持"
-        ],
-        "fixes": [
-          "修复版本更新后懒加载 chunk 失效白屏"
-        ],
-        "improvements": [
-          "更新版本号至0.6.41并修复错误处理"
-        ]
-      },
-      "type": "patch",
-      "highlights": "add keyboard shortcuts during pen creation"
     }
   ]
 }

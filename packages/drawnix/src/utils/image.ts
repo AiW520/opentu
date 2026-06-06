@@ -5,40 +5,9 @@ import { fileOpen, isFileSystemAbortError } from '../data/filesystem';
 import { IMAGE_MIME_TYPES } from '../constants';
 import { insertImage } from '../data/image';
 import { MessagePlugin } from './message-plugin';
+import { getImageNaturalSize } from './image-natural-size';
 
-/**
- * 加载图片获取其自然尺寸（带超时机制）
- * @param url 图片 URL
- * @param fallbackWidth 加载失败时的回退宽度
- * @param fallbackHeight 加载失败时的回退高度
- * @param timeout 超时时间（毫秒），默认 5000ms
- */
-export async function getImageNaturalSize(
-  url: string,
-  fallbackWidth: number,
-  fallbackHeight: number,
-  timeout = 5000
-): Promise<{ width: number; height: number }> {
-  const img = new Image();
-  
-  await Promise.race([
-    new Promise<void>((resolve) => {
-      img.onload = () => resolve();
-      img.onerror = () => resolve(); // 失败时使用 fallback
-      img.src = url;
-    }),
-    new Promise<void>((resolve) => setTimeout(resolve, timeout))
-  ]);
-  
-  const width = img.naturalWidth || fallbackWidth;
-  const height = img.naturalHeight || fallbackHeight;
-  
-  // 防止除零错误
-  return {
-    width: width > 0 ? width : fallbackWidth,
-    height: height > 0 ? height : fallbackHeight,
-  };
-}
+export { getImageNaturalSize } from './image-natural-size';
 
 /**
  * 计算图片编辑后的新尺寸和位置

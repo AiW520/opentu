@@ -21,14 +21,17 @@ import { MediaLibraryModal } from '../../media-library/MediaLibraryModal';
 import type { Asset } from '../../../types/asset.types';
 import { SelectionMode, AssetType, AssetSource } from '../../../types/asset.types';
 import { useAssets } from '../../../contexts/AssetContext';
-import { compressImageBlob, getCompressionStrategy } from '@aitu/utils';
 import './ReferenceImageUpload.scss';
+
+const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024;
+const COMPRESSION_THRESHOLD_BYTES = 10 * 1024 * 1024;
 
 export interface ReferenceImage {
   url: string;
   name: string;
   file?: File;
   maskImage?: string;
+  slot?: number;
 }
 
 interface ReferenceImageUploadProps {
@@ -98,13 +101,98 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
 
   const t = i18n[language];
 
+  const normalizeSlotImages = useCallback(
+    (nextImages: ReferenceImage[]) => {
+      if (!slotLabels) return nextImages;
+
+      return nextImages
+        .filter((image) => image?.url || image?.file)
+        .map((image, index) => ({
+          ...image,
+          slot: image.slot ?? index,
+        }))
+        .sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
+    },
+    [slotLabels]
+  );
+
+  const slotImageEntries = slotLabels
+    ? slotLabels.map((_, index) => ({
+        slot: index,
+        image: normalizeSlotImages(images).find((item) => (item.slot ?? -1) === index),
+      }))
+    : [];
+
+  const assetToReferenceImage = useCallback(async (asset: Asset): Promise<ReferenceImage> => {
+    if (asset.size && asset.size > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
+    }
+
+    const response = await fetch(asset.url);
+    let blob = await response.blob();
+
+    if (blob.size > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
+    }
+
+    if (blob.size > COMPRESSION_THRESHOLD_BYTES) {
+      const { compressImageBlob, getCompressionStrategy } = await import('@aitu/utils');
+      const strategy = getCompressionStrategy(blob.size / (1024 * 1024));
+      blob = await compressImageBlob(blob, strategy.targetSizeMB);
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    return {
+      url: dataUrl,
+      name: asset.name,
+    };
+  }, []);
+
+  const applySlotImages = useCallback(
+    (newImages: ReferenceImage[], startSlot = currentSlot) => {
+      if (!slotLabels) return;
+
+      const targetSlots = slotLabels
+        .map((_, index) => index)
+        .filter((slot) => slot >= startSlot)
+        .slice(0, newImages.length);
+
+      if (targetSlots.length === 0) return;
+
+      const updatedImages = normalizeSlotImages(images).filter(
+        (image) => !targetSlots.includes(image.slot ?? -1)
+      );
+      targetSlots.forEach((slot, index) => {
+        updatedImages.push({
+          ...newImages[index],
+          slot,
+        });
+      });
+
+      onImagesChange(normalizeSlotImages(updatedImages));
+
+      if (newImages.length > targetSlots.length) {
+        MessagePlugin.warning(
+          t.maxCountReached.replace('{count}', String(targetSlots.length))
+        );
+      }
+    },
+    [currentSlot, images, normalizeSlotImages, onImagesChange, slotLabels, t]
+  );
+
   // Validate file
   const validateFile = useCallback((file: File): boolean => {
     if (!file.type.startsWith('image/')) {
       MessagePlugin.error(t.invalidFile);
       return false;
     }
-    if (file.size > 25 * 1024 * 1024) {
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
       MessagePlugin.error(t.fileTooLarge);
       return false;
     }
@@ -135,7 +223,18 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
     if (validFiles.length === 0) return;
 
     // Check max count
-    if (multiple && images.length + validFiles.length > maxCount) {
+    if (slotLabels) {
+      const startSlot = targetSlot ?? currentSlot;
+      const availableSlots = slotLabels.length - startSlot;
+      if (availableSlots <= 0) {
+        MessagePlugin.warning(t.maxCountReached.replace('{count}', '0'));
+        return;
+      }
+      if (validFiles.length > availableSlots) {
+        MessagePlugin.warning(t.maxCountReached.replace('{count}', String(availableSlots)));
+        validFiles.splice(availableSlots);
+      }
+    } else if (multiple && images.length + validFiles.length > maxCount) {
       MessagePlugin.warning(t.maxCountReached.replace('{count}', String(maxCount)));
       validFiles.splice(maxCount - images.length);
     }
@@ -148,7 +247,8 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
         let fileToAdd: Blob = file;
 
         // Compress if file is 10-25MB
-        if (file.size > 10 * 1024 * 1024) {
+        if (file.size > COMPRESSION_THRESHOLD_BYTES) {
+          const { compressImageBlob, getCompressionStrategy } = await import('@aitu/utils');
           const strategy = getCompressionStrategy(file.size / (1024 * 1024));
           const msgId = MessagePlugin.loading({
             content: language === 'zh'
@@ -198,10 +298,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       );
 
       if (slotLabels && targetSlot !== undefined) {
-        // Slot mode: replace image at specific slot
-        const updatedImages = [...images];
-        updatedImages[targetSlot] = newImages[0];
-        onImagesChange(updatedImages.filter(Boolean));
+        applySlotImages(newImages, targetSlot);
       } else if (multiple) {
         onImagesChange([...images, ...newImages]);
       } else {
@@ -213,7 +310,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       console.error('[ReferenceImageUpload] Failed to process files:', error);
       onError?.(t.loadFailed);
     }
-  }, [images, multiple, maxCount, slotLabels, language, validateFile, fileToReferenceImage, addAsset, onImagesChange, onError, t]);
+  }, [applySlotImages, addAsset, currentSlot, fileToReferenceImage, images, language, maxCount, multiple, onError, onImagesChange, slotLabels, t, validateFile]);
 
   // Handle file input change
   const handleFileInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -227,82 +324,72 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
   // Handle media library selection (single)
   const handleMediaLibrarySelect = useCallback(async (asset: Asset) => {
     try {
-      const response = await fetch(asset.url);
-      const blob = await response.blob();
+      const newImage = await assetToReferenceImage(asset);
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        const newImage: ReferenceImage = {
-          url: reader.result as string,
-          name: asset.name,
-        };
-
-        if (slotLabels) {
-          const updatedImages = [...images];
-          updatedImages[currentSlot] = newImage;
-          onImagesChange(updatedImages.filter(Boolean));
-        } else if (multiple) {
-          if (images.length >= maxCount) {
-            MessagePlugin.warning(t.maxCountReached.replace('{count}', String(maxCount)));
-            return;
-          }
-          onImagesChange([...images, newImage]);
-        } else {
-          onImagesChange([newImage]);
+      if (slotLabels) {
+        applySlotImages([newImage]);
+      } else if (multiple) {
+        if (images.length >= maxCount) {
+          MessagePlugin.warning(t.maxCountReached.replace('{count}', String(maxCount)));
+          return;
         }
+        onImagesChange([...images, newImage]);
+      } else {
+        onImagesChange([newImage]);
+      }
 
-        setShowMediaLibrary(false);
-        onError?.(null);
-      };
-      reader.readAsDataURL(blob);
+      setShowMediaLibrary(false);
+      onError?.(null);
     } catch (error) {
       console.error('[ReferenceImageUpload] Failed to convert asset to base64:', error);
       onError?.(t.loadFailed);
       setShowMediaLibrary(false);
     }
-  }, [images, multiple, maxCount, slotLabels, currentSlot, onImagesChange, onError, t]);
+  }, [applySlotImages, assetToReferenceImage, images, multiple, maxCount, slotLabels, onImagesChange, onError, t]);
 
   // Handle media library batch selection
   const handleMediaLibrarySelectMultiple = useCallback(async (assets: Asset[]) => {
     if (assets.length === 0) return;
 
-    // Check max count for batch
-    if (multiple && !slotLabels && images.length + assets.length > maxCount) {
+    let selectedAssets = assets;
+
+    if (slotLabels) {
+      const availableSlots = slotLabels.length - currentSlot;
+      if (availableSlots <= 0) {
+        setShowMediaLibrary(false);
+        return;
+      }
+      selectedAssets = assets.slice(0, availableSlots);
+      if (assets.length > availableSlots) {
+        MessagePlugin.warning(t.maxCountReached.replace('{count}', String(availableSlots)));
+      }
+    } else if (multiple && images.length + assets.length > maxCount) {
       MessagePlugin.warning(t.maxCountReached.replace('{count}', String(maxCount)));
-      // Truncate to fit
       const available = maxCount - images.length;
       if (available <= 0) {
         setShowMediaLibrary(false);
         return;
       }
-      assets = assets.slice(0, available);
+      selectedAssets = assets.slice(0, available);
+    } else if (!multiple) {
+      selectedAssets = assets.slice(0, 1);
     }
 
     try {
       const newImages: ReferenceImage[] = [];
 
-      for (const asset of assets) {
+      for (const asset of selectedAssets) {
         try {
-          const response = await fetch(asset.url);
-          const blob = await response.blob();
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-
-          newImages.push({
-            url: dataUrl,
-            name: asset.name,
-          });
+          newImages.push(await assetToReferenceImage(asset));
         } catch (err) {
           console.error('[ReferenceImageUpload] Failed to convert asset:', asset.name, err);
         }
       }
 
       if (newImages.length > 0) {
-        if (multiple) {
+        if (slotLabels) {
+          applySlotImages(newImages);
+        } else if (multiple) {
           onImagesChange([...images, ...newImages]);
         } else {
           onImagesChange(newImages.slice(0, 1));
@@ -316,7 +403,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       onError?.(t.loadFailed);
       setShowMediaLibrary(false);
     }
-  }, [images, multiple, maxCount, slotLabels, onImagesChange, onError, t]);
+  }, [applySlotImages, assetToReferenceImage, currentSlot, images, multiple, maxCount, slotLabels, onImagesChange, onError, t]);
 
   // Handle drag events
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -361,7 +448,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
     if (files && files.length > 0) {
       handleFiles(files, targetSlot);
     }
-  }, [disabled, handleFiles]);
+  }, [currentSlot, disabled, handleFiles, slotLabels]);
 
   // Handle paste events
   useEffect(() => {
@@ -397,7 +484,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
 
       if (imageFiles.length > 0) {
         e.preventDefault();
-        handleFiles(imageFiles);
+        handleFiles(imageFiles, slotLabels ? currentSlot : undefined);
       }
     };
 
@@ -408,11 +495,13 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
   }, [disabled, handleFiles]);
 
   // Remove image
-  const handleRemove = useCallback((index: number) => {
-    const newImages = images.filter((_, i) => i !== index);
+  const handleRemove = useCallback((index: number, slot?: number) => {
+    const newImages = slotLabels
+      ? images.filter((image, i) => (image.slot ?? i) !== (slot ?? index))
+      : images.filter((_, i) => i !== index);
     setHoveredImage(null);
     onImagesChange(newImages);
-  }, [images, onImagesChange]);
+  }, [images, onImagesChange, slotLabels]);
 
   // Open file dialog
   const openFileDialog = useCallback((slot?: number) => {
@@ -492,15 +581,15 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       <button
         type="button"
         className="reference-image-upload__remove"
-        onClick={() => handleRemove(index)}
+        onClick={() => handleRemove(index, image.slot)}
         disabled={disabled}
         data-track="reference_image_upload_remove"
       >
         <X size={14} />
       </button>
-      {slotLabels && slotLabels[index] && (
+      {slotLabels && slotLabels[image.slot ?? index] && (
         <div className="reference-image-upload__slot-label">
-          {slotLabels[index]}
+          {slotLabels[image.slot ?? index]}
         </div>
       )}
     </div>
@@ -512,26 +601,26 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
 
     return (
       <div className="reference-image-upload__slots">
-        {slotLabels.map((slotLabel, index) => {
-          const image = images[index];
+        {slotImageEntries.map(({ slot, image }, index) => {
+          const slotLabel = slotLabels[index];
           return (
-            <div key={index} className="reference-image-upload__slot">
+            <div key={slot} className="reference-image-upload__slot">
               <div className="reference-image-upload__slot-title">{slotLabel}</div>
               {image ? (
-                renderImagePreview(image, index)
+                renderImagePreview(image, slot)
               ) : (
                 <div
                   className={`reference-image-upload__slot-placeholder ${isDragging ? 'reference-image-upload__slot-placeholder--dragging' : ''}`}
                   onDragEnter={handleDragEnter}
                   onDragLeave={handleDragLeave}
                   onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, index)}
+                  onDrop={(e) => handleDrop(e, slot)}
                 >
                   <div className="reference-image-upload__slot-buttons">
                     <Button
                       variant="outline"
                       icon={<ImageUploadIcon size={16} />}
-                      onClick={() => openFileDialog(index)}
+                      onClick={() => openFileDialog(slot)}
                       disabled={disabled}
                       data-track="reference_image_upload_slot_local"
                       className="reference-image-upload__slot-btn"
@@ -541,7 +630,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
                     <Button
                       variant="outline"
                       icon={<MediaLibraryIcon size={16} />}
-                      onClick={() => openMediaLibrary(index)}
+                      onClick={() => openMediaLibrary(slot)}
                       disabled={disabled}
                       data-track="reference_image_upload_slot_library"
                       className="reference-image-upload__slot-btn"

@@ -12,9 +12,8 @@ import {
   ToolWindowLaunchMode,
   ToolWindowState,
 } from '../types/toolbox.types';
-import { toolboxService } from './toolbox-service';
 import { analytics } from '../utils/posthog-analytics';
-import { isBuiltInToolId } from '../constants/built-in-tools';
+import { toolRegistry } from '../tools/registry';
 
 /** localStorage key for pinned tools */
 const PINNED_TOOLS_STORAGE_KEY = 'aitu-pinned-tools';
@@ -37,7 +36,7 @@ function buildToolAnalyticsPayload(
   tool: ToolDefinition,
   extras: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  const isCustomTool = !isBuiltInToolId(tool.id);
+  const isCustomTool = !toolRegistry.isBuiltInTool(tool.id);
   return {
     toolId: tool.id,
     tool_id: tool.id,
@@ -749,7 +748,7 @@ class ToolWindowService {
       return undefined;
     }
 
-    const fullTool = toolboxService.getToolById(toolId);
+    const fullTool = toolRegistry.getManifestById(toolId);
     if (fullTool) {
       return {
         instanceId: `${LAUNCHER_INSTANCE_PREFIX}${toolId}`,

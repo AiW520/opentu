@@ -3,13 +3,6 @@
  * 素材库侧边栏样式 - 简洁素雅风格
  */
 
-// ========================================
-// 品牌色变量（仅用于强调）
-// ========================================
-$brand-orange: #F39C12;
-$brand-orange-light: #FBBF24;
-$brand-orange-dark: #E67E22;
-
 .media-library-sidebar {
   display: flex;
   flex-direction: column;
@@ -24,14 +17,14 @@ $brand-orange-dark: #E67E22;
     &--storage {
       margin-top: auto;
       padding-top: 16px;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      border-top: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     }
   }
 
   &__title {
     font-size: 11px;
     font-weight: 700;
-    color: #94a3b8;
+    color: var(--aitu-ui-text-tertiary, #94a3b8);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     margin: 0;
@@ -44,7 +37,7 @@ $brand-orange-dark: #E67E22;
       content: '';
       width: 3px;
       height: 12px;
-      background: $brand-orange;
+      background: var(--aitu-ui-brand, #f39c12);
       border-radius: 2px;
     }
   }
@@ -102,37 +95,37 @@ $brand-orange-dark: #E67E22;
 
       // 激活状态 (base variant)
       &.t-button--variant-base {
-        background: rgba($brand-orange, 0.1);
-        color: $brand-orange-dark;
-        border: 1px solid rgba($brand-orange, 0.2);
+        background: var(--aitu-ui-brand-soft, rgba(243, 156, 18, 0.12));
+        color: var(--aitu-ui-brand-text, #b45309);
+        border: 1px solid var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28));
 
         svg {
-          color: $brand-orange;
+          color: var(--aitu-ui-brand, #f39c12);
         }
 
         &:hover {
-          background: rgba($brand-orange, 0.15);
+          background: var(--aitu-ui-brand-soft, rgba(243, 156, 18, 0.12));
         }
       }
 
       // 非激活状态 (outline variant)
       &.t-button--variant-outline {
         background: transparent;
-        color: #64748b;
+        color: var(--aitu-ui-text-secondary, #64748b);
         border-color: transparent;
 
         svg {
-          color: #94a3b8;
+          color: var(--aitu-ui-text-tertiary, #94a3b8);
         }
 
         &:hover {
-          background: rgba($brand-orange, 0.06);
-          color: $brand-orange-dark;
-          border-color: rgba($brand-orange, 0.1);
+          background: var(--aitu-ui-brand-softer, rgba(243, 156, 18, 0.06));
+          color: var(--aitu-ui-brand-text, #b45309);
+          border-color: var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28));
           transform: translateX(4px);
 
           svg {
-            color: $brand-orange;
+            color: var(--aitu-ui-brand, #f39c12);
             transform: scale(1.1);
           }
         }
@@ -155,7 +148,7 @@ $brand-orange-dark: #E67E22;
       &--storage {
         padding-top: 0;
         border-top: none;
-        border-left: 1px solid rgba(0, 0, 0, 0.06);
+        border-left: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
         padding-left: 10px;
         margin-left: auto;
         display: none;

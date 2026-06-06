@@ -23,7 +23,8 @@
   }
 
   &--focused {
-    border: 2px solid #f39c12;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.08);
   }
 
   &--empty {
@@ -37,8 +38,8 @@
 
     // 空槽位选中态
     &.media-viewport--focused {
-      border: 2px solid #f39c12;
-      background: rgba(243, 156, 18, 0.1);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      background: rgba(15, 23, 42, 0.04);
     }
   }
 

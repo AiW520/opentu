@@ -74,11 +74,11 @@ describe('default image adapter compatibility', () => {
       {
         size: '1024x1024',
         image: ['data:image/png;base64,abc123'],
-        response_format: 'url',
         quality: '4k',
         count: 2,
         model: 'gpt-image-2',
         modelRef: null,
+        omitDefaultResponseFormat: true,
       }
     );
     expect(result).toMatchObject({

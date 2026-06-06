@@ -85,11 +85,11 @@ function setAllowedStringValue(
 
 function getGPTImageResponseFormat(
   params: Record<string, unknown> | undefined
-): 'url' | 'b64_json' {
+): 'url' | 'b64_json' | undefined {
   const value = getStringParam(params, 'response_format');
   return value && GPT_IMAGE_RESPONSE_FORMAT_VALUES.has(value)
     ? (value as 'url' | 'b64_json')
-    : 'url';
+    : undefined;
 }
 
 function applyCommonGPTImageOptions(
@@ -172,8 +172,11 @@ export function buildGPTImageGenerationBody(
   const body: Record<string, unknown> = {
     model: request.model,
     prompt: request.prompt,
-    response_format: getGPTImageResponseFormat(request.params),
   };
+  const responseFormat = getGPTImageResponseFormat(request.params);
+  if (responseFormat) {
+    body.response_format = responseFormat;
+  }
 
   applyCommonGPTImageOptions(body, request, 'generation');
 
@@ -255,8 +258,11 @@ export async function buildGPTImageEditFormData(
   const fields: Record<string, unknown> = {
     model: request.model,
     prompt: request.prompt,
-    response_format: getGPTImageResponseFormat(params),
   };
+  const responseFormat = getGPTImageResponseFormat(params);
+  if (responseFormat) {
+    fields.response_format = responseFormat;
+  }
 
   setAllowedStringValue(
     fields,
@@ -296,6 +302,12 @@ function isGPTImageEditRequest(
   request: ImageGenerationRequest,
   requestSchema?: string
 ): boolean {
+  const hasReferenceImages =
+    (request.referenceImages && request.referenceImages.length > 0) ||
+    request.maskImage;
+  if (!hasReferenceImages) {
+    return false;
+  }
   if (requestSchema === 'openai.image.gpt-edit-form') {
     return true;
   }
@@ -318,7 +330,7 @@ function resolveGPTImagePath(
       : '/images/edits';
   }
 
-  if (binding?.submitPath) {
+  if (binding?.submitPath && binding.submitPath !== '/images/edits') {
     return binding.submitPath;
   }
 
@@ -397,10 +409,20 @@ export const gptImageAdapter: ImageModelAdapter = {
   ],
   defaultModel: 'gpt-image-2',
   async generateImage(context, request) {
+    console.debug('[gpt-image-adapter] generateImage called', {
+      bindingProtocol: context.binding?.protocol,
+      bindingRequestSchema: context.binding?.requestSchema,
+      bindingSubmitPath: context.binding?.submitPath,
+      generationMode: request.generationMode,
+      hasReferenceImages: !!(request.referenceImages && request.referenceImages.length > 0),
+      referenceImagesCount: request.referenceImages?.length ?? 0,
+      hasMaskImage: !!request.maskImage,
+    });
     const isEditRequest = isGPTImageEditRequest(
       request,
       context.binding?.requestSchema
     );
+    console.debug('[gpt-image-adapter] isEditRequest:', isEditRequest);
     const editFormData = isEditRequest
       ? await buildGPTImageEditFormData(request, context.fetcher)
       : null;

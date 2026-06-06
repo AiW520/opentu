@@ -485,4 +485,177 @@ describe('settings-manager', () => {
       imageApiCompatibility: 'auto',
     });
   });
+
+  it('preserves managed special profile async image preferences after reload', async () => {
+    mockSettingsManagerDeps();
+
+    localStorage.setItem(
+      DRAWNIX_SETTINGS_KEY,
+      JSON.stringify({
+        gemini: {
+          apiKey: 'legacy-key',
+          baseUrl: 'https://api.tu-zi.com/v1',
+        },
+        providerProfiles: [
+          {
+            id: 'legacy-default',
+            name: 'default 分组',
+            providerType: 'openai-compatible',
+            baseUrl: 'https://api.tu-zi.com/v1',
+            apiKey: 'legacy-key',
+            authType: 'bearer',
+            imageApiCompatibility: 'tuzi-gpt-image',
+            preferAsyncImageEndpoint: true,
+            enabled: true,
+            capabilities: {},
+          },
+          {
+            id: 'tuzi-origin',
+            name: '原价分组',
+            providerType: 'openai-compatible',
+            baseUrl: 'https://api.tu-zi.com/v1',
+            apiKey: 'origin-key',
+            authType: 'bearer',
+            imageApiCompatibility: 'tuzi-gpt-image',
+            preferAsyncImageEndpoint: true,
+            enabled: true,
+            capabilities: {},
+            pricingGroup: 'default',
+          },
+          {
+            id: 'tuzi-mix',
+            name: 'gemini-mix 分组',
+            providerType: 'openai-compatible',
+            baseUrl: 'https://api.tu-zi.com/v1',
+            apiKey: 'mix-key',
+            authType: 'bearer',
+            imageApiCompatibility: 'openai-gpt-image',
+            preferAsyncImageEndpoint: true,
+            enabled: true,
+            capabilities: {},
+            pricingGroup: 'gemini-mix',
+          },
+          {
+            id: 'tuzi-codex',
+            name: 'codex 分组',
+            providerType: 'openai-compatible',
+            baseUrl: 'https://api.tu-zi.com/v1',
+            apiKey: 'codex-key',
+            authType: 'bearer',
+            imageApiCompatibility: 'openai-gpt-image',
+            preferAsyncImageEndpoint: true,
+            enabled: true,
+            capabilities: {},
+            pricingGroup: 'codex',
+          },
+          {
+            id: 'tuzi-business',
+            name: 'Business',
+            providerType: 'openai-compatible',
+            baseUrl: 'https://business.tu-zi.com/v1',
+            apiKey: 'business-key',
+            authType: 'bearer',
+            imageApiCompatibility: 'auto',
+            preferAsyncImageEndpoint: true,
+            enabled: true,
+            capabilities: {},
+            pricingGroup: 'default',
+          },
+        ],
+      })
+    );
+
+    const {
+      providerProfilesSettings,
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
+      TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
+      TUZI_MIX_PROVIDER_PROFILE_ID,
+      TUZI_CODEX_PROVIDER_PROFILE_ID,
+      TUZI_BUSINESS_PROVIDER_PROFILE_ID,
+    } = await import('../settings-manager');
+
+    const profiles = providerProfilesSettings.get();
+    const legacyProfile = profiles.find(
+      (profile) => profile.id === LEGACY_DEFAULT_PROVIDER_PROFILE_ID
+    );
+    const tuziOriginProfile = profiles.find(
+      (profile) => profile.id === TUZI_ORIGINAL_PROVIDER_PROFILE_ID
+    );
+    const tuziMixProfile = profiles.find(
+      (profile) => profile.id === TUZI_MIX_PROVIDER_PROFILE_ID
+    );
+    const tuziCodexProfile = profiles.find(
+      (profile) => profile.id === TUZI_CODEX_PROVIDER_PROFILE_ID
+    );
+    const tuziBusinessProfile = profiles.find(
+      (profile) => profile.id === TUZI_BUSINESS_PROVIDER_PROFILE_ID
+    );
+
+    expect(legacyProfile).toMatchObject({
+      preferAsyncImageEndpoint: true,
+    });
+    expect(tuziOriginProfile).toMatchObject({
+      preferAsyncImageEndpoint: true,
+    });
+    expect(tuziMixProfile).toMatchObject({
+      preferAsyncImageEndpoint: true,
+    });
+    expect(tuziCodexProfile).toMatchObject({
+      preferAsyncImageEndpoint: true,
+    });
+    expect(tuziBusinessProfile).toMatchObject({
+      preferAsyncImageEndpoint: true,
+    });
+
+    await providerProfilesSettings.update(
+      profiles.map((profile) => ({
+        ...profile,
+        preferAsyncImageEndpoint: false,
+      }))
+    );
+
+    vi.resetModules();
+    mockSettingsManagerDeps();
+
+    const reloaded = await import('../settings-manager');
+    const reloadedLegacyProfile = reloaded.providerProfilesSettings
+      .get()
+      .find(
+        (profile) => profile.id === reloaded.LEGACY_DEFAULT_PROVIDER_PROFILE_ID
+      );
+    const reloadedTuziOriginProfile = reloaded.providerProfilesSettings
+      .get()
+      .find(
+        (profile) => profile.id === reloaded.TUZI_ORIGINAL_PROVIDER_PROFILE_ID
+      );
+    const reloadedTuziMixProfile = reloaded.providerProfilesSettings
+      .get()
+      .find((profile) => profile.id === reloaded.TUZI_MIX_PROVIDER_PROFILE_ID);
+    const reloadedTuziCodexProfile = reloaded.providerProfilesSettings
+      .get()
+      .find(
+        (profile) => profile.id === reloaded.TUZI_CODEX_PROVIDER_PROFILE_ID
+      );
+    const reloadedTuziBusinessProfile = reloaded.providerProfilesSettings
+      .get()
+      .find(
+        (profile) => profile.id === reloaded.TUZI_BUSINESS_PROVIDER_PROFILE_ID
+      );
+
+    expect(reloadedLegacyProfile).toMatchObject({
+      preferAsyncImageEndpoint: false,
+    });
+    expect(reloadedTuziOriginProfile).toMatchObject({
+      preferAsyncImageEndpoint: false,
+    });
+    expect(reloadedTuziMixProfile).toMatchObject({
+      preferAsyncImageEndpoint: false,
+    });
+    expect(reloadedTuziCodexProfile).toMatchObject({
+      preferAsyncImageEndpoint: false,
+    });
+    expect(reloadedTuziBusinessProfile).toMatchObject({
+      preferAsyncImageEndpoint: false,
+    });
+  });
 });

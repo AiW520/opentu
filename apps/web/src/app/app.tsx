@@ -1,5 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Drawnix } from '@drawnix/drawnix';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  lazy,
+  Suspense,
+} from 'react';
 import {
   WorkspaceService,
   migrateToWorkspace,
@@ -14,17 +20,20 @@ import {
   requestServiceWorkerIdlePrefetch,
   MessagePlugin,
 } from '@drawnix/drawnix/runtime';
-import {
+import type {
   PlaitBoard,
   PlaitElement,
   PlaitTheme,
   Viewport,
-  updateViewBox,
-  initializeViewBox,
-  updateViewportOffset,
 } from '@plait/core';
 import { ErrorFallbackUI, safeModeReload, goToDebug } from './ErrorBoundary';
 import { collectAndDownloadErrorLog } from '../utils/error-log-exporter';
+
+const Drawnix = lazy(() =>
+  import('@drawnix/drawnix').then((module) => ({
+    default: module.Drawnix,
+  }))
+);
 
 // 节流保存 viewport 的间隔（毫秒）
 const VIEWPORT_SAVE_DEBOUNCE = 500;
@@ -35,6 +44,14 @@ const BOARD_CLOSE_SNAPSHOT_KEY = 'aitu_board_close_snapshot_v1';
 
 // Global flag to prevent duplicate initialization in StrictMode
 let appInitialized = false;
+
+async function refreshBoardViewportBounds(board: PlaitBoard): Promise<void> {
+  const { initializeViewBox, updateViewBox, updateViewportOffset } =
+    await import('@plait/core');
+  initializeViewBox(board);
+  updateViewBox(board);
+  updateViewportOffset(board);
+}
 
 type BoardPersistencePayload = {
   children: PlaitElement[];
@@ -538,10 +555,9 @@ export function App() {
         // 使用 setTimeout 而不是 queueMicrotask，给 React 更多时间完成 DOM 更新
         setTimeout(() => {
           if (boardRef.current) {
-            // 完整的边界更新流程
-            initializeViewBox(boardRef.current);
-            updateViewBox(boardRef.current);
-            updateViewportOffset(boardRef.current);
+            refreshBoardViewportBounds(boardRef.current).catch((error) => {
+              console.warn('[App] Failed to refresh board bounds:', error);
+            });
           }
         }, 0);
       } catch (error) {
@@ -914,37 +930,43 @@ export function App() {
 
   return (
     <div style={{ height: '100vh' }}>
-      <Drawnix
-        value={value.children}
-        viewport={value.viewport}
-        theme={value.theme}
-        onChange={handleBoardChange}
-        onViewportChange={handleViewportChange}
-        onBoardSwitch={handleBoardSwitch}
-        onTabSyncNeeded={handleTabSyncNeeded}
-        isDataReady={isDataReady}
-        currentBoardId={currentBoardId}
-        afterInit={(board) => {
-          // 保存 board 引用，用于手动触发边界更新
-          boardRef.current = board;
+      <Suspense fallback={null}>
+        <Drawnix
+          value={value.children}
+          viewport={value.viewport}
+          theme={value.theme}
+          onChange={handleBoardChange}
+          onViewportChange={handleViewportChange}
+          onBoardSwitch={handleBoardSwitch}
+          onTabSyncNeeded={handleTabSyncNeeded}
+          isDataReady={isDataReady}
+          currentBoardId={currentBoardId}
+          afterInit={(board) => {
+            // 保存 board 引用，用于手动触发边界更新
+            boardRef.current = board;
 
-          (
-            window as unknown as {
-              __drawnix__web__console: (value: string) => void;
-            }
-          )['__drawnix__web__console'] = (value: string) => {
-            addDebugLog(board, value);
-          };
-        }}
-      />
+            (
+              window as unknown as {
+                __drawnix__web__console: (value: string) => void;
+              }
+            )['__drawnix__web__console'] = (value: string) => {
+              addDebugLog(board, value);
+            };
+          }}
+        />
+      </Suspense>
     </div>
   );
 }
 
-const addDebugLog = (board: PlaitBoard, value: string) => {
-  const container = PlaitBoard.getBoardContainer(board).closest(
-    '.drawnix'
-  ) as HTMLElement;
+const addDebugLog = async (board: PlaitBoard, value: string) => {
+  const { PlaitBoard } = await import('@plait/core');
+  const container = PlaitBoard.getBoardContainer(board).closest('.drawnix') as
+    | HTMLElement
+    | null;
+  if (!container) {
+    return;
+  }
   let consoleContainer = container.querySelector('.drawnix-console');
   if (!consoleContainer) {
     consoleContainer = document.createElement('div');

@@ -21,7 +21,7 @@ import { analytics } from '../utils/posthog-analytics';
 import { cacheRemoteUrl } from '../services/media-executor/fallback-utils';
 import { normalizeImageDataUrl } from '@aitu/utils';
 import { AssetSource, AssetType } from '../types/asset.types';
-import { getInsertionPointFromSavedSelection } from '../utils/canvas-insertion-layout';
+import { getInsertionPointFromSavedSelection, calculateImageDisplayDimensions } from '../utils/canvas-insertion-layout';
 
 export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
   const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
@@ -334,7 +334,9 @@ export const insertImageFromUrl = async (
   // 如果为 true 且提供了 referenceDimensions，则跳过图片加载直接使用提供的尺寸
   skipImageLoad?: boolean,
   // 如果为 true，图片加载后不再按真实比例改写尺寸
-  lockReferenceDimensions?: boolean
+  lockReferenceDimensions?: boolean,
+  // 如果为 true，插入图片后不自动选中（用于自动插入场景，避免覆盖用户当前选中状态）
+  skipSelect?: boolean
 ) => {
   // 外部 URL 和 data URL 先缓存到本地
   let resolvedUrl = normalizeImageDataUrl(imageUrl);
@@ -472,6 +474,15 @@ export const insertImageFromUrl = async (
     height: imageItem.height,
   });
 
+  // 选中新插入的图片元素（如果没有跳过选中）
+  if (!skipSelect) {
+    const newElement = board.children[childrenCountBefore];
+    if (newElement) {
+      clearSelectedElement(board);
+      addSelectedElement(board, newElement);
+    }
+  }
+
   // 如果跳过了图片加载，异步加载图片并更新元素尺寸
   if (shouldUpdateSizeAfterLoad && referenceDimensions) {
     // 同步捕获新插入元素的 ID，避免异步回调中索引失效
@@ -524,30 +535,14 @@ function updateImageSizeAfterLoad(
         return;
       }
 
-      // 计算图片的实际宽高比
-      const imageAspectRatio = naturalWidth / naturalHeight;
-      const referenceAspectRatio =
-        referenceDimensions.width / referenceDimensions.height;
-
-      // 如果宽高比相同（误差 < 1%），不需要更新
-      if (
-        Math.abs(imageAspectRatio - referenceAspectRatio) /
-          referenceAspectRatio <
-        0.01
-      ) {
-        return;
-      }
-
-      // 根据实际图片比例计算新的显示尺寸
-      // 以预设宽度为基准，调整高度以匹配实际比例
-      let newWidth = referenceDimensions.width;
-      let newHeight = newWidth / imageAspectRatio;
-
-      // 如果新高度超过预设高度，则以高度为基准
-      if (newHeight > referenceDimensions.height) {
-        newHeight = referenceDimensions.height;
-        newWidth = newHeight * imageAspectRatio;
-      }
+      // 使用与预计算网格布局相同的尺寸计算逻辑，确保尺寸一致不会破坏布局
+      const displayDimensions = calculateImageDisplayDimensions(
+        naturalWidth,
+        naturalHeight
+      );
+      
+      let newWidth = displayDimensions.width;
+      let newHeight = displayDimensions.height;
 
       // 通过 ID 查找元素（比索引更可靠，不受插入/删除影响）
       const elementIndex = board.children.findIndex(

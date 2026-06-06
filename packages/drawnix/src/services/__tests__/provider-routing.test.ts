@@ -636,6 +636,7 @@ describe('provider routing', () => {
       baseUrl: 'https://test-business.tu-zi.com/v1',
       apiKey: 'key-a',
       authType: 'bearer' as const,
+      preferAsyncImageEndpoint: true,
     };
     const model: ModelConfig = {
       id: 'gpt-image-1-vip',
@@ -686,13 +687,13 @@ describe('provider routing', () => {
       baseUrl: 'https://test-business.tu-zi.com/v1',
       apiKey: 'key-a',
       authType: 'bearer' as const,
-      imageApiCompatibility: 'openai-gpt-image' as const,
+      preferAsyncImageEndpoint: true,
     };
     const model: ModelConfig = {
-      id: 'gpt-image-2',
-      label: 'GPT Image 2',
+      id: 'gemini-3-pro-image-preview-async',
+      label: 'Gemini Async Image',
       type: 'image',
-      vendor: ModelVendor.GPT,
+      vendor: ModelVendor.GEMINI,
     };
     const bindings = inferBindingsForProviderModel(profile, model, {
       'openai-video': {
@@ -718,7 +719,132 @@ describe('provider routing', () => {
     });
 
     expect(bindings.map((binding) => binding.requestSchema)).toContain(
-      'openai.image.gpt-edit-form'
+      'openai.async.image.form'
+    );
+    expect(plan.binding.protocol).toBe('openai.async.media');
+    expect(plan.binding.requestSchema).toBe('openai.async.image.form');
+    expect(plan.binding.submitPath).toBe('/videos');
+  });
+
+  it('prefers async image binding for async-listed image models when enabled', () => {
+    const profile = {
+      id: 'provider-business',
+      name: 'Business Provider',
+      providerType: 'openai-compatible' as const,
+      baseUrl: 'https://test-business.tu-zi.com/v1',
+      apiKey: 'key-a',
+      authType: 'bearer' as const,
+      preferAsyncImageEndpoint: true,
+    };
+    const model: ModelConfig = {
+      id: 'gemini-3-pro-image-preview-async',
+      label: 'Gemini Async Image',
+      type: 'image',
+      vendor: ModelVendor.GEMINI,
+    };
+    const bindings = inferBindingsForProviderModel(profile, model, {
+      'openai-video': {
+        path: '/v1/videos',
+        method: 'POST',
+        scenario: 'async-image',
+      },
+    });
+    const plan = new InvocationPlanner(
+      createRepositories({
+        profiles: [profile],
+        bindings,
+      })
+    ).plan({
+      operation: 'image',
+      modelRef: {
+        profileId: profile.id,
+        modelId: model.id,
+      },
+    });
+
+    expect(plan.binding.protocol).toBe('openai.async.media');
+    expect(plan.binding.submitPath).toBe('/videos');
+  });
+
+  it('routes generic image models through /v1/videos when async image is enabled', () => {
+    const profile = {
+      id: 'provider-business',
+      name: 'Business Provider',
+      providerType: 'openai-compatible' as const,
+      baseUrl: 'https://test-business.tu-zi.com/v1',
+      apiKey: 'key-a',
+      authType: 'bearer' as const,
+      preferAsyncImageEndpoint: true,
+    };
+    const model: ModelConfig = {
+      id: 'qwen-image-2.0',
+      label: 'Qwen Image 2.0',
+      type: 'image',
+      vendor: ModelVendor.QWEN,
+    };
+    const bindings = inferBindingsForProviderModel(profile, model, {
+      'openai-video': {
+        path: '/v1/videos',
+        method: 'POST',
+        scenario: 'async-image',
+      },
+    });
+    const plan = new InvocationPlanner(
+      createRepositories({
+        profiles: [profile],
+        bindings,
+      })
+    ).plan({
+      operation: 'image',
+      modelRef: {
+        profileId: profile.id,
+        modelId: model.id,
+      },
+    });
+
+    expect(plan.binding.protocol).toBe('openai.async.media');
+    expect(plan.binding.submitPath).toBe('/videos');
+  });
+
+  it('routes mj-imagine through /v1/videos when async image is enabled', () => {
+    const profile = {
+      id: 'provider-business',
+      name: 'Business Provider',
+      providerType: 'openai-compatible' as const,
+      baseUrl: 'https://test-business.tu-zi.com/v1',
+      apiKey: 'key-a',
+      authType: 'bearer' as const,
+      preferAsyncImageEndpoint: true,
+    };
+    const model: ModelConfig = {
+      id: 'mj-imagine',
+      label: 'Midjourney',
+      type: 'image',
+      vendor: ModelVendor.MIDJOURNEY,
+      tags: ['mj'],
+    };
+    const bindings = inferBindingsForProviderModel(profile, model, {
+      'openai-video': {
+        path: '/v1/videos',
+        method: 'POST',
+        scenario: 'async-image',
+      },
+    });
+    const plan = new InvocationPlanner(
+      createRepositories({
+        profiles: [profile],
+        bindings,
+      })
+    ).plan({
+      operation: 'image',
+      modelRef: {
+        profileId: profile.id,
+        modelId: model.id,
+      },
+    });
+
+    expect(bindings.map((binding) => binding.protocol)).toContain(
+      'openai.async.media'
     );
     expect(plan.binding.protocol).toBe('openai.async.media');
     expect(plan.binding.requestSchema).toBe('openai.async.image.form');

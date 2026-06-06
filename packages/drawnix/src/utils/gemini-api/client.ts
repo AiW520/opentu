@@ -58,6 +58,7 @@ export class GeminiClient {
       size?: string;
       image?: string | string[];
       response_format?: 'url' | 'b64_json';
+      omitDefaultResponseFormat?: boolean;
       quality?: '1k' | '2k' | '4k';
       count?: number;
       model?: string; // 支持指定模型

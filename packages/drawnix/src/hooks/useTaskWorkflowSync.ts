@@ -20,6 +20,7 @@ import type { TaskEvent, Task } from '../types/task.types';
 
 import type { WorkflowStep, WorkflowDefinition } from '../components/ai-input-bar/workflow-converter';
 import type { PlaitWorkZone } from '../types/workzone.types';
+import { findWorkflowStepForTask } from '../utils/workflow-task-linking';
 
 interface WorkflowControl {
   updateStep: (
@@ -37,6 +38,7 @@ interface WorkflowControl {
 export interface UseTaskWorkflowSyncOptions {
   workflowControl: WorkflowControl;
   updateWorkflowMessage: (data: WorkflowMessageData) => void;
+  syncWorkflowTaskUpdate?: (task: Task) => boolean;
   boardRef: React.MutableRefObject<PlaitBoard | null>;
   workZoneIdRef: React.MutableRefObject<string | null>;
 }
@@ -45,21 +47,11 @@ const MAX_BUFFER_SIZE = 20;
 const REPLAY_INTERVAL = 2000;
 const MAX_REPLAY_DURATION = 30000;
 
-/**
- * Build taskId → stepId mapping from workflow steps
- */
-function buildTaskStepMap(
-  steps: Array<{ id: string; result?: unknown }> | undefined
-): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!steps) return map;
-  for (const step of steps) {
-    const result = step.result as { taskId?: string } | undefined;
-    if (result?.taskId) {
-      map.set(result.taskId, step.id);
-    }
-  }
-  return map;
+function areAllWorkflowStepsCompleted(workflow: WorkflowDefinition): boolean {
+  return (
+    workflow.steps.length > 0 &&
+    workflow.steps.every((step) => step.status === 'completed')
+  );
 }
 
 /**
@@ -69,9 +61,13 @@ function mapTaskToStepStatus(task: Task): {
   status: WorkflowStep['status']; result?: unknown; error?: string;
 } | null {
   if (task.status === TaskStatus.PROCESSING) {
-    return { status: 'running' };
+    return { status: 'running', result: { taskId: task.id } };
   } else if (task.status === TaskStatus.COMPLETED && task.result) {
-    return { status: 'completed', result: { ...task.result, taskId: task.id } };
+    const result =
+      typeof task.result === 'object' && task.result !== null
+        ? { ...task.result, taskId: task.id }
+        : { result: task.result, taskId: task.id };
+    return { status: 'completed', result };
   } else if (task.status === TaskStatus.FAILED) {
     const errorMsg = typeof task.error === 'string'
       ? task.error
@@ -94,20 +90,31 @@ function processViaContext(
   workZoneIdRef: React.MutableRefObject<string | null>,
 ): boolean {
   const workflow = workflowControl.getWorkflow();
-  const taskStepMap = buildTaskStepMap(workflow?.steps);
-  const stepId = taskStepMap.get(task.id);
-  if (!stepId) return false;
+  const step = findWorkflowStepForTask(workflow, task);
+  if (!step) return false;
   const shouldSyncWorkZone =
     task.type !== TaskType.IMAGE && workflow?.generationType !== 'image';
 
   if (mapped.status === 'running') {
     workflowControl.resumeWorkflow();
   }
-  workflowControl.updateStep(stepId, mapped.status, mapped.result, mapped.error);
+  workflowControl.updateStep(
+    step.id,
+    mapped.status,
+    mapped.result,
+    mapped.error
+  );
 
   const updatedWorkflow = workflowControl.getWorkflow();
   if (updatedWorkflow) {
-    const workflowData = toWorkflowMessageData(updatedWorkflow);
+    const workflowData = toWorkflowMessageData(
+      updatedWorkflow,
+      undefined,
+      updatedWorkflow.generationType === 'image' &&
+        areAllWorkflowStepsCompleted(updatedWorkflow)
+        ? 'completed'
+        : undefined
+    );
     updateWorkflowMessageRef.current(workflowData);
     const board = boardRef.current;
     const workZoneId = workZoneIdRef.current;
@@ -142,13 +149,12 @@ function processViaWorkZone(
     if (wz.workflow.generationType === 'image') {
       continue;
     }
-    const wzStepMap = buildTaskStepMap(wz.workflow?.steps);
-    const wzStepId = wzStepMap.get(task.id);
-    if (!wzStepId) continue;
+    const wzStep = findWorkflowStepForTask(wz.workflow, task);
+    if (!wzStep) continue;
 
     // Update the WorkZone's workflow steps
     const updatedSteps = wz.workflow.steps.map(step => {
-      if (step.id !== wzStepId) return step;
+      if (step.id !== wzStep.id) return step;
       return {
         ...step,
         status: mapped.status,
@@ -213,7 +219,12 @@ function processViaWorkZone(
 function processTaskEvent(
   event: TaskEvent,
   workflowControl: WorkflowControl,
-  updateWorkflowMessageRef: React.MutableRefObject<(data: WorkflowMessageData) => void>,
+  updateWorkflowMessageRef: React.MutableRefObject<
+    (data: WorkflowMessageData) => void
+  >,
+  syncWorkflowTaskUpdateRef: React.MutableRefObject<
+    ((task: Task) => boolean) | undefined
+  >,
   boardRef: React.MutableRefObject<PlaitBoard | null>,
   workZoneIdRef: React.MutableRefObject<string | null>,
 ): boolean {
@@ -222,15 +233,33 @@ function processTaskEvent(
   if (!mapped) return false;
 
   // Primary: update via WorkflowContext
-  if (processViaContext(task, mapped, workflowControl, updateWorkflowMessageRef, boardRef, workZoneIdRef)) {
+  if (
+    processViaContext(
+      task,
+      mapped,
+      workflowControl,
+      updateWorkflowMessageRef,
+      boardRef,
+      workZoneIdRef
+    )
+  ) {
     return true;
   }
   // Fallback: update WorkZone Plait element directly
-  if (processViaWorkZone(task, mapped, workflowControl, updateWorkflowMessageRef, boardRef, workZoneIdRef)) {
+  if (
+    processViaWorkZone(
+      task,
+      mapped,
+      workflowControl,
+      updateWorkflowMessageRef,
+      boardRef,
+      workZoneIdRef
+    )
+  ) {
     return true;
   }
 
-  return false;
+  return syncWorkflowTaskUpdateRef.current?.(task) ?? false;
 }
 
 /**
@@ -245,6 +274,10 @@ export function useTaskWorkflowSync(options: UseTaskWorkflowSyncOptions): void {
   useEffect(() => {
     updateWorkflowMessageRef.current = options.updateWorkflowMessage;
   }, [options.updateWorkflowMessage]);
+  const syncWorkflowTaskUpdateRef = useRef(options.syncWorkflowTaskUpdate);
+  useEffect(() => {
+    syncWorkflowTaskUpdateRef.current = options.syncWorkflowTaskUpdate;
+  }, [options.syncWorkflowTaskUpdate]);
 
   const eventBufferRef = useRef<Map<string, TaskEvent>>(new Map());
   const replayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -272,6 +305,7 @@ export function useTaskWorkflowSync(options: UseTaskWorkflowSyncOptions): void {
           buffered,
           workflowControl,
           updateWorkflowMessageRef,
+          syncWorkflowTaskUpdateRef,
           boardRef,
           workZoneIdRef,
         );
@@ -301,41 +335,58 @@ export function useTaskWorkflowSync(options: UseTaskWorkflowSyncOptions): void {
         if (mapped.status === 'completed' || mapped.status === 'failed') {
           processTaskEvent(
             { type: 'taskUpdated', task, timestamp: Date.now() },
-            workflowControl, updateWorkflowMessageRef, boardRef, workZoneIdRef,
+            workflowControl,
+            updateWorkflowMessageRef,
+            syncWorkflowTaskUpdateRef,
+            boardRef,
+            workZoneIdRef
           );
         }
       }
     }
 
-    const subscription = taskQueueService.observeTaskUpdates().subscribe((event) => {
-      if (event.type !== 'taskUpdated') return;
+    const subscription = taskQueueService
+      .observeTaskUpdates()
+      .subscribe((event) => {
+        if (event.type !== 'taskUpdated') return;
 
-      if (
-        event.task.status === TaskStatus.PROCESSING &&
-        eventBufferRef.current.has(event.task.id)
-      ) {
-        bufferEvent(event);
-        if (!replayTimerRef.current) {
-          replayStartRef.current = Date.now();
-          replayTimerRef.current = setInterval(tryReplayBuffer, REPLAY_INTERVAL);
+        if (
+          event.task.status === TaskStatus.PROCESSING &&
+          eventBufferRef.current.has(event.task.id)
+        ) {
+          bufferEvent(event);
+          if (!replayTimerRef.current) {
+            replayStartRef.current = Date.now();
+            replayTimerRef.current = setInterval(
+              tryReplayBuffer,
+              REPLAY_INTERVAL
+            );
+          }
+          return;
         }
-        return;
-      }
 
-      const handled = processTaskEvent(
-        event, workflowControl, updateWorkflowMessageRef, boardRef, workZoneIdRef,
-      );
+        const handled = processTaskEvent(
+          event,
+          workflowControl,
+          updateWorkflowMessageRef,
+          syncWorkflowTaskUpdateRef,
+          boardRef,
+          workZoneIdRef
+        );
 
-      if (handled) {
-        eventBufferRef.current.delete(event.task.id);
-      } else {
-        bufferEvent(event);
-        if (!replayTimerRef.current) {
-          replayStartRef.current = Date.now();
-          replayTimerRef.current = setInterval(tryReplayBuffer, REPLAY_INTERVAL);
+        if (handled) {
+          eventBufferRef.current.delete(event.task.id);
+        } else {
+          bufferEvent(event);
+          if (!replayTimerRef.current) {
+            replayStartRef.current = Date.now();
+            replayTimerRef.current = setInterval(
+              tryReplayBuffer,
+              REPLAY_INTERVAL
+            );
+          }
         }
-      }
-    });
+      });
 
     return () => {
       subscription.unsubscribe();

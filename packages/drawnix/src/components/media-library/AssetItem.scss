@@ -4,35 +4,37 @@
  * 简洁素雅风格
  */
 
-// ========================================
-// 品牌色变量（仅用于强调）
-// ========================================
-$brand-orange: #F39C12;
-$brand-orange-light: #FBBF24;
-$brand-orange-dark: #E67E22;
-
 .asset-item {
   position: relative;
   box-sizing: border-box;
   contain: layout paint;
   isolation: isolate;
   cursor: pointer;
-  background: #ffffff;
+  background: var(--aitu-ui-surface, #ffffff);
   border: 2px solid transparent;
   overflow: hidden;
   transition:
+    background-color 0.15s ease,
     border-color 0.15s ease,
     box-shadow 0.2s ease;
   user-select: none; // 防止 Shift 连选时文本被选中
 
   &:hover {
-    border-color: rgba(0, 0, 0, 0.15);
+    border-color: var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28));
+    background: var(--aitu-ui-hover-bg, #fffaf0);
   }
 
   &--selected {
-    border-color: rgba($brand-orange, 0.5);
-    background-color: rgba($brand-orange, 0.02);
+    border-color: var(--aitu-ui-brand-border, rgba(243, 156, 18, 0.52));
+    background-color: var(--aitu-ui-selected-bg, rgba(243, 156, 18, 0.08));
+    box-shadow: var(--aitu-ui-shadow-selected, 0 10px 24px rgba(243, 156, 18, 0.14));
     z-index: 1; // 提升选中项层级，避免边框被覆盖
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--aitu-ui-brand, #f39c12);
+    box-shadow: var(--aitu-ui-focus-ring, 0 0 0 3px rgba(243, 156, 18, 0.18));
   }
 
   &--selection-mode {
@@ -42,7 +44,11 @@ $brand-orange-dark: #E67E22;
   // ========== 缩略图 ==========
   &__thumbnail {
     position: relative;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    background: linear-gradient(
+      135deg,
+      var(--aitu-ui-surface-subtle, #f8fafc) 0%,
+      var(--aitu-ui-surface-muted, #f1f5f9) 100%
+    );
     display: flex;
     align-items: center;
     justify-content: center;
@@ -63,8 +69,8 @@ $brand-orange-dark: #E67E22;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, rgba(243, 156, 18, 0.12) 0%, rgba(90, 79, 207, 0.12) 100%);
-    color: #5A4FCF;
+    background: linear-gradient(135deg, var(--aitu-ui-brand-soft, rgba(243, 156, 18, 0.12)) 0%, rgba(90, 79, 207, 0.1) 100%);
+    color: var(--aitu-ui-brand-text, #b45309);
   }
 
   // ========== 徽章 ==========
@@ -83,16 +89,14 @@ $brand-orange-dark: #E67E22;
   &__type-badge {
     padding: 5px 10px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--aitu-ui-surface-elevated, rgba(255, 255, 255, 0.92));
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 
-      0 2px 8px 0 rgba(0, 0, 0, 0.08),
-      0 0 0 1px rgba(255, 255, 255, 0.5);
+    box-shadow: var(--aitu-ui-shadow-soft, 0 2px 10px rgba(15, 23, 42, 0.06));
 
     svg {
-      color: #64748b;
+      color: var(--aitu-ui-text-secondary, #64748b);
       width: 13px;
       height: 13px;
     }
@@ -101,8 +105,8 @@ $brand-orange-dark: #E67E22;
   &__ai-badge {
     padding: 4px 8px;
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.6);
-    color: #ffffff;
+    background: var(--aitu-ui-brand-soft, rgba(243, 156, 18, 0.12));
+    color: var(--aitu-ui-brand-text, #b45309);
     font-size: 9px;
     font-weight: 600;
     text-transform: uppercase;
@@ -122,12 +126,12 @@ $brand-orange-dark: #E67E22;
   &__synced-badge {
     padding: 4px 6px;
     border-radius: 4px;
-    background: rgba(34, 197, 94, 0.9);
-    color: #ffffff;
+    background: var(--aitu-ui-success-soft, rgba(34, 197, 94, 0.12));
+    color: var(--aitu-ui-success, #15803d);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 4px rgba(34, 197, 94, 0.3);
+    box-shadow: inset 0 0 0 1px var(--aitu-ui-success-border, rgba(34, 197, 94, 0.28));
     cursor: default;
 
     svg {
@@ -150,8 +154,8 @@ $brand-orange-dark: #E67E22;
   &__subject-badge {
     padding: 4px 7px;
     border-radius: 4px;
-    background: rgba(15, 23, 42, 0.88);
-    color: #ffffff;
+    background: var(--aitu-ui-surface-elevated, rgba(255, 255, 255, 0.92));
+    color: var(--aitu-ui-brand-text, #b45309);
     font-size: 10px;
     font-weight: 600;
     line-height: 12px;
@@ -159,7 +163,7 @@ $brand-orange-dark: #E67E22;
     align-items: center;
     gap: 3px;
     cursor: default;
-    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.24);
+    box-shadow: inset 0 0 0 1px var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28)), var(--aitu-ui-shadow-soft, 0 2px 10px rgba(15, 23, 42, 0.06));
 
     svg {
       width: 10px;
@@ -181,13 +185,13 @@ $brand-orange-dark: #E67E22;
   &__cache-warning-badge {
     padding: 4px 7px;
     border-radius: 4px;
-    background: rgba(245, 158, 11, 0.92);
-    color: #ffffff;
+    background: var(--aitu-ui-warning-soft, rgba(245, 158, 11, 0.14));
+    color: var(--aitu-ui-warning, #b45309);
     font-size: 10px;
     font-weight: 600;
     line-height: 12px;
     cursor: help;
-    box-shadow: 0 2px 4px rgba(245, 158, 11, 0.28);
+    box-shadow: inset 0 0 0 1px var(--aitu-ui-warning-border, rgba(245, 158, 11, 0.32));
 
     &--list {
       flex-shrink: 0;
@@ -211,24 +215,24 @@ $brand-orange-dark: #E67E22;
         
         .t-checkbox__input {
           border-radius: 4px;
-          border-color: rgba(255, 255, 255, 0.4);
-          background: rgba(0, 0, 0, 0.2);
+          border-color: var(--aitu-ui-border, rgba(15, 23, 42, 0.1));
+          background: var(--aitu-ui-surface-elevated, rgba(255, 255, 255, 0.92));
           width: 18px; // 统一尺寸
           height: 18px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+          box-shadow: var(--aitu-ui-shadow-soft, 0 2px 10px rgba(15, 23, 42, 0.06));
           transition: all 0.2s ease;
         }
 
         &:hover .t-checkbox__input {
-          border-color: rgba(255, 255, 255, 0.8);
+          border-color: var(--aitu-ui-brand-border, rgba(243, 156, 18, 0.52));
           transform: scale(1.05);
         }
 
         &.t-is-checked {
           .t-checkbox__input {
-            background: $brand-orange !important;
-            border-color: $brand-orange !important;
-            box-shadow: 0 4px 12px rgba($brand-orange, 0.4);
+            background: var(--aitu-ui-brand, #f39c12) !important;
+            border-color: var(--aitu-ui-brand, #f39c12) !important;
+            box-shadow: var(--aitu-ui-focus-ring, 0 0 0 3px rgba(243, 156, 18, 0.18));
           }
         }
       }
@@ -249,32 +253,28 @@ $brand-orange-dark: #E67E22;
     height: 32px;
     border: none;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--aitu-ui-surface-elevated, rgba(255, 255, 255, 0.92));
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 
-      0 2px 8px 0 rgba(0, 0, 0, 0.12),
-      0 0 0 1px rgba(255, 255, 255, 0.5);
+    box-shadow: var(--aitu-ui-shadow-soft, 0 2px 10px rgba(15, 23, 42, 0.06));
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
 
     svg {
-      color: #333;
+      color: var(--aitu-ui-text-primary, #1e293b);
       width: 16px;
       height: 16px;
     }
 
     &:hover {
-      background: #fff;
-      box-shadow: 
-        0 4px 12px 0 rgba(0, 0, 0, 0.15),
-        0 0 0 1px rgba(255, 255, 255, 0.8);
+      background: var(--aitu-ui-surface, #ffffff);
+      box-shadow: var(--aitu-ui-shadow-hover, 0 8px 20px rgba(15, 23, 42, 0.08));
 
       svg {
-        color: #000;
+        color: var(--aitu-ui-brand-text, #b45309);
       }
     }
 
@@ -301,19 +301,19 @@ $brand-orange-dark: #E67E22;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.94);
-    color: #64748b;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+    background: var(--aitu-ui-surface-elevated, rgba(255, 255, 255, 0.92));
+    color: var(--aitu-ui-text-secondary, #64748b);
+    box-shadow: var(--aitu-ui-shadow-soft, 0 2px 10px rgba(15, 23, 42, 0.06));
     transition: all 0.2s ease;
 
     &:hover {
       transform: scale(1.06);
-      color: #ef4444;
+      color: var(--aitu-ui-danger, #e91e63);
     }
 
     &--active {
-      color: #ef4444;
-      background: rgba(254, 226, 226, 0.96);
+      color: var(--aitu-ui-danger, #e91e63);
+      background: var(--aitu-ui-danger-soft, rgba(233, 30, 99, 0.08));
     }
 
     &--list {
@@ -328,13 +328,11 @@ $brand-orange-dark: #E67E22;
   // ========== 渐变遮罩和名称 ==========
   &__overlay {
     position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      180deg, 
-      rgba(0, 0, 0, 0) 0%, 
-      rgba(0, 0, 0, 0) 50%,
-      rgba(0, 0, 0, 0.7) 100%
-    );
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 42%;
+    background: linear-gradient(180deg, transparent 0%, var(--aitu-ui-surface-elevated, rgba(255, 255, 255, 0.92)) 100%);
     opacity: 0;
     transition: opacity 0.25s ease;
     pointer-events: none;
@@ -345,7 +343,7 @@ $brand-orange-dark: #E67E22;
     bottom: 14px;
     left: 14px;
     right: 14px;
-    color: white;
+    color: var(--aitu-ui-text-primary, #1e293b);
     font-size: 13px;
     font-weight: 600;
     white-space: nowrap;
@@ -354,7 +352,7 @@ $brand-orange-dark: #E67E22;
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.25s ease, transform 0.25s ease;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
     z-index: 1;
     pointer-events: none;
   }
@@ -371,7 +369,7 @@ $brand-orange-dark: #E67E22;
   &__name {
     font-size: 14px;
     font-weight: 600;
-    color: #1e293b;
+    color: var(--aitu-ui-text-primary, #1e293b);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -382,7 +380,7 @@ $brand-orange-dark: #E67E22;
     align-items: center;
     gap: 12px;
     font-size: 12px;
-    color: #64748b;
+    color: var(--aitu-ui-text-secondary, #64748b);
   }
 
   &__type {
@@ -391,13 +389,13 @@ $brand-orange-dark: #E67E22;
     gap: 4px;
 
     svg {
-      color: #333;
+      color: var(--aitu-ui-text-primary, #1e293b);
     }
   }
 
   &__size,
   &__date {
-    color: #94a3b8;
+    color: var(--aitu-ui-text-tertiary, #94a3b8);
   }
 
   // ========================================
@@ -407,9 +405,7 @@ $brand-orange-dark: #E67E22;
     width: 100%;
     height: 100%;
     border-radius: 16px;
-    box-shadow: 
-      0 1px 3px 0 rgba(0, 0, 0, 0.05),
-      0 0 0 1px rgba(0, 0, 0, 0.03);
+    box-shadow: var(--aitu-ui-shadow-card, 0 1px 3px rgba(15, 23, 42, 0.06));
 
     .asset-item__thumbnail {
       width: 100%;
@@ -417,8 +413,7 @@ $brand-orange-dark: #E67E22;
       border-radius: 14px;
     }
 
-    &:hover,
-    &.asset-item--selected {
+    &:hover {
       .asset-item__overlay,
       .asset-item__name-overlay {
         opacity: 1;
@@ -430,6 +425,7 @@ $brand-orange-dark: #E67E22;
     }
 
     &.asset-item--selection-mode:hover {
+      .asset-item__overlay,
       .asset-item__name-overlay {
         opacity: 0;
       }
@@ -444,7 +440,7 @@ $brand-orange-dark: #E67E22;
     height: 100%;
     border-radius: 8px;
     border-width: 1px;
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+    box-shadow: var(--aitu-ui-shadow-card, 0 1px 3px rgba(15, 23, 42, 0.06));
 
     &.asset-item--selected {
       border-width: 2px;
@@ -515,22 +511,22 @@ $brand-orange-dark: #E67E22;
     gap: 14px;
     padding: 12px 16px; // 调整内边距以对齐上方
     border-radius: 8px; // 保持圆角，但减小间距
-    border: 1px solid #f1f5f9;
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+    border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
+    box-shadow: var(--aitu-ui-shadow-card, 0 1px 3px rgba(15, 23, 42, 0.06));
     margin-bottom: 8px; // 增加间距避免重叠感，列表也可以有呼吸感
     transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 
     &:hover {
-      background: #fff;
-      border-color: rgba($brand-orange, 0.2);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      background: var(--aitu-ui-hover-bg, #fffaf0);
+      border-color: var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28));
+      box-shadow: var(--aitu-ui-shadow-hover, 0 8px 20px rgba(15, 23, 42, 0.08));
       z-index: 1;
     }
 
     &.asset-item--selected {
-      background: rgba($brand-orange, 0.03);
-      border-color: rgba($brand-orange, 0.5);
-      box-shadow: 0 0 0 1px rgba($brand-orange, 0.1);
+      background: var(--aitu-ui-selected-bg, rgba(243, 156, 18, 0.08));
+      border-color: var(--aitu-ui-brand-border, rgba(243, 156, 18, 0.52));
+      box-shadow: var(--aitu-ui-shadow-selected, 0 10px 24px rgba(243, 156, 18, 0.14));
       z-index: 2;
     }
 
@@ -543,8 +539,8 @@ $brand-orange-dark: #E67E22;
       width: 48px;
       height: 48px;
       border-radius: 8px;
-      background: #fff;
-      border: 1px solid #f1f5f9;
+      background: var(--aitu-ui-surface, #ffffff);
+      border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     }
 
     .asset-item__info {
@@ -553,12 +549,12 @@ $brand-orange-dark: #E67E22;
 
     .asset-item__name {
       font-size: 13.5px;
-      color: #1e293b;
+      color: var(--aitu-ui-text-primary, #1e293b);
     }
 
     .asset-item__meta {
       font-size: 11px;
-      color: #94a3b8;
+      color: var(--aitu-ui-text-tertiary, #94a3b8);
     }
 
     .asset-item__preview-btn {

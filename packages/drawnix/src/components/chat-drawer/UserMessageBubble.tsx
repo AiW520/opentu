@@ -9,11 +9,16 @@ import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import { copyToClipboard } from '../../utils/runtime-helpers';
 import type { Message } from '../../types/chat-ui.types';
 import { ServiceIcon, LayersIcon, ImageIcon, BulletpointIcon } from 'tdesign-icons-react';
+import type { MediaItem as UnifiedMediaItem } from '../shared/media-preview';
 import './user-message-bubble.scss';
 
 interface UserMessageBubbleProps {
   message: Message;
   className?: string;
+  onPreviewImages?: (
+    items: UnifiedMediaItem[],
+    initialIndex: number
+  ) => void;
 }
 
 interface ImageData {
@@ -29,6 +34,7 @@ interface MetaItem {
 export const UserMessageBubble: React.FC<UserMessageBubbleProps> = ({
   message,
   className = '',
+  onPreviewImages,
 }) => {
   const textRef = useRef<HTMLDivElement>(null);
 
@@ -182,52 +188,74 @@ export const UserMessageBubble: React.FC<UserMessageBubbleProps> = ({
 
   // 判断是否为纯文字消息（无图片、无元数据）
   const isTextOnly = images.length === 0 && (!meta || meta.length === 0);
+  const previewItems: UnifiedMediaItem[] = useMemo(
+    () =>
+      images.map((img, index) => ({
+        id: `${message.id || 'user'}-image-${index}`,
+        url: img.url,
+        type: 'image',
+        alt: img.filename,
+      })),
+    [images, message.id]
+  );
+
+  const handleImageClick = useCallback((index: number, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    onPreviewImages?.(previewItems, index);
+  }, [onPreviewImages, previewItems]);
 
   return (
-    <div className={`user-bubble chat-message chat-message--user ${isTextOnly ? 'user-bubble--text-only' : ''} ${className}`}>
-      <div className="chat-message-avatar">
-        <span>👤</span>
-      </div>
-      <div className="user-bubble__content chat-message-content">
-        {/* 图片网格 */}
-        {images.length > 0 && (
-          <div className={`user-bubble__images user-bubble__images--${Math.min(images.length, 4)}`}>
-            {images.map((img, index) => (
-              <div key={index} className="user-bubble__image-wrapper">
-                <img
-                  src={img.url}
-                  alt={img.filename}
-                  className="user-bubble__image"
-                  loading="lazy"
-                />
-              </div>
-            ))}
-          </div>
-        )}
+    <>
+      <div className={`user-bubble chat-message chat-message--user ${isTextOnly ? 'user-bubble--text-only' : ''} ${className}`}>
+        <div className="chat-message-avatar">
+          <span>👤</span>
+        </div>
+        <div className="user-bubble__content chat-message-content">
+          {/* 图片网格 */}
+          {images.length > 0 && (
+            <div className={`user-bubble__images user-bubble__images--${Math.min(images.length, 4)}`}>
+              {images.map((img, index) => (
+                <div
+                  key={index}
+                  className="user-bubble__image-wrapper"
+                  onClick={(event) => handleImageClick(index, event)}
+                >
+                  <img
+                    src={img.url}
+                    alt={img.filename}
+                    className="user-bubble__image"
+                    loading="lazy"
+                    draggable={false}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* 文本内容 - 仅展示清洗后的用户输入 */}
-        {text && (
-          <div 
-            ref={textRef}
-            className="user-bubble__text user-bubble__text--selectable"
-          >
-            {text}
-          </div>
-        )}
+          {/* 文本内容 - 仅展示清洗后的用户输入 */}
+          {text && (
+            <div
+              ref={textRef}
+              className="user-bubble__text user-bubble__text--selectable"
+            >
+              {text}
+            </div>
+          )}
 
-        {/* 元数据标签 - 独立节点展示 */}
-        {meta && meta.length > 0 && (
-          <div className="user-bubble__meta-tags">
-            {meta.map((item, index) => (
-              <div key={index} className="user-bubble__meta-tag">
-                <span className="user-bubble__meta-icon">{item.icon}</span>
-                <span className="user-bubble__meta-label">{item.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
+          {/* 元数据标签 - 独立节点展示 */}
+          {meta && meta.length > 0 && (
+            <div className="user-bubble__meta-tags">
+              {meta.map((item, index) => (
+                <div key={index} className="user-bubble__meta-tag">
+                  <span className="user-bubble__meta-icon">{item.icon}</span>
+                  <span className="user-bubble__meta-label">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 

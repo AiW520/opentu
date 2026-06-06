@@ -56,11 +56,14 @@ function getThumbnailUrl(originalUrl: string, size: 'small' | 'large' = 'small')
 
 export function MediaLibraryInspector({
   asset,
+  selectedAssets = [],
+  isSelectionMode = false,
   onRename,
   onDelete,
   onDownload,
   onMarkAsSubject,
   onSelect,
+  onSelectMultiple,
   showSelectButton,
   selecting = false,
   selectButtonText = '使用',
@@ -76,6 +79,21 @@ export function MediaLibraryInspector({
 
   // 获取实际文件大小（支持从缓存获取）
   const displaySize = useAssetSize(asset?.id, asset?.url, asset?.size);
+
+  const selectedAssetCount = selectedAssets.length;
+  const selectedImageCount = selectedAssets.filter(
+    (item) => item.type === AssetType.IMAGE
+  ).length;
+  const selectedVideoCount = selectedAssets.filter(
+    (item) => item.type === AssetType.VIDEO
+  ).length;
+  const selectedAudioCount = selectedAssets.filter(
+    (item) => item.type === AssetType.AUDIO
+  ).length;
+  const selectedTotalSize = selectedAssets.reduce(
+    (sum, item) => sum + (item.size || 0),
+    0
+  );
 
   // 检查素材是否为缓存类型（合并图片/视频），并统计画布中使用该素材的元素数量
   const { isCacheAsset, canvasElementCount } = useMemo(() => {
@@ -171,6 +189,14 @@ export function MediaLibraryInspector({
     }
   }, [asset, onSelect, selecting]);
 
+  const handleSelectMultiple = useCallback(async () => {
+    if (!onSelectMultiple || selectedAssets.length === 0 || selecting) {
+      return;
+    }
+
+    await onSelectMultiple(selectedAssets);
+  }, [onSelectMultiple, selectedAssets, selecting]);
+
   // 复制提示词
   const handleCopyPrompt = useCallback(async () => {
     if (asset?.prompt) {
@@ -225,6 +251,76 @@ export function MediaLibraryInspector({
     subjectName,
     subjectPrompt,
   ]);
+
+  if (isSelectionMode) {
+    return (
+      <div className="media-library-inspector media-library-inspector--selection">
+        <div className="media-library-inspector__selection-card">
+          <div className="media-library-inspector__selection-icon">
+            <CheckCircle size={22} />
+          </div>
+          <div className="media-library-inspector__selection-copy">
+            <span className="media-library-inspector__selection-kicker">
+              批量选择
+            </span>
+            <h3 className="media-library-inspector__selection-title">
+              已选 {selectedAssetCount} 个素材
+            </h3>
+            <p className="media-library-inspector__selection-desc">
+              右侧操作会应用到当前筛选结果中已勾选的素材。
+            </p>
+          </div>
+        </div>
+
+        <div className="media-library-inspector__selection-summary">
+          <div className="media-library-inspector__meta-item">
+            <span className="media-library-inspector__meta-label">图片</span>
+            <span className="media-library-inspector__meta-value">
+              {selectedImageCount}
+            </span>
+          </div>
+          <div className="media-library-inspector__meta-item">
+            <span className="media-library-inspector__meta-label">视频</span>
+            <span className="media-library-inspector__meta-value">
+              {selectedVideoCount}
+            </span>
+          </div>
+          <div className="media-library-inspector__meta-item">
+            <span className="media-library-inspector__meta-label">音频</span>
+            <span className="media-library-inspector__meta-value">
+              {selectedAudioCount}
+            </span>
+          </div>
+          <div className="media-library-inspector__meta-item">
+            <span className="media-library-inspector__meta-label">总大小</span>
+            <span className="media-library-inspector__meta-value">
+              {selectedTotalSize > 0 ? formatFileSize(selectedTotalSize) : '-'}
+            </span>
+          </div>
+        </div>
+
+        <div className="media-library-inspector__actions media-library-inspector__actions--batch">
+          {showSelectButton && onSelectMultiple && (
+            <Button
+              theme="primary"
+              block
+              icon={<CheckCircle size={16} />}
+              onClick={() => {
+                void handleSelectMultiple();
+              }}
+              loading={selecting}
+              disabled={selecting || selectedAssetCount === 0}
+              data-track="inspector_batch_use_assets"
+              className="inspector-btn-select"
+            >
+              {selectButtonText}
+              {selectedAssetCount > 0 ? ` (${selectedAssetCount})` : ''}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!asset) {
     return (

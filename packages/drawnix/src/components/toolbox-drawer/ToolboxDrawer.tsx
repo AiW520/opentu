@@ -24,9 +24,9 @@ import { ToolDefinition } from '../../types/toolbox.types';
 import {
   DEFAULT_TOOL_CONFIG,
   TOOL_CATEGORY_LABELS,
-  isBuiltInToolId,
   sortToolCategories,
-} from '../../constants/built-in-tools';
+} from '../../constants/toolbox-shared';
+import { toolRegistry } from '../../tools/registry';
 import { ToolList } from './ToolList';
 import { CustomToolDialog } from '../custom-tool-dialog/CustomToolDialog';
 import { BaseDrawer } from '../side-drawer';
@@ -107,7 +107,7 @@ export const ToolboxDrawer: React.FC<ToolboxDrawerProps> = ({
         console.warn('Board not ready');
         return;
       }
-      const isCustomTool = !isBuiltInToolId(tool.id);
+      const isCustomTool = !toolRegistry.isBuiltInTool(tool.id);
 
       // 计算画布中心位置
       // 使用 Plait 的 getViewportOrigination 获取视口原点
@@ -192,7 +192,7 @@ export const ToolboxDrawer: React.FC<ToolboxDrawerProps> = ({
       // 检查 URL 是否需要 API Key 配置
       const toolUrl = (tool as any).url;
       if (toolUrl && needsApiKeyConfiguration(toolUrl)) {
-        const isCustomTool = !isBuiltInToolId(tool.id);
+        const isCustomTool = !toolRegistry.isBuiltInTool(tool.id);
         analytics.trackUIInteraction({
           area: 'toolbox',
           action: 'api_key_required',
@@ -224,7 +224,7 @@ export const ToolboxDrawer: React.FC<ToolboxDrawerProps> = ({
    */
   const executeToolOpenWindow = useCallback(
     (tool: ToolDefinition) => {
-      const isCustomTool = !isBuiltInToolId(tool.id);
+      const isCustomTool = !toolRegistry.isBuiltInTool(tool.id);
       // 存储原始模板 URL，在渲染时由 ToolWinBoxManager 替换
       toolWindowService.openTool(tool);
 
@@ -271,7 +271,7 @@ export const ToolboxDrawer: React.FC<ToolboxDrawerProps> = ({
       // 检查 URL 是否需要 API Key 配置
       const toolUrl = (tool as any).url;
       if (toolUrl && needsApiKeyConfiguration(toolUrl)) {
-        const isCustomTool = !isBuiltInToolId(tool.id);
+        const isCustomTool = !toolRegistry.isBuiltInTool(tool.id);
         analytics.trackUIInteraction({
           area: 'toolbox',
           action: 'api_key_required',

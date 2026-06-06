@@ -16,6 +16,22 @@ type SearchableAsset = Asset & {
   title?: string;
 };
 
+const INTERNAL_LIBRARY_EXCLUDED_CACHE_SOURCES = new Set([
+  'video-frame',
+  'ai-mask-brush',
+  'ai-mask-reference-resize',
+]);
+
+export function isInternalLibraryExcludedCache(item: {
+  metadata?: Record<string, unknown> | null;
+}): boolean {
+  const source = item.metadata?.source;
+  return (
+    typeof source === 'string' &&
+    INTERNAL_LIBRARY_EXCLUDED_CACHE_SOURCES.has(source)
+  );
+}
+
 /**
  * Validate Asset Name
  * 验证素材名称

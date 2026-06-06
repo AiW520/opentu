@@ -9,7 +9,7 @@
   height: 100%;
   padding: 12px;
   gap: 10px;
-  background: #ffffff;
+  background: var(--aitu-ui-surface, #ffffff);
   min-width: 260px;
   overflow-y: auto;
 
@@ -23,23 +23,23 @@
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #e2e8f0;
+    background: var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     border-radius: 2px;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background: #cbd5e1;
+    background: var(--aitu-ui-border-hover, rgba(15, 23, 42, 0.18));
   }
 
   // 空状态
   &--empty {
     align-items: center;
     justify-content: center;
-    color: #94a3b8;
+    color: var(--aitu-ui-text-tertiary, #94a3b8);
     font-size: 13px;
     text-align: center;
     padding: 40px 20px;
-    background: #f8fafc;
+    background: var(--aitu-ui-surface-subtle, #f8fafc);
 
     p {
       margin: 0;
@@ -53,8 +53,8 @@
     height: 140px;
     border-radius: 12px;
     overflow: hidden;
-    background: #f8fafc;
-    border: 1px solid rgba(0, 0, 0, 0.04);
+    background: var(--aitu-ui-surface-subtle, #f8fafc);
+    border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -66,7 +66,7 @@
       content: '';
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.01) 0%, transparent 70%);
+      background: radial-gradient(circle at 50% 50%, var(--aitu-ui-brand-softer, rgba(243, 156, 18, 0.06)) 0%, transparent 70%);
       pointer-events: none;
     }
   }
@@ -125,7 +125,7 @@
     margin: 0;
     font-size: 14px;
     font-weight: 700;
-    color: #1e293b;
+    color: var(--aitu-ui-text-primary, #1e293b);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -139,14 +139,14 @@
 
     .t-input {
       border-radius: 6px;
-      border-color: rgba(0, 0, 0, 0.1);
+      border-color: var(--aitu-ui-border, rgba(15, 23, 42, 0.1));
       height: 28px;
       font-size: 12px;
 
       &:focus,
       &.t-is-focused {
-        border-color: #000;
-        box-shadow: 0 0 0 1px #000;
+        border-color: var(--aitu-ui-brand, #f39c12);
+        box-shadow: var(--aitu-ui-focus-ring, 0 0 0 3px rgba(243, 156, 18, 0.18));
       }
     }
   }
@@ -157,9 +157,9 @@
     flex-direction: column;
     gap: 0;
     padding: 0;
-    background: #f8fafc;
+    background: var(--aitu-ui-surface-subtle, #f8fafc);
     border-radius: 10px;
-    border: 1px solid rgba(0, 0, 0, 0.03);
+    border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     flex-shrink: 0;
     overflow: hidden;
   }
@@ -172,7 +172,7 @@
     min-height: 32px;
     padding: 0 12px;
     gap: 8px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+    border-bottom: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
     transition: background-color 0.15s ease;
 
     &:last-child {
@@ -180,12 +180,12 @@
     }
 
     &:hover {
-      background: rgba(0, 0, 0, 0.02);
+      background: var(--aitu-ui-brand-softer, rgba(243, 156, 18, 0.06));
     }
   }
 
   &__meta-label {
-    color: #64748b;
+    color: var(--aitu-ui-text-secondary, #64748b);
     font-weight: 500;
     display: flex;
     align-items: center;
@@ -196,12 +196,12 @@
     svg {
       width: 12px;
       height: 12px;
-      color: #94a3b8;
+      color: var(--aitu-ui-text-tertiary, #94a3b8);
     }
   }
 
   &__meta-value {
-    color: #334155;
+    color: var(--aitu-ui-text-primary, #1e293b);
     font-weight: 600;
     text-align: right;
     overflow: hidden;
@@ -210,9 +210,77 @@
     font-family: 'SF Mono', Monaco, monospace;
     font-size: 11px;
     flex-shrink: 1;
-    background: rgba(0, 0, 0, 0.02);
+    background: var(--aitu-ui-surface-muted, #f1f5f9);
     padding: 2px 8px;
     border-radius: 4px;
+  }
+
+  // ========== 批量选择摘要 ==========
+  &--selection {
+    background: linear-gradient(
+      180deg,
+      var(--aitu-ui-surface, #ffffff) 0%,
+      var(--aitu-ui-surface-subtle, #f8fafc) 100%
+    );
+  }
+
+  &__selection-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28));
+    border-radius: 12px;
+    background: var(--aitu-ui-brand-softer, rgba(243, 156, 18, 0.06));
+  }
+
+  &__selection-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--aitu-ui-brand-text, #b45309);
+    background: var(--aitu-ui-brand-soft, rgba(243, 156, 18, 0.12));
+    flex-shrink: 0;
+  }
+
+  &__selection-copy {
+    min-width: 0;
+  }
+
+  &__selection-kicker {
+    display: block;
+    color: var(--aitu-ui-brand-text, #b45309);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 7px;
+  }
+
+  &__selection-title {
+    margin: 0;
+    color: var(--aitu-ui-text-primary, #1e293b);
+    font-size: 16px;
+    line-height: 1.3;
+  }
+
+  &__selection-desc {
+    margin: 7px 0 0;
+    color: var(--aitu-ui-text-secondary, #64748b);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  &__selection-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
+    border-radius: 10px;
+    background: var(--aitu-ui-surface, #ffffff);
+    overflow: hidden;
   }
 
   // ========== 提示词区域 ==========
@@ -221,10 +289,10 @@
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    background: #ffffff;
+    background: var(--aitu-ui-surface, #ffffff);
     border-radius: 12px;
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+    border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
+    box-shadow: var(--aitu-ui-shadow-soft, 0 2px 10px rgba(15, 23, 42, 0.06));
     flex: 1;
     min-height: 120px;
     overflow: hidden;
@@ -245,7 +313,7 @@
   &__prompt-label {
     font-size: 12px;
     font-weight: 700;
-    color: #1e293b;
+    color: var(--aitu-ui-text-primary, #1e293b);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -254,7 +322,7 @@
       content: '';
       width: 3px;
       height: 12px;
-      background: #000;
+      background: var(--aitu-ui-brand, #f39c12);
       border-radius: 2px;
     }
   }
@@ -262,15 +330,15 @@
   &__prompt-content {
     font-size: 12px;
     line-height: 1.6;
-    color: #475569;
+    color: var(--aitu-ui-text-secondary, #64748b);
     overflow-y: auto;
     flex: 1;
     word-break: break-word;
     white-space: pre-wrap;
     padding: 8px;
-    background: #f8fafc;
+    background: var(--aitu-ui-surface-subtle, #f8fafc);
     border-radius: 6px;
-    border: 1px solid rgba(0, 0, 0, 0.04);
+    border: 1px solid var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
 
     // 自定义滚动条
     &::-webkit-scrollbar {
@@ -282,7 +350,7 @@
     }
 
     &::-webkit-scrollbar-thumb {
-      background: #e2e8f0;
+      background: var(--aitu-ui-border-subtle, rgba(15, 23, 42, 0.06));
       border-radius: 2px;
     }
   }
@@ -340,40 +408,50 @@
       grid-template-columns: repeat(2, 1fr);
     }
 
+    &--batch {
+      grid-template-columns: 1fr;
+      margin-top: auto;
+
+      .inspector-btn-select {
+        min-height: 40px;
+      }
+    }
+
     // 主要按钮 - 素雅风格
     .t-button--theme-primary {
-      background: #000 !important;
-      border: none !important;
-      color: #ffffff !important;
+      background: var(--aitu-ui-brand, #f39c12) !important;
+      border: 1px solid var(--aitu-ui-brand, #f39c12) !important;
+      color: var(--aitu-ui-text-inverse, #ffffff) !important;
       
       &:hover {
-        background: #222 !important;
+        background: var(--aitu-ui-brand-hover, #e67e22) !important;
+        border-color: var(--aitu-ui-brand-hover, #e67e22) !important;
       }
     }
 
     // 次要按钮
     .t-button--variant-outline {
-      border-color: rgba(0, 0, 0, 0.1);
-      color: #475569;
-      background: #ffffff;
+      border-color: var(--aitu-ui-border, rgba(15, 23, 42, 0.1));
+      color: var(--aitu-ui-text-secondary, #64748b);
+      background: var(--aitu-ui-surface, #ffffff);
 
       &:hover {
-        border-color: rgba(0, 0, 0, 0.2);
-        color: #000;
-        background: #f8fafc;
+        border-color: var(--aitu-ui-brand-border-soft, rgba(243, 156, 18, 0.28));
+        color: var(--aitu-ui-brand-text, #b45309);
+        background: var(--aitu-ui-brand-softer, rgba(243, 156, 18, 0.06));
       }
     }
 
     // 危险按钮 - 弱化风格
     .t-button--theme-danger {
-      background: rgba(220, 53, 69, 0.05) !important;
-      border: 1px solid rgba(220, 53, 69, 0.15) !important;
-      color: #dc3545 !important;
+      background: var(--aitu-ui-danger-soft, rgba(233, 30, 99, 0.08)) !important;
+      border: 1px solid var(--aitu-ui-danger-border, rgba(233, 30, 99, 0.24)) !important;
+      color: var(--aitu-ui-danger, #e91e63) !important;
 
       &:hover {
-        background: #dc3545 !important;
-        color: #ffffff !important;
-        border-color: #dc3545 !important;
+        background: var(--aitu-ui-danger, #e91e63) !important;
+        color: var(--aitu-ui-text-inverse, #ffffff) !important;
+        border-color: var(--aitu-ui-danger, #e91e63) !important;
       }
     }
   }
@@ -390,12 +468,12 @@
     gap: 6px;
     font-size: 12px;
     font-weight: 600;
-    color: #1e293b;
+    color: var(--aitu-ui-text-primary, #1e293b);
   }
 
   &__subject-hint {
     margin: -4px 0 0;
-    color: #64748b;
+    color: var(--aitu-ui-text-secondary, #64748b);
     font-size: 12px;
     line-height: 1.5;
   }
@@ -404,22 +482,22 @@
     width: 100%;
     min-height: 88px;
     resize: vertical;
-    border: 1px solid #dcdfe6;
+    border: 1px solid var(--aitu-ui-border, rgba(15, 23, 42, 0.1));
     border-radius: 6px;
     padding: 8px 10px;
     font-size: 12px;
     line-height: 1.5;
-    color: #1e293b;
+    color: var(--aitu-ui-text-primary, #1e293b);
     outline: none;
 
     &:focus {
-      border-color: #000;
-      box-shadow: 0 0 0 1px #000;
+      border-color: var(--aitu-ui-brand, #f39c12);
+      box-shadow: var(--aitu-ui-focus-ring, 0 0 0 3px rgba(243, 156, 18, 0.18));
     }
 
     &:disabled {
-      color: #94a3b8;
-      background: #f8fafc;
+      color: var(--aitu-ui-text-tertiary, #94a3b8);
+      background: var(--aitu-ui-surface-subtle, #f8fafc);
       cursor: not-allowed;
     }
   }

@@ -426,6 +426,15 @@ $ai-input-small-expanded-max-height: $ai-input-small-line-height * 6 +
     }
   }
 
+  .ai-input-composer-shell__prompt-row {
+    position: relative;
+    width: 100%;
+  }
+
+  .ai-input-composer-shell--disabled {
+    opacity: 0.72;
+  }
+
   // Left tools area
   &__tools {
     display: flex;

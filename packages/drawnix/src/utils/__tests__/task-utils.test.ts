@@ -55,7 +55,7 @@ describe('task-utils', () => {
       expect(isResumableAsyncImageTask(task)).toBe(false);
     });
 
-    it('does not treat sync image bindings as resumable async work', () => {
+    it('treats any image task with remoteId as resumable', () => {
       const task = createImageTask({
         remoteId: 'remote-task-1',
         invocationRoute: {
@@ -67,7 +67,7 @@ describe('task-utils', () => {
         },
       });
 
-      expect(isResumableAsyncImageTask(task)).toBe(false);
+      expect(isResumableAsyncImageTask(task)).toBe(true);
     });
   });
 });

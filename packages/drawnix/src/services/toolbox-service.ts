@@ -7,7 +7,7 @@
 
 import localforage from 'localforage';
 import { ToolDefinition, ToolCategory } from '../types/toolbox.types';
-import { BUILT_IN_TOOLS } from '../constants/built-in-tools';
+import { toolRegistry } from '../tools/registry';
 
 /**
  * 自定义工具存储格式
@@ -50,15 +50,14 @@ class ToolboxService {
    * 获取所有可用工具
    */
   getAvailableTools(): ToolDefinition[] {
-    return [...BUILT_IN_TOOLS, ...this.customTools];
+    return [...toolRegistry.getBuiltInTools(), ...this.customTools];
   }
 
   /**
    * 根据 ID 获取工具定义
    */
   getToolById(id: string): ToolDefinition | null {
-    const allTools = this.getAvailableTools();
-    return allTools.find(tool => tool.id === id) || null;
+    return toolRegistry.getManifestById(id) || this.customTools.find((tool) => tool.id === id) || null;
   }
 
   /**

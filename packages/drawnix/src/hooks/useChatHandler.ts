@@ -62,6 +62,10 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
     newMessages: Message[],
     rawChatMessages?: ChatMessage[]
   ) => void;
+  appendMessagesWithRaw: (
+    newMessages: Message[],
+    rawChatMessages?: ChatMessage[]
+  ) => void;
   updateRawMessageWorkflow: (
     messageId: string,
     workflow: WorkflowMessageData
@@ -421,6 +425,16 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
     []
   );
 
+  const appendMessagesWithRaw = useCallback(
+    (newMessages: Message[], rawChatMessages?: ChatMessage[]) => {
+      setMessages((prev) => [...prev, ...newMessages]);
+      if (rawChatMessages) {
+        rawMessagesRef.current = [...rawMessagesRef.current, ...rawChatMessages];
+      }
+    },
+    []
+  );
+
   // 更新原始消息中的工作流数据（用于工作流更新场景）
   const updateRawMessageWorkflow = useCallback(
     (messageId: string, workflow: WorkflowMessageData) => {
@@ -439,6 +453,7 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
     regenerate,
     setMessages,
     setMessagesWithRaw,
+    appendMessagesWithRaw,
     updateRawMessageWorkflow,
     isLoading,
   };

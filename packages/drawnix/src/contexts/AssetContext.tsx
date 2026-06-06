@@ -59,6 +59,7 @@ import {
   isAssetLibraryUrl,
   isLegacyCacheUrl,
 } from '../utils/virtual-media-url';
+import { isInternalLibraryExcludedCache } from '../utils/asset-utils';
 
 /**
  * Asset Provider Props
@@ -152,12 +153,6 @@ function buildCharacterMeta(input: {
       : undefined;
 
   return name || prompt ? { ...(name && { name }), ...(prompt && { prompt }) } : undefined;
-}
-
-function isInternalLibraryExcludedCache(
-  item: Pick<CachedMedia, 'metadata'>
-): boolean {
-  return item.metadata?.source === 'video-frame';
 }
 
 function getNormalizedClipId(asset: Pick<Asset, 'clipId'>): string | undefined {

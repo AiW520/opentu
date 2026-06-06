@@ -1,3 +1,67 @@
+## 0.9.9 (2026-05-18)
+
+### 🚀 Features
+
+- 供应商设置增加「图片优先使用异步接口」开关 ([1fc6aadc](https://github.com/ljquan/aitu/commit/1fc6aadc))
+
+### 🩹 Fixes
+
+- 异步接口开关持久化 + 图片任务刷新后恢复轮询 ([08f05614](https://github.com/ljquan/aitu/commit/08f05614))
+
+### 🔧 Chores
+
+- 修复：同步聊天抽屉素材库批量选择 ([06fee16e](https://github.com/ljquan/aitu/commit/06fee16e))
+- 更新应用版本到 0.9.8 ([a70d1053](https://github.com/ljquan/aitu/commit/a70d1053))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.9.8 (2026-05-17)
+
+### 🚀 Features
+
+- 添加批量插入功能 ([344c28a2](https://github.com/ljquan/aitu/commit/344c28a2))
+- improve chat drawer workflow generation ([5da07cac](https://github.com/ljquan/aitu/commit/5da07cac))
+
+### 🩹 Fixes
+
+- split batch media action copy by target context ([3332459b](https://github.com/ljquan/aitu/commit/3332459b))
+- support bulk media insertion and image generation compatibility ([3156c1ac](https://github.com/ljquan/aitu/commit/3156c1ac))
+
+### 🔧 Chores
+
+- bump version to 0.9.7 ([35aba9f3](https://github.com/ljquan/aitu/commit/35aba9f3))
+- Refactor canvas batch insertion to viewport flow layout ([04f42a12](https://github.com/ljquan/aitu/commit/04f42a12))
+- 修复对话输入框内层描边并抽出共享壳 ([8be4a467](https://github.com/ljquan/aitu/commit/8be4a467))
+- 聊天抽屉图片预览收口到列表层 ([8afea976](https://github.com/ljquan/aitu/commit/8afea976))
+- 补充首屏壳层与 chunk 守门经验 ([f8f4b8f7](https://github.com/ljquan/aitu/commit/f8f4b8f7))
+- 修复素材库配色与多选架构，补充UI规范和架构说明 ([8c233640](https://github.com/ljquan/aitu/commit/8c233640))
+- 修复：蒙版预览缓存不进入素材库 ([94dbf95e](https://github.com/ljquan/aitu/commit/94dbf95e))
+- Bump web app version to 0.9.7 ([3bc2abe0](https://github.com/ljquan/aitu/commit/3bc2abe0))
+- revert: restore original image generation behavior ([e12dec48](https://github.com/ljquan/aitu/commit/e12dec48))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+- lichenyi <lichenyi@qq.com>
+- SaulgoodMan-C <271131037+SaulgoodMan-C@users.noreply.github.com>
+
+## 0.9.7 (2026-05-09)
+
+### 🩹 Fixes
+
+- 修复批量导入图片弹窗显示异常 ([77e6df4c](https://github.com/ljquan/aitu/commit/77e6df4c))
+
+### 🔧 Chores
+
+- 更新版本号至0.9.6并同步构建时间 ([9b9fb552](https://github.com/ljquan/aitu/commit/9b9fb552))
+
+### ❤️  Thank You
+
+- gongchengtu <1817063960@qq.com>
+- liquid <ljquan@qq.com>
+
 ## 0.9.6 (2026-05-06)
 
 ### 🚀 Features

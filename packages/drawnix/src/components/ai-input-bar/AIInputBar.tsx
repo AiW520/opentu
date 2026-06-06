@@ -49,7 +49,10 @@ import {
   scrollToPointIfNeeded,
 } from '../../utils/selection-utils';
 import { useTextSelection } from '../../hooks/useTextSelection';
-import { useChatDrawerControl } from '../../contexts/ChatDrawerContext';
+import {
+  useChatDrawerControl,
+  type DrawerGenerationSubmitParams,
+} from '../../contexts/ChatDrawerContext';
 import { useAssets } from '../../contexts/AssetContext';
 import { useModelHealthContext } from '../../contexts/ModelHealthContext';
 import {
@@ -83,7 +86,6 @@ import {
   type ModelConfig,
 } from '../../constants/model-config';
 import { getEffectiveVideoCompatibleParams } from '../../services/video-binding-utils';
-import { BUILT_IN_TOOLS } from '../../constants/built-in-tools';
 import { initializeMCP, mcpRegistry } from '../../mcp';
 import { setCanvasBoard } from '../../services/canvas-operations/canvas-insertion';
 import { setCanvasBoard as setMcpCanvasBoard } from '../../mcp/tools/canvas-insertion';
@@ -128,6 +130,7 @@ import {
 } from '../../utils/posthog-analytics';
 import classNames from 'classnames';
 import { InspirationBoard } from '../inspiration-board';
+import { AIInputComposerShell } from './AIInputComposerShell';
 import { GenerationTypeDropdown } from './GenerationTypeDropdown';
 import { CountDropdown } from './CountDropdown';
 import './ai-input-bar.scss';
@@ -146,7 +149,6 @@ import {
   type ImageGenerationAnchorPresentationState,
 } from '../../utils/image-generation-anchor-state';
 import { WorkZoneTransforms } from '../../plugins/with-workzone';
-import { toolWindowService } from '../../services/tool-window-service';
 import { useWorkflowSubmission } from '../../hooks/useWorkflowSubmission';
 import { isFrameElement } from '../../types/frame.types';
 import { matchFrameSizeForModel } from '../../utils/frame-size-matcher';
@@ -172,6 +174,12 @@ import {
   type AIInputPrefillEventDetail,
 } from '../../services/ai-input-ui-events';
 import { normalizeKnowledgeContextRefs } from '../../services/generation-context-service';
+import {
+  ensureTaskIdInStepResult,
+  extractTaskIdFromStepResult,
+  findWorkflowStepByTaskId,
+  findWorkflowStepForTask,
+} from '../../utils/workflow-task-linking';
 
 /**
  * 将 WorkflowDefinition 转换为 WorkflowMessageData
@@ -213,6 +221,13 @@ function toWorkflowMessageData(
     postProcessingStatus,
     insertedCount,
   };
+}
+
+function areAllWorkflowStepsCompleted(workflow: WorkflowDefinition): boolean {
+  return (
+    workflow.steps.length > 0 &&
+    workflow.steps.every((step) => step.status === 'completed')
+  );
 }
 
 function toPromptAnalyticsType(
@@ -384,6 +399,17 @@ interface SelectedContent {
   name: string; // 显示名称
   width?: number; // 图片/视频宽度
   height?: number; // 图片/视频高度
+}
+
+interface GenerationRequestOverride {
+  prompt: string;
+  content: SelectedContent[];
+  generationType: GenerationType;
+  selectedModel: string;
+  selectedModelRef?: ModelRef | null;
+  selectedParams: Record<string, string>;
+  selectedCount: number;
+  appendToCurrentChatSession?: boolean;
 }
 
 function getSelectionKeyForModel(
@@ -800,6 +826,11 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
       chatDrawerControl.updateWorkflowMessage
     );
     updateWorkflowMessageRef.current = chatDrawerControl.updateWorkflowMessage;
+    const syncWorkflowTaskUpdateRef = useRef(
+      chatDrawerControl.syncWorkflowTaskUpdate
+    );
+    syncWorkflowTaskUpdateRef.current =
+      chatDrawerControl.syncWorkflowTaskUpdate;
     const appendAgentLogRef = useRef(chatDrawerControl.appendAgentLog);
     appendAgentLogRef.current = chatDrawerControl.appendAgentLog;
     const updateThinkingContentRef = useRef(
@@ -812,6 +843,11 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
       chatDrawerControl.registerRetryHandler
     );
     registerRetryHandlerRef.current = chatDrawerControl.registerRetryHandler;
+    const registerGenerationSubmitterRef = useRef(
+      chatDrawerControl.registerGenerationSubmitter
+    );
+    registerGenerationSubmitterRef.current =
+      chatDrawerControl.registerGenerationSubmitter;
 
     // 当前工作流的重试上下文（用于在更新时保持 retryContext）
     const currentRetryContextRef = useRef<WorkflowRetryContext | null>(null);
@@ -1071,7 +1107,8 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     const [isFocused, setIsFocused] = useState(false);
     const [isPromptManuallyExpanded, setIsPromptManuallyExpanded] =
       useState(false);
-    const [canPromptManuallyExpand, setCanPromptManuallyExpand] = useState(false);
+    const [canPromptManuallyExpand, setCanPromptManuallyExpand] =
+      useState(false);
     const [isCanvasEmpty, setIsCanvasEmpty] = useState<boolean | null>(null); // null=加载中, true=空, false=有内容
     // 当前选中的生成类型（图片、视频、Agent）
     const [generationType, setGenerationType] = useState<GenerationType>(
@@ -1633,15 +1670,15 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
         .observeTaskUpdates()
         .subscribe((event) => {
           const task = event.task;
+          syncWorkflowTaskUpdateRef.current(task);
+
           const workflow = workflowControl.getWorkflow();
 
           if (!workflow) return;
 
-          // 查找与此任务关联的步骤
-          const step = workflow.steps.find((s) => {
-            const result = s.result as { taskId?: string } | undefined;
-            return result?.taskId === task.id;
-          });
+          // 查找与此任务关联的步骤。图片锚点链路里，任务完成事件可能先于
+          // taskId 写入步骤抵达，所以除 result.taskId 外还按 workflowId/batchIndex 兜底。
+          const step = findWorkflowStepForTask(workflow, task);
 
           if (!step) return;
 
@@ -1658,19 +1695,26 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           switch (task.status) {
             case TaskStatus.PENDING:
             case TaskStatus.PROCESSING:
+              workflowControl.resumeWorkflow();
               newStatus = 'running';
+              stepResult = ensureTaskIdInStepResult(stepResult, task.id);
+              stepError = undefined;
               break;
             case TaskStatus.COMPLETED:
               newStatus = 'completed';
               // 添加任务结果信息
               stepResult = {
-                ...(typeof stepResult === 'object' ? stepResult : {}),
+                ...(stepResult && typeof stepResult === 'object'
+                  ? stepResult
+                  : {}),
                 taskId: task.id,
                 result: task.result,
               };
+              stepError = undefined;
               break;
             case TaskStatus.FAILED:
               newStatus = 'failed';
+              stepResult = ensureTaskIdInStepResult(stepResult, task.id);
               stepError = task.error?.message || '任务执行失败';
               break;
             case TaskStatus.CANCELLED:
@@ -1679,7 +1723,17 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           }
 
           // 只有状态变化时才更新
-          if (newStatus !== step.status) {
+          const nextTaskId = extractTaskIdFromStepResult(stepResult);
+          const previousTaskId = extractTaskIdFromStepResult(step.result);
+          const shouldForceImageCompletionSync =
+            workflow.generationType === 'image' &&
+            task.status === TaskStatus.COMPLETED;
+          if (
+            newStatus !== step.status ||
+            nextTaskId !== previousTaskId ||
+            stepError !== step.error ||
+            shouldForceImageCompletionSync
+          ) {
             workflowControl.updateStep(
               step.id,
               newStatus,
@@ -1711,9 +1765,19 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
             // 同步更新 ChatDrawer 中的工作流消息
             const updatedWorkflow = workflowControl.getWorkflow();
             if (updatedWorkflow) {
+              const shouldMarkImageWorkflowCompleted =
+                updatedWorkflow.generationType === 'image' &&
+                areAllWorkflowStepsCompleted(updatedWorkflow);
+              if (shouldMarkImageWorkflowCompleted) {
+                postProcessingStatusRef.current = 'completed';
+              }
               const workflowData = toWorkflowMessageData(
                 updatedWorkflow,
-                currentRetryContextRef.current || undefined
+                currentRetryContextRef.current || undefined,
+                shouldMarkImageWorkflowCompleted
+                  ? 'completed'
+                  : postProcessingStatusRef.current,
+                insertedCountRef.current
               );
               updateWorkflowMessageRef.current(workflowData);
 
@@ -1748,10 +1812,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           const workflow = workflowControl.getWorkflow();
 
           // 查找与此任务关联的步骤（即使 workflow 为 null 也继续处理 postProcessingCompleted）
-          const step = workflow?.steps.find((s) => {
-            const result = s.result as { taskId?: string } | undefined;
-            return result?.taskId === event.taskId;
-          });
+          const eventTask = taskQueueService.getTask(event.taskId);
+          const step = eventTask
+            ? findWorkflowStepForTask(workflow, eventTask)
+            : findWorkflowStepByTaskId(workflow, event.taskId);
 
           // 更新后处理状态
           let newPostProcessingStatus: PostProcessingStatus | undefined;
@@ -1779,12 +1843,50 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
 
           // 同步更新 ChatDrawer 中的工作流消息（仅当 workflow 和 step 都存在时）
           if (workflow && step) {
+            const stepTaskId = extractTaskIdFromStepResult(step.result);
+            if (!stepTaskId && eventTask) {
+              workflowControl.updateStep(
+                step.id,
+                step.status,
+                ensureTaskIdInStepResult(step.result, event.taskId),
+                step.error,
+                step.duration
+              );
+            }
+
+            if (
+              event.type === 'postProcessingCompleted' &&
+              step.status !== 'completed' &&
+              eventTask?.status === TaskStatus.COMPLETED
+            ) {
+              workflowControl.updateStep(
+                step.id,
+                'completed',
+                {
+                  ...ensureTaskIdInStepResult(step.result, event.taskId),
+                  result: eventTask.result,
+                },
+                undefined,
+                step.duration
+              );
+            }
+
             const updatedWorkflow = workflowControl.getWorkflow();
             if (updatedWorkflow) {
+              const shouldKeepImageWorkflowCompleted =
+                updatedWorkflow.generationType === 'image' &&
+                areAllWorkflowStepsCompleted(updatedWorkflow);
+              const workflowPostProcessingStatus =
+                shouldKeepImageWorkflowCompleted
+                  ? 'completed'
+                  : newPostProcessingStatus;
+              if (workflowPostProcessingStatus === 'completed') {
+                postProcessingStatusRef.current = 'completed';
+              }
               const workflowData = toWorkflowMessageData(
                 updatedWorkflow,
                 currentRetryContextRef.current || undefined,
-                newPostProcessingStatus,
+                workflowPostProcessingStatus,
                 insertedCountRef.current
               );
               updateWorkflowMessageRef.current(workflowData);
@@ -1935,7 +2037,8 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
         }
 
         return confirm({
-          title: language === 'zh' ? '覆盖当前输入？' : 'Overwrite current input?',
+          title:
+            language === 'zh' ? '覆盖当前输入？' : 'Overwrite current input?',
           description:
             language === 'zh'
               ? '底部输入框已有提示词或参考图，继续会覆盖当前输入。'
@@ -2075,7 +2178,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
 
       window.addEventListener(AI_INPUT_PREFILL_EVENT, handleAIInputPrefill);
       return () => {
-        window.removeEventListener(AI_INPUT_PREFILL_EVENT, handleAIInputPrefill);
+        window.removeEventListener(
+          AI_INPUT_PREFILL_EVENT,
+          handleAIInputPrefill
+        );
       };
     }, [
       audioModels,
@@ -2151,8 +2257,12 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     );
 
     // 处理添加 Skill：打开知识库并定位到 Skill 目录，自动新建笔记
-    const handleAddSkill = useCallback(() => {
-      const tool = BUILT_IN_TOOLS.find((t) => t.id === 'knowledge-base');
+    const handleAddSkill = useCallback(async () => {
+      const [{ toolRegistry }, { toolWindowService }] = await Promise.all([
+        import('../../tools/registry'),
+        import('../../services/tool-window-service'),
+      ]);
+      const tool = toolRegistry.getManifestById('knowledge-base');
       if (!tool) return;
 
       // 先存储待处理的导航意图（防止组件还未挂载时事件丢失）
@@ -2175,9 +2285,13 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
 
     // 处理打开提示词工具（香蕉提示词）- 通过 WinBox 弹窗方式打开
     const handleOpenPromptTool = useCallback(
-      (source = 'ai_input_bar') => {
+      async (source = 'ai_input_bar') => {
+        const [{ toolRegistry }, { toolWindowService }] = await Promise.all([
+          import('../../tools/registry'),
+          import('../../services/tool-window-service'),
+        ]);
         // 从内置工具列表中获取香蕉提示词工具配置
-        const tool = BUILT_IN_TOOLS.find((t) => t.id === 'banana-prompt');
+        const tool = toolRegistry.getManifestById('banana-prompt');
         if (!tool) {
           console.warn('[AIInputBar] Banana prompt tool not found');
           analytics.trackPromptAction({
@@ -2252,16 +2366,19 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     );
 
     // 处理素材库选择
-    const handleMediaLibrarySelect = useCallback(async (asset: Asset) => {
-      try {
-        const newContent = await assetToSelectedContent(asset);
-        setUploadedContent((prev) => [...prev, newContent]);
-        setShowMediaLibrary(false);
-      } catch (error) {
-        console.error('Failed to select asset from library:', error);
-        setShowMediaLibrary(false);
-      }
-    }, [assetToSelectedContent]);
+    const handleMediaLibrarySelect = useCallback(
+      async (asset: Asset) => {
+        try {
+          const newContent = await assetToSelectedContent(asset);
+          setUploadedContent((prev) => [...prev, newContent]);
+          setShowMediaLibrary(false);
+        } catch (error) {
+          console.error('Failed to select asset from library:', error);
+          setShowMediaLibrary(false);
+        }
+      },
+      [assetToSelectedContent]
+    );
 
     const handleMediaLibrarySelectMultiple = useCallback(
       async (assets: Asset[]) => {
@@ -2513,6 +2630,8 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           url: c.url,
           text: c.text,
           name: c.name,
+          width: c.width,
+          height: c.height,
         }))
       );
     }, [allContent]);
@@ -2915,722 +3034,837 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     );
 
     // Handle generation
-    const handleGenerate = useCallback(async (trigger: AIInputSubmitTrigger) => {
-      const trimmedPrompt = prompt.trim();
-      if (!trimmedPrompt && allContent.length === 0) {
-        return;
-      }
-      if (submitLockRef.current || isSubmitting) {
-        return; // 仅防止快速重复点击
-      }
-      submitLockRef.current = true;
-      setIsInspirationSendGuideActive(false);
-      onEnableRuntime?.();
-
-      const submitStartTime = Date.now();
-      const promptLength = trimmedPrompt.length;
-      const submitAnalyticsBase = {
-        trigger,
-        source: 'ai_input_bar',
-        generationType,
-        generation_type: generationType,
-        model: selectedModel,
-        profileId: selectedModelRef?.profileId || null,
-        profile_id: selectedModelRef?.profileId || null,
-        hasAttachedContent: allContent.length > 0,
-        has_attached_content: allContent.length > 0,
-        attachedCount: allContent.length,
-        attached_count: allContent.length,
-        knowledgeContextCount: knowledgeContextRefs.length,
-        knowledge_context_count: knowledgeContextRefs.length,
-        promptLength,
-        prompt_length: promptLength,
-        promptLengthBucket: getPromptLengthBucket(promptLength),
-        prompt_length_bucket: getPromptLengthBucket(promptLength),
-      };
-      const trackSubmitStatus = (
-        status: 'start' | 'success' | 'failed' | 'cancelled',
-        extras: Record<string, unknown> = {}
+    const handleGenerate = useCallback(
+      async (
+        triggerOrOverride:
+          | AIInputSubmitTrigger
+          | GenerationRequestOverride = 'button'
       ) => {
-        const durationMs = Date.now() - submitStartTime;
-        analytics.track('ai_input_submit', {
-          ...submitAnalyticsBase,
-          status,
-          durationMs,
-          duration_ms: durationMs,
-          ...extras,
-        });
-      };
+        const override =
+          typeof triggerOrOverride === 'string' ? undefined : triggerOrOverride;
+        const trigger =
+          typeof triggerOrOverride === 'string' ? triggerOrOverride : 'button';
+        const effectivePrompt = override?.prompt ?? prompt;
+        const effectiveContent = override?.content ?? allContent;
+        const effectiveGenerationType =
+          override?.generationType ?? generationType;
+        const effectiveSelectedModel = override?.selectedModel ?? selectedModel;
+        const effectiveSelectedModelRef =
+          override?.selectedModelRef ?? selectedModelRef;
+        const effectiveSelectedParams =
+          override?.selectedParams ?? selectedParams;
+        const effectiveSelectedCount = override?.selectedCount ?? selectedCount;
+        const appendToCurrentChatSession =
+          override?.appendToCurrentChatSession ?? false;
+        const shouldClearLocalInput = !override;
+        const effectiveKnowledgeContextRefs = override
+          ? []
+          : knowledgeContextRefs;
+        const trimmedPrompt = effectivePrompt.trim();
 
-      trackSubmitStatus('start');
-      setIsSubmitting(true);
-
-      try {
-        // 检查 API key，如果没有配置则弹窗获取
-        const currentRouteType =
-          generationType === 'video'
-            ? 'video'
-            : generationType === 'audio'
-            ? 'audio'
-            : generationType === 'text' || generationType === 'agent'
-            ? 'text'
-            : 'image';
-        const hasRouteCredentials = hasInvocationRouteCredentials(
-          currentRouteType,
-          selectedModelRef || selectedModel
-        );
-        if (!hasRouteCredentials) {
-          const newApiKey = await promptForApiKey();
-          if (!newApiKey) {
-            trackSubmitStatus('cancelled', {
-              reason: 'missing_api_key',
-              submitMode: 'preflight',
-              submit_mode: 'preflight',
-            });
-            submitLockRef.current = false;
-            setIsSubmitting(false);
-            return;
-          }
+        if (!trimmedPrompt && effectiveContent.length === 0) {
+          return;
         }
+        if (submitLockRef.current || isSubmitting) {
+          return; // 仅防止快速重复点击
+        }
+        submitLockRef.current = true;
+        setIsInspirationSendGuideActive(false);
+        onEnableRuntime?.();
 
-        // 构建选中元素的分类信息（使用合并后的 allContent）
-        // 收集图片和图形的尺寸信息（按顺序：先 images，后 graphics）
-        const imageItems = allContent.filter(
-          (item) => item.type === 'image' && item.url
-        );
-        const graphicsItems = allContent.filter(
-          (item) => item.type === 'graphics' && item.url
-        );
-        const imageDimensions = [...imageItems, ...graphicsItems]
-          .map((item) => {
-            if (item.width && item.height) {
-              return { width: item.width, height: item.height };
-            }
-            return undefined;
-          })
-          .filter(
-            (dim): dim is { width: number; height: number } => dim !== undefined
-          );
-
-        const selection = {
-          texts: allContent
-            .filter((item) => item.type === 'text' && item.text)
-            .map((item) => item.text!),
-          images: imageItems.map((item) => item.url!),
-          videos: allContent
-            .filter((item) => item.type === 'video' && item.url)
-            .map((item) => item.url!),
-          graphics: graphicsItems.map((item) => item.url!),
-          // 添加图片尺寸信息（始终传递数组，避免下游处理 undefined）
-          imageDimensions: imageDimensions,
-          maskImage:
-            imageItems.length === 1 && graphicsItems.length === 0
-              ? imageItems[0].maskImage
-              : undefined,
+        const submitStartTime = Date.now();
+        const promptLength = trimmedPrompt.length;
+        const submitAnalyticsBase = {
+          trigger,
+          source: override ? 'chat_drawer' : 'ai_input_bar',
+          generationType: effectiveGenerationType,
+          generation_type: effectiveGenerationType,
+          model: effectiveSelectedModel,
+          profileId: effectiveSelectedModelRef?.profileId || null,
+          profile_id: effectiveSelectedModelRef?.profileId || null,
+          hasAttachedContent: effectiveContent.length > 0,
+          has_attached_content: effectiveContent.length > 0,
+          attachedCount: effectiveContent.length,
+          attached_count: effectiveContent.length,
+          knowledgeContextCount: effectiveKnowledgeContextRefs.length,
+          knowledge_context_count: effectiveKnowledgeContextRefs.length,
+          promptLength,
+          prompt_length: promptLength,
+          promptLengthBucket: getPromptLengthBucket(promptLength),
+          prompt_length_bucket: getPromptLengthBucket(promptLength),
+        };
+        const trackSubmitStatus = (
+          status: 'start' | 'success' | 'failed' | 'cancelled',
+          extras: Record<string, unknown> = {}
+        ) => {
+          const durationMs = Date.now() - submitStartTime;
+          analytics.track('ai_input_submit', {
+            ...submitAnalyticsBase,
+            status,
+            durationMs,
+            duration_ms: durationMs,
+            ...extras,
+          });
         };
 
-        // 解析输入内容，使用选中的模型和尺寸
-        const parsedParams = parseAIInput(prompt, selection, {
-          modelId: selectedModel,
-          modelRef: selectedModelRef,
-          params: selectedParams,
-          generationType: generationType,
-          count: selectedCount,
-          knowledgeContextRefs,
-          defaultModels:
-            generationType === 'agent' ? agentMediaDefaultModels : undefined,
-          defaultModelRefs:
-            generationType === 'agent' ? agentMediaDefaultModelRefs : undefined,
-        });
+        setIsSubmitting(true);
+        trackSubmitStatus('start');
 
-        // 收集所有参考媒体（图片 + 图形 + 视频）
-        const referenceImages = [...selection.images, ...selection.graphics];
-
-        // 创建工作流定义（仅用于 WorkZone 显示，实际工作流由 submitWorkflowToSW 创建）
-        let workflow: WorkflowDefinition;
-        if (generationType === 'agent' && selectedSkillId !== SKILL_AUTO_ID) {
-          // Skill 模式：根据 skillId 决定使用系统内置 Skill 还是用户自定义 Skill
-          const systemSkill = findSystemSkillById(selectedSkillId);
-          if (systemSkill) {
-            // 系统内置 Skill：直接转换，失败时降级到通用工作流
-            try {
-              workflow = await convertSkillFlowToWorkflow(
-                parsedParams,
-                systemSkill,
-                referenceImages
-              );
-            } catch (e) {
-              console.warn(
-                '[AIInputBar] 系统 Skill 工作流转换失败，降级到通用工作流:',
-                e
-              );
-              workflow = convertToWorkflow(parsedParams, referenceImages);
+        try {
+          // 检查 API key，如果没有配置则弹窗获取
+          const currentRouteType =
+            effectiveGenerationType === 'video'
+              ? 'video'
+              : effectiveGenerationType === 'audio'
+              ? 'audio'
+              : effectiveGenerationType === 'text' ||
+                effectiveGenerationType === 'agent'
+              ? 'text'
+              : 'image';
+          const hasRouteCredentials = hasInvocationRouteCredentials(
+            currentRouteType,
+            effectiveSelectedModelRef || effectiveSelectedModel
+          );
+          if (!hasRouteCredentials) {
+            const newApiKey = await promptForApiKey();
+            if (!newApiKey) {
+              trackSubmitStatus('cancelled', {
+                reason: 'missing_api_key',
+                submitMode: 'preflight',
+                submit_mode: 'preflight',
+              });
+              submitLockRef.current = false;
+              setIsSubmitting(false);
+              return;
             }
-          } else {
-            // 尝试外部 Skill
-            const externalSkill = findExternalSkillById(selectedSkillId);
-            if (externalSkill) {
-              // 外部 Skill：使用 content（SKILL.md 文档体）走三条路径
+          }
+
+          // 构建选中元素的分类信息（使用合并后的 allContent）
+          // 收集图片和图形的尺寸信息（按顺序：先 images，后 graphics）
+          const imageItems = effectiveContent.filter(
+            (item) => item.type === 'image' && item.url
+          );
+          const graphicsItems = effectiveContent.filter(
+            (item) => item.type === 'graphics' && item.url
+          );
+          const imageDimensions = [...imageItems, ...graphicsItems]
+            .map((item) => {
+              if (item.width && item.height) {
+                return { width: item.width, height: item.height };
+              }
+              return undefined;
+            })
+            .filter(
+              (dim): dim is { width: number; height: number } =>
+                dim !== undefined
+            );
+
+          const selection = {
+            texts: effectiveContent
+              .filter((item) => item.type === 'text' && item.text)
+              .map((item) => item.text!),
+            images: imageItems.map((item) => item.url!),
+            videos: effectiveContent
+              .filter((item) => item.type === 'video' && item.url)
+              .map((item) => item.url!),
+            graphics: graphicsItems.map((item) => item.url!),
+            // 添加图片尺寸信息（始终传递数组，避免下游处理 undefined）
+            imageDimensions: imageDimensions,
+            maskImage:
+              imageItems.length === 1 && graphicsItems.length === 0
+                ? imageItems[0].maskImage
+                : undefined,
+          };
+
+          // 解析输入内容，使用选中的模型和尺寸
+          const parsedParams = parseAIInput(effectivePrompt, selection, {
+            modelId: effectiveSelectedModel,
+            modelRef: effectiveSelectedModelRef,
+            params: effectiveSelectedParams,
+            generationType: effectiveGenerationType,
+            count: effectiveSelectedCount,
+            knowledgeContextRefs: effectiveKnowledgeContextRefs,
+            defaultModels:
+              effectiveGenerationType === 'agent'
+                ? agentMediaDefaultModels
+                : undefined,
+            defaultModelRefs:
+              effectiveGenerationType === 'agent'
+                ? agentMediaDefaultModelRefs
+                : undefined,
+          });
+
+          // 收集所有参考媒体（图片 + 图形 + 视频）
+          const referenceImages = [...selection.images, ...selection.graphics];
+
+          // 创建工作流定义（仅用于 WorkZone 显示，实际工作流由 submitWorkflowToSW 创建）
+          let workflow: WorkflowDefinition;
+          if (
+            effectiveGenerationType === 'agent' &&
+            selectedSkillId !== SKILL_AUTO_ID
+          ) {
+            // Skill 模式：根据 skillId 决定使用系统内置 Skill 还是用户自定义 Skill
+            const systemSkill = findSystemSkillById(selectedSkillId);
+            if (systemSkill) {
+              // 系统内置 Skill：直接转换，失败时降级到通用工作流
               try {
                 workflow = await convertSkillFlowToWorkflow(
                   parsedParams,
-                  {
-                    id: externalSkill.id,
-                    name: externalSkill.name,
-                    type: 'external' as const,
-                    content: externalSkill.content,
-                    outputType: externalSkill.outputType,
-                  },
+                  systemSkill,
                   referenceImages
                 );
               } catch (e) {
                 console.warn(
-                  '[AIInputBar] 外部 Skill 工作流转换失败，降级到角色扮演:',
+                  '[AIInputBar] 系统 Skill 工作流转换失败，降级到通用工作流:',
                   e
                 );
-                // 外部 Skill 降级时，使用 content 作为 systemPrompt
-                workflow = await convertSkillFlowToWorkflow(
-                  parsedParams,
-                  {
-                    id: externalSkill.id,
-                    name: externalSkill.name,
-                    type: 'external' as const,
-                    content: externalSkill.content,
-                    outputType: externalSkill.outputType,
-                  },
-                  referenceImages
-                ).catch(() => convertToWorkflow(parsedParams, referenceImages));
+                workflow = convertToWorkflow(parsedParams, referenceImages);
               }
             } else {
-              // 用户自定义 Skill：从知识库读取笔记内容
-              try {
-                const userNote = await knowledgeBaseService.getNoteById(
-                  selectedSkillId
-                );
-                if (userNote) {
-                  const userOutputType =
-                    (userNote.metadata?.outputType as
-                      | 'image'
-                      | 'text'
-                      | 'video'
-                      | 'audio'
-                      | 'ppt') || undefined;
+              // 尝试外部 Skill
+              const externalSkill = findExternalSkillById(selectedSkillId);
+              if (externalSkill) {
+                // 外部 Skill：使用 content（SKILL.md 文档体）走三条路径
+                try {
                   workflow = await convertSkillFlowToWorkflow(
                     parsedParams,
                     {
-                      id: userNote.id,
-                      name: userNote.title,
-                      type: 'user',
-                      content: userNote.content,
-                      outputType: userOutputType,
+                      id: externalSkill.id,
+                      name: externalSkill.name,
+                      type: 'external' as const,
+                      content: externalSkill.content,
+                      outputType: externalSkill.outputType,
                     },
                     referenceImages
                   );
-                } else {
+                } catch (e) {
+                  console.warn(
+                    '[AIInputBar] 外部 Skill 工作流转换失败，降级到角色扮演:',
+                    e
+                  );
+                  // 外部 Skill 降级时，使用 content 作为 systemPrompt
+                  workflow = await convertSkillFlowToWorkflow(
+                    parsedParams,
+                    {
+                      id: externalSkill.id,
+                      name: externalSkill.name,
+                      type: 'external' as const,
+                      content: externalSkill.content,
+                      outputType: externalSkill.outputType,
+                    },
+                    referenceImages
+                  ).catch(() =>
+                    convertToWorkflow(parsedParams, referenceImages)
+                  );
+                }
+              } else {
+                // 用户自定义 Skill：从知识库读取笔记内容
+                try {
+                  const userNote = await knowledgeBaseService.getNoteById(
+                    selectedSkillId
+                  );
+                  if (userNote) {
+                    const userOutputType =
+                      (userNote.metadata?.outputType as
+                        | 'image'
+                        | 'text'
+                        | 'video'
+                        | 'audio'
+                        | 'ppt') || undefined;
+                    workflow = await convertSkillFlowToWorkflow(
+                      parsedParams,
+                      {
+                        id: userNote.id,
+                        name: userNote.title,
+                        type: 'user',
+                        content: userNote.content,
+                        outputType: userOutputType,
+                      },
+                      referenceImages
+                    );
+                  } else {
+                    workflow = convertToWorkflow(parsedParams, referenceImages);
+                  }
+                } catch {
                   workflow = convertToWorkflow(parsedParams, referenceImages);
                 }
-              } catch {
-                workflow = convertToWorkflow(parsedParams, referenceImages);
               }
             }
-          }
-          // 兜底：若上述所有路径均未赋值（理论上不应发生），降级到通用工作流
-          if (!workflow) {
-            console.warn('[AIInputBar] Skill 工作流未能生成，降级到通用工作流');
+            // 兜底：若上述所有路径均未赋值（理论上不应发生），降级到通用工作流
+            if (!workflow) {
+              console.warn(
+                '[AIInputBar] Skill 工作流未能生成，降级到通用工作流'
+              );
+              workflow = convertToWorkflow(parsedParams, referenceImages);
+            }
+          } else {
             workflow = convertToWorkflow(parsedParams, referenceImages);
           }
-        } else {
-          workflow = convertToWorkflow(parsedParams, referenceImages);
-        }
-        const board = SelectionWatcherBoardRef.current;
-        if (board) {
-          // WorkZone 固定尺寸
-          const WORKZONE_WIDTH = 360;
-          const WORKZONE_HEIGHT = 240;
-          const GAP = 50;
+          const board = SelectionWatcherBoardRef.current;
+          if (board) {
+            // WorkZone 固定尺寸
+            const WORKZONE_WIDTH = 360;
+            const WORKZONE_HEIGHT = 240;
+            const GAP = 50;
 
-          const containerRect = board.host?.getBoundingClientRect();
-          const zoom = board.viewport?.zoom || 1;
-          const originX = board.viewport?.origination?.[0] || 0;
-          const originY = board.viewport?.origination?.[1] || 0;
+            const containerRect = board.host?.getBoundingClientRect();
+            const zoom = board.viewport?.zoom || 1;
+            const originX = board.viewport?.origination?.[0] || 0;
+            const originY = board.viewport?.origination?.[1] || 0;
 
-          const allElements = board.children.filter(
-            (el: { type?: string }) => el.type !== 'workzone'
-          );
+            const allElements = board.children.filter(
+              (el: { type?: string }) => el.type !== 'workzone'
+            );
 
-          const viewportCenterX =
-            originX + (containerRect?.width || 0) / 2 / zoom;
-          const viewportCenterY =
-            originY + (containerRect?.height || 0) / 2 / zoom;
+            const viewportCenterX =
+              originX + (containerRect?.width || 0) / 2 / zoom;
+            const viewportCenterY =
+              originY + (containerRect?.height || 0) / 2 / zoom;
 
-          let expectedInsertLeftX: number = viewportCenterX - 200;
-          let expectedInsertY: number = viewportCenterY;
-          let workzoneX: number = expectedInsertLeftX;
-          let workzoneY: number = viewportCenterY - WORKZONE_HEIGHT / 2;
+            let expectedInsertLeftX: number = viewportCenterX - 200;
+            let expectedInsertY: number = viewportCenterY;
+            let workzoneX: number = expectedInsertLeftX;
+            let workzoneY: number = viewportCenterY - WORKZONE_HEIGHT / 2;
 
-          if (allElements.length > 0) {
-            const selectedElements = getSelectedElements(board);
-            let positionCalculated = false;
+            if (allElements.length > 0) {
+              const selectedElements = getSelectedElements(board);
+              let positionCalculated = false;
 
-            if (selectedElements.length > 0) {
-              try {
-                const selectedRect = getRectangleByElements(
-                  board,
-                  selectedElements,
-                  false
-                );
-
-                // 检测选中元素是否全部为图片/视频
-                const allMediaElements = selectedElements.every(
-                  (el) =>
-                    (PlaitDrawElement.isDrawElement(el) &&
-                      PlaitDrawElement.isImage(el)) ||
-                    isPlaitVideo(el)
-                );
-
-                if (
-                  allMediaElements &&
-                  selectedRect.width > selectedRect.height
-                ) {
-                  // 横屏：插入到右侧，顶部对齐
-                  expectedInsertLeftX =
-                    selectedRect.x + selectedRect.width + GAP;
-                  expectedInsertY = selectedRect.y;
-                } else {
-                  // 竖屏或非媒体元素：插入到下方
-                  expectedInsertLeftX = selectedRect.x;
-                  expectedInsertY = selectedRect.y + selectedRect.height + GAP;
-                }
-
-                workzoneX = expectedInsertLeftX;
-                workzoneY = expectedInsertY;
-                positionCalculated = true;
-              } catch (error) {
-                console.warn(
-                  '[AIInputBar] Failed to calculate position for selected elements:',
-                  error
-                );
-              }
-            }
-
-            if (!positionCalculated) {
-              let bottommostElement: PlaitElement | null = null;
-              let maxBottomY = -Infinity;
-
-              for (const element of allElements) {
+              if (selectedElements.length > 0) {
                 try {
-                  const rect = getRectangleByElements(
+                  const selectedRect = getRectangleByElements(
                     board,
-                    [element as PlaitElement],
+                    selectedElements,
                     false
                   );
-                  const bottomY = rect.y + rect.height;
-                  if (bottomY > maxBottomY) {
-                    maxBottomY = bottomY;
-                    bottommostElement = element as PlaitElement;
+
+                  // 检测选中元素是否全部为图片/视频
+                  const allMediaElements = selectedElements.every(
+                    (el) =>
+                      (PlaitDrawElement.isDrawElement(el) &&
+                        PlaitDrawElement.isImage(el)) ||
+                      isPlaitVideo(el)
+                  );
+
+                  if (
+                    allMediaElements &&
+                    selectedRect.width > selectedRect.height
+                  ) {
+                    // 横屏：插入到右侧，顶部对齐
+                    expectedInsertLeftX =
+                      selectedRect.x + selectedRect.width + GAP;
+                    expectedInsertY = selectedRect.y;
+                  } else {
+                    // 竖屏或非媒体元素：插入到下方
+                    expectedInsertLeftX = selectedRect.x;
+                    expectedInsertY =
+                      selectedRect.y + selectedRect.height + GAP;
                   }
+
+                  workzoneX = expectedInsertLeftX;
+                  workzoneY = expectedInsertY;
+                  positionCalculated = true;
                 } catch (error) {
                   console.warn(
-                    '[AIInputBar] Failed to get rectangle for element:',
+                    '[AIInputBar] Failed to calculate position for selected elements:',
                     error
                   );
                 }
               }
 
-              if (bottommostElement) {
-                const bottommostRect = getRectangleByElements(
-                  board,
-                  [bottommostElement],
-                  false
-                );
-                expectedInsertLeftX = bottommostRect.x;
-                expectedInsertY =
-                  bottommostRect.y + bottommostRect.height + GAP;
-                workzoneX = expectedInsertLeftX;
-                workzoneY = expectedInsertY;
+              if (!positionCalculated) {
+                let bottommostElement: PlaitElement | null = null;
+                let maxBottomY = -Infinity;
+
+                for (const element of allElements) {
+                  try {
+                    const rect = getRectangleByElements(
+                      board,
+                      [element as PlaitElement],
+                      false
+                    );
+                    const bottomY = rect.y + rect.height;
+                    if (bottomY > maxBottomY) {
+                      maxBottomY = bottomY;
+                      bottommostElement = element as PlaitElement;
+                    }
+                  } catch (error) {
+                    console.warn(
+                      '[AIInputBar] Failed to get rectangle for element:',
+                      error
+                    );
+                  }
+                }
+
+                if (bottommostElement) {
+                  const bottommostRect = getRectangleByElements(
+                    board,
+                    [bottommostElement],
+                    false
+                  );
+                  expectedInsertLeftX = bottommostRect.x;
+                  expectedInsertY =
+                    bottommostRect.y + bottommostRect.height + GAP;
+                  workzoneX = expectedInsertLeftX;
+                  workzoneY = expectedInsertY;
+                }
               }
             }
-          }
 
-          const workflowMessageData = toWorkflowMessageData(workflow);
+            const workflowMessageData = toWorkflowMessageData(workflow);
 
-          // 如果选中了 Frame，将 Frame 信息传递给 WorkZone
-          // 生成完成后媒体将插入到 Frame 内部并缩放到 Frame 尺寸
-          const frameInfo = selectedFrameRef.current;
-          let targetFrameId: string | undefined;
-          let targetFrameDimensions:
-            | { width: number; height: number }
-            | undefined;
-          let targetFrameRect:
-            | { x: number; y: number; width: number; height: number }
-            | undefined;
+            // 如果选中了 Frame，将 Frame 信息传递给 WorkZone
+            // 生成完成后媒体将插入到 Frame 内部并缩放到 Frame 尺寸
+            const frameInfo = selectedFrameRef.current;
+            let targetFrameId: string | undefined;
+            let targetFrameDimensions:
+              | { width: number; height: number }
+              | undefined;
+            let targetFrameRect:
+              | { x: number; y: number; width: number; height: number }
+              | undefined;
 
-          if (frameInfo) {
-            // 验证 Frame 仍然存在
-            const frameElement = board.children.find(
-              (el: { id: string }) => el.id === frameInfo.id
-            );
-            if (frameElement && isFrameElement(frameElement)) {
-              targetFrameId = frameInfo.id;
-              targetFrameDimensions = {
-                width: frameInfo.width,
-                height: frameInfo.height,
-              };
-              // Frame 选中时，插入位置设为 Frame 左上角（后续由插入逻辑居中处理）
-              const frameRect = RectangleClient.getRectangleByPoints(
-                frameElement.points
+            if (frameInfo) {
+              // 验证 Frame 仍然存在
+              const frameElement = board.children.find(
+                (el: { id: string }) => el.id === frameInfo.id
               );
-              targetFrameRect = frameRect;
-              expectedInsertLeftX = frameRect.x;
-              expectedInsertY = frameRect.y;
+              if (frameElement && isFrameElement(frameElement)) {
+                targetFrameId = frameInfo.id;
+                targetFrameDimensions = {
+                  width: frameInfo.width,
+                  height: frameInfo.height,
+                };
+                // Frame 选中时，插入位置设为 Frame 左上角（后续由插入逻辑居中处理）
+                const frameRect = RectangleClient.getRectangleByPoints(
+                  frameElement.points
+                );
+                targetFrameRect = frameRect;
+                expectedInsertLeftX = frameRect.x;
+                expectedInsertY = frameRect.y;
+              }
             }
-          }
 
-          const isImageGeneration = parsedParams.generationType === 'image';
+            const isImageGeneration = parsedParams.generationType === 'image';
 
-          if (isImageGeneration) {
-            const requestedCount = Math.max(parsedParams.count ?? 1, 1);
-            const shouldCreateIndependentBatchAnchors = requestedCount > 1;
-            const anchorTargetFrameId = shouldCreateIndependentBatchAnchors
-              ? undefined
-              : targetFrameId;
-            const anchorTargetFrameDimensions =
-              shouldCreateIndependentBatchAnchors
+            if (isImageGeneration) {
+              const requestedCount = Math.max(parsedParams.count ?? 1, 1);
+              const shouldCreateIndependentBatchAnchors = requestedCount > 1;
+              const anchorTargetFrameId = shouldCreateIndependentBatchAnchors
                 ? undefined
-                : targetFrameDimensions;
-            const imageAnchorElements: Array<
-              ReturnType<typeof ImageGenerationAnchorTransforms.insertAnchor>
-            > = [];
-            const workflowBatchId = `wf_batch_${workflow.id}`;
-            const plannedAnchorPositions = !anchorTargetFrameId
-              ? resolveImageGenerationBatchAnchorPositions(
-                  board,
-                  [expectedInsertLeftX, expectedInsertY],
+                : targetFrameId;
+              const anchorTargetFrameDimensions =
+                shouldCreateIndependentBatchAnchors
+                  ? undefined
+                  : targetFrameDimensions;
+              const imageAnchorElements: Array<
+                ReturnType<typeof ImageGenerationAnchorTransforms.insertAnchor>
+              > = [];
+              const workflowBatchId = `wf_batch_${workflow.id}`;
+              const plannedAnchorPositions = !anchorTargetFrameId
+                ? resolveImageGenerationBatchAnchorPositions(
+                    board,
+                    [expectedInsertLeftX, expectedInsertY],
+                    buildImageGenerationAnchorCreateOptions({
+                      workflowId: workflow.id,
+                      expectedInsertPosition: [
+                        expectedInsertLeftX,
+                        expectedInsertY,
+                      ],
+                      requestedSize: parsedParams.size,
+                      requestedCount: 1,
+                      zoom,
+                      title: workflowMessageData.name || '图片生成',
+                      ...buildImageGenerationAnchorPresentationPatch(
+                        'submitted'
+                      ),
+                    }).size ?? {
+                      width: 320,
+                      height: 180,
+                    },
+                    requestedCount,
+                    {
+                      frameRect: shouldCreateIndependentBatchAnchors
+                        ? targetFrameRect
+                        : undefined,
+                    }
+                  )
+                : null;
+
+              for (let index = 0; index < requestedCount; index += 1) {
+                let anchorCreateOptions =
                   buildImageGenerationAnchorCreateOptions({
                     workflowId: workflow.id,
                     expectedInsertPosition: [
                       expectedInsertLeftX,
                       expectedInsertY,
                     ],
+                    targetFrameId: anchorTargetFrameId,
+                    targetFrameDimensions: anchorTargetFrameDimensions,
+                    frameAffinityId: shouldCreateIndependentBatchAnchors
+                      ? targetFrameId
+                      : undefined,
+                    frameAffinityDimensions: shouldCreateIndependentBatchAnchors
+                      ? targetFrameDimensions
+                      : undefined,
                     requestedSize: parsedParams.size,
-                    requestedCount: 1,
+                    requestedCount: shouldCreateIndependentBatchAnchors
+                      ? 1
+                      : requestedCount,
+                    batchId: shouldCreateIndependentBatchAnchors
+                      ? workflowBatchId
+                      : undefined,
+                    batchIndex: shouldCreateIndependentBatchAnchors
+                      ? index + 1
+                      : undefined,
+                    batchTotal: shouldCreateIndependentBatchAnchors
+                      ? requestedCount
+                      : undefined,
                     zoom,
                     title: workflowMessageData.name || '图片生成',
                     ...buildImageGenerationAnchorPresentationPatch('submitted'),
-                  }).size ?? {
-                    width: 320,
-                    height: 180,
-                  },
-                  requestedCount,
-                  {
-                    frameRect: shouldCreateIndependentBatchAnchors
-                      ? targetFrameRect
-                      : undefined,
-                  }
-                )
-              : null;
+                  });
 
-            for (let index = 0; index < requestedCount; index += 1) {
-              let anchorCreateOptions = buildImageGenerationAnchorCreateOptions(
-                {
-                  workflowId: workflow.id,
-                  expectedInsertPosition: [
-                    expectedInsertLeftX,
-                    expectedInsertY,
-                  ],
-                  targetFrameId: anchorTargetFrameId,
-                  targetFrameDimensions: anchorTargetFrameDimensions,
-                  frameAffinityId: shouldCreateIndependentBatchAnchors
-                    ? targetFrameId
-                    : undefined,
-                  frameAffinityDimensions: shouldCreateIndependentBatchAnchors
-                    ? targetFrameDimensions
-                    : undefined,
-                  requestedSize: parsedParams.size,
-                  requestedCount: shouldCreateIndependentBatchAnchors
-                    ? 1
-                    : requestedCount,
-                  batchId: shouldCreateIndependentBatchAnchors
-                    ? workflowBatchId
-                    : undefined,
-                  batchIndex: shouldCreateIndependentBatchAnchors
-                    ? index + 1
-                    : undefined,
-                  batchTotal: shouldCreateIndependentBatchAnchors
-                    ? requestedCount
-                    : undefined,
-                  zoom,
-                  title: workflowMessageData.name || '图片生成',
-                  ...buildImageGenerationAnchorPresentationPatch('submitted'),
+                if (!anchorTargetFrameId) {
+                  const resolvedAnchorPosition = plannedAnchorPositions
+                    ? plannedAnchorPositions[index] ??
+                      anchorCreateOptions.position
+                    : anchorCreateOptions.position;
+
+                  anchorCreateOptions = {
+                    ...anchorCreateOptions,
+                    position: resolvedAnchorPosition,
+                    expectedInsertPosition: resolvedAnchorPosition,
+                  };
                 }
-              );
 
-              if (!anchorTargetFrameId) {
-                const resolvedAnchorPosition = plannedAnchorPositions
-                  ? plannedAnchorPositions[index] ??
-                    anchorCreateOptions.position
-                  : anchorCreateOptions.position;
-
-                anchorCreateOptions = {
-                  ...anchorCreateOptions,
-                  position: resolvedAnchorPosition,
-                  expectedInsertPosition: resolvedAnchorPosition,
-                };
+                const anchorElement =
+                  ImageGenerationAnchorTransforms.insertAnchor(
+                    board,
+                    anchorCreateOptions
+                  );
+                imageAnchorElements.push(anchorElement);
               }
 
-              const anchorElement =
-                ImageGenerationAnchorTransforms.insertAnchor(
-                  board,
-                  anchorCreateOptions
-                );
-              imageAnchorElements.push(anchorElement);
-            }
+              currentImageAnchorIdsRef.current = imageAnchorElements.map(
+                (anchor) => anchor.id
+              );
+              currentWorkZoneIdRef.current = null;
+              const [firstAnchor] = imageAnchorElements;
+              if (firstAnchor) {
+                setTimeout(() => {
+                  const anchorRect = RectangleClient.getRectangleByPoints(
+                    firstAnchor.points
+                  );
+                  scrollToPointIfNeeded(
+                    board,
+                    [
+                      anchorRect.x + anchorRect.width / 2,
+                      anchorRect.y + anchorRect.height / 2,
+                    ],
+                    100
+                  );
+                }, 100);
+              }
+            } else {
+              const workzoneElement = WorkZoneTransforms.insertWorkZone(board, {
+                workflow: workflowMessageData,
+                position: [workzoneX, workzoneY],
+                size: { width: WORKZONE_WIDTH, height: WORKZONE_HEIGHT },
+                expectedInsertPosition: [expectedInsertLeftX, expectedInsertY],
+                targetFrameId,
+                targetFrameDimensions,
+                zoom,
+              });
 
-            currentImageAnchorIdsRef.current = imageAnchorElements.map(
-              (anchor) => anchor.id
-            );
-            currentWorkZoneIdRef.current = null;
-            const [firstAnchor] = imageAnchorElements;
-            if (firstAnchor) {
+              currentWorkZoneIdRef.current = workzoneElement.id;
+              currentImageAnchorIdsRef.current = [];
               setTimeout(() => {
-                const anchorRect = RectangleClient.getRectangleByPoints(
-                  firstAnchor.points
-                );
+                const workzoneCenterX = workzoneX + WORKZONE_WIDTH / 2;
+                const workzoneCenterY = workzoneY + WORKZONE_HEIGHT / 2;
                 scrollToPointIfNeeded(
                   board,
-                  [
-                    anchorRect.x + anchorRect.width / 2,
-                    anchorRect.y + anchorRect.height / 2,
-                  ],
+                  [workzoneCenterX, workzoneCenterY],
                   100
                 );
               }, 100);
             }
-          } else {
-            const workzoneElement = WorkZoneTransforms.insertWorkZone(board, {
-              workflow: workflowMessageData,
-              position: [workzoneX, workzoneY],
-              size: { width: WORKZONE_WIDTH, height: WORKZONE_HEIGHT },
-              expectedInsertPosition: [expectedInsertLeftX, expectedInsertY],
-              targetFrameId,
-              targetFrameDimensions,
-              zoom,
-            });
-
-            currentWorkZoneIdRef.current = workzoneElement.id;
-            currentImageAnchorIdsRef.current = [];
-            setTimeout(() => {
-              const workzoneCenterX = workzoneX + WORKZONE_WIDTH / 2;
-              const workzoneCenterY = workzoneY + WORKZONE_HEIGHT / 2;
-              scrollToPointIfNeeded(
-                board,
-                [workzoneCenterX, workzoneCenterY],
-                100
-              );
-            }, 100);
           }
-        }
 
-        const imageRoute = resolveInvocationRoute('image');
-        const videoRoute = resolveInvocationRoute('video');
-        const audioRoute = resolveInvocationRoute('audio');
-        const aiContext = {
-          rawInput: prompt,
-          userInstruction: parsedParams.userInstruction,
-          model: {
-            id: parsedParams.modelId,
-            type: parsedParams.generationType,
-            isExplicit: parsedParams.isModelExplicit,
-          },
-          modelRef: parsedParams.modelRef,
-          defaultModels: parsedParams.defaultModels || {
-            audio: audioRoute.modelId || getDefaultAudioModel(),
-            image: imageRoute.modelId || getDefaultImageModel(),
-            video: videoRoute.modelId || getDefaultVideoModel(),
-          },
-          defaultModelRefs: parsedParams.defaultModelRefs || {
-            audio: createModelRef(audioRoute.profileId, audioRoute.modelId),
-            image: createModelRef(imageRoute.profileId, imageRoute.modelId),
-            video: createModelRef(videoRoute.profileId, videoRoute.modelId),
-          },
-          params: {
-            count: parsedParams.count,
-            size: parsedParams.size,
-            duration: parsedParams.duration,
-          },
-          selection,
-          finalPrompt: parsedParams.prompt,
-          knowledgeContextRefs: parsedParams.knowledgeContextRefs,
-        };
+          const imageRoute = resolveInvocationRoute('image');
+          const videoRoute = resolveInvocationRoute('video');
+          const audioRoute = resolveInvocationRoute('audio');
+          const aiContext = {
+            rawInput: effectivePrompt,
+            userInstruction: parsedParams.userInstruction,
+            model: {
+              id: parsedParams.modelId,
+              type: parsedParams.generationType,
+              isExplicit: parsedParams.isModelExplicit,
+            },
+            modelRef: parsedParams.modelRef,
+            defaultModels: parsedParams.defaultModels || {
+              audio: audioRoute.modelId || getDefaultAudioModel(),
+              image: imageRoute.modelId || getDefaultImageModel(),
+              video: videoRoute.modelId || getDefaultVideoModel(),
+            },
+            defaultModelRefs: parsedParams.defaultModelRefs || {
+              audio: createModelRef(audioRoute.profileId, audioRoute.modelId),
+              image: createModelRef(imageRoute.profileId, imageRoute.modelId),
+              video: createModelRef(videoRoute.profileId, videoRoute.modelId),
+            },
+            params: {
+              count: parsedParams.count,
+              size: parsedParams.size,
+              duration: parsedParams.duration,
+            },
+            selection,
+            finalPrompt: parsedParams.prompt,
+            knowledgeContextRefs: parsedParams.knowledgeContextRefs,
+          };
 
-        const textModel = resolveInvocationRoute('text').modelId;
+          const textModel = resolveInvocationRoute('text').modelId;
 
-        const retryContext: WorkflowRetryContext = {
-          aiContext,
-          referenceImages,
-          textModel,
-        };
-        currentRetryContextRef.current = retryContext;
-
-        try {
-          const t0 = Date.now();
-          const { usedSW } = await submitWorkflowToSW(
-            parsedParams,
+          const retryContext: WorkflowRetryContext = {
+            aiContext,
             referenceImages,
-            retryContext,
-            workflow
-          );
-          if (usedSW) {
-            trackSubmitStatus('success', {
-              submitMode: 'service_worker',
-              submit_mode: 'service_worker',
-              workflowId: workflow.id,
-              workflow_id: workflow.id,
-              stepCount: workflow.steps.length,
-              step_count: workflow.steps.length,
-            });
-            if (generationType === 'image') {
-              applyCurrentImageAnchorPresentationState(board, 'accepted');
-            }
+            textModel,
+          };
+          currentRetryContextRef.current = retryContext;
 
-            if (prompt.trim()) {
-              const trimmedPrompt = prompt.trim();
-              const hasSelection = allContent.length > 0;
-              addPromptHistory(trimmedPrompt, hasSelection, generationType);
-              if (generationType === 'image') {
-                addImagePromptHistory(trimmedPrompt);
-              } else if (generationType === 'video') {
-                addVideoPromptHistory(trimmedPrompt);
+          try {
+            const { usedSW } = await submitWorkflowToSW(
+              parsedParams,
+              referenceImages,
+              retryContext,
+              workflow,
+              { appendToCurrentChatSession }
+            );
+            if (usedSW) {
+              trackSubmitStatus('success', {
+                submitMode: 'service_worker',
+                submit_mode: 'service_worker',
+                workflowId: workflow.id,
+                workflow_id: workflow.id,
+                stepCount: workflow.steps.length,
+                step_count: workflow.steps.length,
+              });
+              if (effectiveGenerationType === 'image') {
+                applyCurrentImageAnchorPresentationState(board, 'accepted');
               }
+
+              if (effectivePrompt.trim()) {
+                const trimmedPrompt = effectivePrompt.trim();
+                const hasSelection = effectiveContent.length > 0;
+                addPromptHistory(
+                  trimmedPrompt,
+                  hasSelection,
+                  effectiveGenerationType
+                );
+                if (effectiveGenerationType === 'image') {
+                  addImagePromptHistory(trimmedPrompt);
+                } else if (effectiveGenerationType === 'video') {
+                  addVideoPromptHistory(trimmedPrompt);
+                }
+              }
+              if (shouldClearLocalInput) {
+                setPrompt('');
+                setSelectedContent([]);
+                setUploadedContent([]);
+                setKnowledgeContextRefs([]);
+              }
+
+              if (submitCooldownRef.current) {
+                clearTimeout(submitCooldownRef.current);
+              }
+              submitCooldownRef.current = setTimeout(() => {
+                submitLockRef.current = false;
+                setIsSubmitting(false);
+                submitCooldownRef.current = null;
+              }, 1000);
+
+              return;
             }
+          } catch (swError) {
+            console.warn(
+              '[AIInputBar] SW execution failed, falling back to main thread:',
+              swError
+            );
+          }
+          if (effectiveGenerationType === 'image') {
+            applyCurrentImageAnchorPresentationState(board, 'handoff');
+          }
+
+          // 工作流已提交，立即保存历史、清空输入并解锁，步骤执行在后台继续
+          if (effectivePrompt.trim()) {
+            const trimmedPrompt = effectivePrompt.trim();
+            const hasSelection = effectiveContent.length > 0;
+            addPromptHistory(
+              trimmedPrompt,
+              hasSelection,
+              effectiveGenerationType
+            );
+            if (effectiveGenerationType === 'image') {
+              addImagePromptHistory(trimmedPrompt);
+            } else if (effectiveGenerationType === 'video') {
+              addVideoPromptHistory(trimmedPrompt);
+            }
+          }
+          if (shouldClearLocalInput) {
             setPrompt('');
             setSelectedContent([]);
             setUploadedContent([]);
             setKnowledgeContextRefs([]);
-
-            if (submitCooldownRef.current) {
-              clearTimeout(submitCooldownRef.current);
-            }
-            submitCooldownRef.current = setTimeout(() => {
-              submitLockRef.current = false;
-              setIsSubmitting(false);
-              submitCooldownRef.current = null;
-            }, 1000);
-
-            return;
           }
-        } catch (swError) {
-          console.warn(
-            '[AIInputBar] SW execution failed, falling back to main thread:',
-            swError
-          );
-        }
-        if (generationType === 'image') {
-          applyCurrentImageAnchorPresentationState(board, 'handoff');
-        }
-
-        // 工作流已提交，立即保存历史、清空输入并解锁，步骤执行在后台继续
-        if (prompt.trim()) {
-          const trimmedPrompt = prompt.trim();
-          const hasSelection = allContent.length > 0;
-          addPromptHistory(trimmedPrompt, hasSelection, generationType);
-          if (generationType === 'image') {
-            addImagePromptHistory(trimmedPrompt);
-          } else if (generationType === 'video') {
-            addVideoPromptHistory(trimmedPrompt);
+          if (submitCooldownRef.current) {
+            clearTimeout(submitCooldownRef.current);
           }
-        }
-        setPrompt('');
-        setSelectedContent([]);
-        setUploadedContent([]);
-        setKnowledgeContextRefs([]);
-        if (submitCooldownRef.current) {
-          clearTimeout(submitCooldownRef.current);
-        }
-        submitCooldownRef.current = setTimeout(() => {
-          submitLockRef.current = false;
-          setIsSubmitting(false);
-          submitCooldownRef.current = null;
-        }, 1000);
+          submitCooldownRef.current = setTimeout(() => {
+            submitLockRef.current = false;
+            setIsSubmitting(false);
+            submitCooldownRef.current = null;
+          }, 1000);
 
-        const createdTaskIds: string[] = [];
+          const createdTaskIds: string[] = [];
 
-        // 收集动态添加的步骤（用于后续执行）
-        const pendingNewSteps: Array<{
-          id: string;
-          mcp: string;
-          args: Record<string, unknown>;
-          description: string;
-          options?: WorkflowStepOptions;
-        }> = [];
+          // 收集动态添加的步骤（用于后续执行）
+          const pendingNewSteps: Array<{
+            id: string;
+            mcp: string;
+            args: Record<string, unknown>;
+            description: string;
+            options?: WorkflowStepOptions;
+          }> = [];
 
-        // 创建标准回调（所有工具都可使用，不需要的会忽略）
-        const createStepCallbacks = (
-          currentStep: (typeof workflow.steps)[0],
-          stepStartTime: number
-        ) => ({
-          // 流式输出回调
-          onChunk: (chunk: string) => {
-            updateThinkingContentRef.current(chunk);
-          },
-          // 动态添加步骤回调
-          onAddSteps: (
-            newSteps: Array<{
-              id: string;
-              mcp: string;
-              args: Record<string, unknown>;
-              description: string;
-              status: string;
-            }>
-          ) => {
-            // 当前步骤完成
-            workflowControl.updateStep(
-              currentStep.id,
-              'completed',
-              { analysis: 'completed' },
-              undefined,
-              Date.now() - stepStartTime
-            );
+          // 创建标准回调（所有工具都可使用，不需要的会忽略）
+          const createStepCallbacks = (
+            currentStep: (typeof workflow.steps)[0],
+            stepStartTime: number
+          ) => ({
+            // 流式输出回调
+            onChunk: (chunk: string) => {
+              updateThinkingContentRef.current(chunk);
+            },
+            // 动态添加步骤回调
+            onAddSteps: (
+              newSteps: Array<{
+                id: string;
+                mcp: string;
+                args: Record<string, unknown>;
+                description: string;
+                status: string;
+              }>
+            ) => {
+              // 当前步骤完成
+              workflowControl.updateStep(
+                currentStep.id,
+                'completed',
+                { analysis: 'completed' },
+                undefined,
+                Date.now() - stepStartTime
+              );
 
-            // 为新步骤添加 queue 模式选项（尊重传入的 status，若为 completed 则保留）
-            const stepsWithOptions = newSteps.map((s, index) =>
-              enrichStepArgsWithPromptMeta(workflow, {
-                ...s,
-                status: (s.status === 'completed' ? 'completed' : 'pending') as
-                  | 'pending'
-                  | 'completed',
-                options: {
-                  mode: 'queue' as const,
-                  batchId: `agent_${Date.now()}`,
-                  batchIndex: index + 1,
-                  batchTotal: newSteps.length,
-                  globalIndex: index + 1,
-                },
-              })
-            );
+              // 为新步骤添加 queue 模式选项（尊重传入的 status，若为 completed 则保留）
+              const stepsWithOptions = newSteps.map((s, index) =>
+                enrichStepArgsWithPromptMeta(workflow, {
+                  ...s,
+                  status: (s.status === 'completed'
+                    ? 'completed'
+                    : 'pending') as 'pending' | 'completed',
+                  options: {
+                    mode: 'queue' as const,
+                    batchId: `agent_${Date.now()}`,
+                    batchIndex: index + 1,
+                    batchTotal: newSteps.length,
+                    globalIndex: index + 1,
+                  },
+                })
+              );
 
-            // 添加新步骤到工作流
-            workflowControl.addSteps(stepsWithOptions);
+              // 添加新步骤到工作流
+              workflowControl.addSteps(stepsWithOptions);
 
-            // 收集待执行的步骤
-            pendingNewSteps.push(...stepsWithOptions);
+              // 收集待执行的步骤
+              pendingNewSteps.push(...stepsWithOptions);
 
-            // 追加工具调用日志
-            newSteps.forEach((s) => {
-              appendAgentLogRef.current({
-                type: 'tool_call',
-                timestamp: Date.now(),
-                toolName: s.mcp,
-                args: s.args,
+              // 追加工具调用日志
+              newSteps.forEach((s) => {
+                appendAgentLogRef.current({
+                  type: 'tool_call',
+                  timestamp: Date.now(),
+                  toolName: s.mcp,
+                  args: s.args,
+                });
               });
-            });
 
+              const workflowData = toWorkflowMessageData(
+                workflowControl.getWorkflow()!,
+                currentRetryContextRef.current || undefined
+              );
+              updateWorkflowMessageRef.current(workflowData);
+              // 同步更新 WorkZone
+              if (currentWorkZoneIdRef.current && board) {
+                WorkZoneTransforms.updateWorkflow(
+                  board,
+                  currentWorkZoneIdRef.current,
+                  workflowData
+                );
+              }
+            },
+            // 更新步骤状态回调
+            onUpdateStep: (
+              stepId: string,
+              status: string,
+              result?: unknown,
+              error?: string
+            ) => {
+              workflowControl.updateStep(
+                stepId,
+                status as
+                  | 'pending'
+                  | 'running'
+                  | 'completed'
+                  | 'failed'
+                  | 'skipped',
+                result,
+                error
+              );
+
+              // 追加工具结果日志
+              appendAgentLogRef.current({
+                type: 'tool_result',
+                timestamp: Date.now(),
+                toolName: stepId,
+                success: status === 'completed',
+                data: result,
+                error,
+              });
+
+              const workflowData = toWorkflowMessageData(
+                workflowControl.getWorkflow()!,
+                currentRetryContextRef.current || undefined
+              );
+              updateWorkflowMessageRef.current(workflowData);
+              // 同步更新 WorkZone
+              if (currentWorkZoneIdRef.current && board) {
+                WorkZoneTransforms.updateWorkflow(
+                  board,
+                  currentWorkZoneIdRef.current,
+                  workflowData
+                );
+              }
+            },
+          });
+
+          let workflowFailed = false;
+
+          // 辅助函数：同步更新 ChatDrawer 和 WorkZone
+          const syncWorkflowUpdates = () => {
             const workflowData = toWorkflowMessageData(
               workflowControl.getWorkflow()!,
               currentRetryContextRef.current || undefined
             );
             updateWorkflowMessageRef.current(workflowData);
-            // 同步更新 WorkZone
             if (currentWorkZoneIdRef.current && board) {
               WorkZoneTransforms.updateWorkflow(
                 board,
@@ -3638,352 +3872,326 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                 workflowData
               );
             }
-          },
-          // 更新步骤状态回调
-          onUpdateStep: (
-            stepId: string,
-            status: string,
-            result?: unknown,
-            error?: string
-          ) => {
-            workflowControl.updateStep(
-              stepId,
-              status as
-                | 'pending'
-                | 'running'
-                | 'completed'
-                | 'failed'
-                | 'skipped',
-              result,
-              error
-            );
+          };
 
-            // 追加工具结果日志
-            appendAgentLogRef.current({
-              type: 'tool_result',
-              timestamp: Date.now(),
-              toolName: stepId,
-              success: status === 'completed',
-              data: result,
-              error,
-            });
+          // 执行单个步骤的函数
+          const executeStep = async (step: (typeof workflow.steps)[0]) => {
+            const stepStartTime = Date.now();
+            // 记录执行前的动态步骤数量，用于判断 ai_analyze 是否触发了 onAddSteps
+            const pendingStepsBeforeExec = pendingNewSteps.length;
 
-            const workflowData = toWorkflowMessageData(
-              workflowControl.getWorkflow()!,
-              currentRetryContextRef.current || undefined
-            );
-            updateWorkflowMessageRef.current(workflowData);
-            // 同步更新 WorkZone
-            if (currentWorkZoneIdRef.current && board) {
-              WorkZoneTransforms.updateWorkflow(
-                board,
-                currentWorkZoneIdRef.current,
-                workflowData
+            // 更新步骤为运行中
+            workflowControl.updateStep(step.id, 'running');
+            syncWorkflowUpdates();
+
+            try {
+              // 合并步骤选项和标准回调（工具自行决定是否使用回调）
+              const executeOptions = {
+                ...step.options,
+                ...createStepCallbacks(step, stepStartTime),
+              }; // 通过 MCP Registry 执行工具
+              const executableStep = enrichStepArgsWithPromptMeta(
+                workflow,
+                step
               );
-            }
-          },
-        });
+              const result = (await mcpRegistry.executeTool(
+                { name: executableStep.mcp, arguments: executableStep.args },
+                executeOptions
+              )) as MCPTaskResult;
+              // 根据结果更新步骤状态
+              const currentStepStatus = workflowControl
+                .getWorkflow()
+                ?.steps.find((s) => s.id === step.id)?.status;
 
-        let workflowFailed = false;
+              if (!result.success) {
+                // 执行失败，标记工作流失败
+                workflowControl.updateStep(
+                  step.id,
+                  'failed',
+                  undefined,
+                  result.error || '执行失败',
+                  Date.now() - stepStartTime
+                );
+                return false; // 返回失败
+              } else if (result.taskId) {
+                // 队列模式：记录任务 ID（状态保持 running，等任务完成后更新）
+                createdTaskIds.push(result.taskId);
+                workflowControl.updateStep(step.id, 'running', {
+                  taskId: result.taskId,
+                });
 
-        // 辅助函数：同步更新 ChatDrawer 和 WorkZone
-        const syncWorkflowUpdates = () => {
-          const workflowData = toWorkflowMessageData(
-            workflowControl.getWorkflow()!,
-            currentRetryContextRef.current || undefined
-          );
-          updateWorkflowMessageRef.current(workflowData);
-          if (currentWorkZoneIdRef.current && board) {
-            WorkZoneTransforms.updateWorkflow(
-              board,
-              currentWorkZoneIdRef.current,
-              workflowData
-            );
-          }
-        };
+                bindCurrentImageAnchorTask(board, result.taskId, {
+                  workflowId: workflow.id,
+                  batchId: step.options?.batchId,
+                  batchIndex: step.options?.batchIndex,
+                });
+              } else if (currentStepStatus === 'running') {
+                const normalizedResultData =
+                  result.type === 'text' &&
+                  result.data &&
+                  typeof result.data === 'object' &&
+                  'content' in result.data
+                    ? { content: (result.data as { content?: string }).content }
+                    : result.data;
+                // 同步模式且未被回调更新：标记为完成
+                workflowControl.updateStep(
+                  step.id,
+                  'completed',
+                  normalizedResultData,
+                  undefined,
+                  Date.now() - stepStartTime
+                );
 
-        // 执行单个步骤的函数
-        const executeStep = async (step: (typeof workflow.steps)[0]) => {
-          const stepStartTime = Date.now();
-          // 记录执行前的动态步骤数量，用于判断 ai_analyze 是否触发了 onAddSteps
-          const pendingStepsBeforeExec = pendingNewSteps.length;
+                const responseText =
+                  step.mcp === 'generate_text'
+                    ? (result.data as { content?: string })?.content
+                    : step.mcp === 'ai_analyze'
+                    ? (result.data as { response?: string })?.response
+                    : undefined;
 
-          // 更新步骤为运行中
-          workflowControl.updateStep(step.id, 'running');
-          syncWorkflowUpdates();
+                const shouldInsertReturnedText =
+                  (step.mcp === 'generate_text' || step.mcp === 'ai_analyze') &&
+                  responseText &&
+                  responseText.trim() &&
+                  pendingNewSteps.length === pendingStepsBeforeExec;
 
-          try {
-            // 合并步骤选项和标准回调（工具自行决定是否使用回调）
-            const executeOptions = {
-              ...step.options,
-              ...createStepCallbacks(step, stepStartTime),
-            }; // 通过 MCP Registry 执行工具
-            const executableStep = enrichStepArgsWithPromptMeta(workflow, step);
-            const result = (await mcpRegistry.executeTool(
-              { name: executableStep.mcp, arguments: executableStep.args },
-              executeOptions
-            )) as MCPTaskResult;
-            // 根据结果更新步骤状态
-            const currentStepStatus = workflowControl
-              .getWorkflow()
-              ?.steps.find((s) => s.id === step.id)?.status;
+                if (shouldInsertReturnedText) {
+                  const insertStepId = `${step.id}-insert-text`;
+                  const insertStep = {
+                    id: insertStepId,
+                    mcp: 'insert_to_canvas',
+                    args: {
+                      items: [
+                        {
+                          type: 'text',
+                          content: responseText,
+                        },
+                      ],
+                    },
+                    description:
+                      step.mcp === 'generate_text'
+                        ? '将生成文本插入画布'
+                        : '将 AI 回复插入画布',
+                    status: 'pending' as const,
+                  };
+                  workflowControl.addSteps([insertStep]);
+                  pendingNewSteps.push(insertStep);
+                }
+              }
 
-            if (!result.success) {
-              // 执行失败，标记工作流失败
+              return true; // 返回成功
+            } catch (stepError) {
+              // 更新步骤为失败
               workflowControl.updateStep(
                 step.id,
                 'failed',
                 undefined,
-                result.error || '执行失败',
-                Date.now() - stepStartTime
+                String(stepError)
               );
               return false; // 返回失败
-            } else if (result.taskId) {
-              // 队列模式：记录任务 ID（状态保持 running，等任务完成后更新）
-              createdTaskIds.push(result.taskId);
-              workflowControl.updateStep(step.id, 'running', {
-                taskId: result.taskId,
-              });
-
-              bindCurrentImageAnchorTask(board, result.taskId, {
-                workflowId: workflow.id,
-                batchId: step.options?.batchId,
-                batchIndex: step.options?.batchIndex,
-              });
-            } else if (currentStepStatus === 'running') {
-              const normalizedResultData =
-                result.type === 'text' &&
-                result.data &&
-                typeof result.data === 'object' &&
-                'content' in result.data
-                  ? { content: (result.data as { content?: string }).content }
-                  : result.data;
-              // 同步模式且未被回调更新：标记为完成
-              workflowControl.updateStep(
-                step.id,
-                'completed',
-                normalizedResultData,
-                undefined,
-                Date.now() - stepStartTime
-              );
-
-              const responseText =
-                step.mcp === 'generate_text'
-                  ? (result.data as { content?: string })?.content
-                  : step.mcp === 'ai_analyze'
-                  ? (result.data as { response?: string })?.response
-                  : undefined;
-
-              const shouldInsertReturnedText =
-                (step.mcp === 'generate_text' || step.mcp === 'ai_analyze') &&
-                responseText &&
-                responseText.trim() &&
-                pendingNewSteps.length === pendingStepsBeforeExec;
-
-              if (shouldInsertReturnedText) {
-                const insertStepId = `${step.id}-insert-text`;
-                const insertStep = {
-                  id: insertStepId,
-                  mcp: 'insert_to_canvas',
-                  args: {
-                    items: [
-                      {
-                        type: 'text',
-                        content: responseText,
-                      },
-                    ],
-                  },
-                  description:
-                    step.mcp === 'generate_text'
-                      ? '将生成文本插入画布'
-                      : '将 AI 回复插入画布',
-                  status: 'pending' as const,
-                };
-                workflowControl.addSteps([insertStep]);
-                pendingNewSteps.push(insertStep);
-              }
+            } finally {
+              // 同步更新 ChatDrawer 和 WorkZone
+              syncWorkflowUpdates();
             }
+          };
 
-            return true; // 返回成功
-          } catch (stepError) {
-            // 更新步骤为失败
-            workflowControl.updateStep(
-              step.id,
-              'failed',
-              undefined,
-              String(stepError)
-            );
-            return false; // 返回失败
-          } finally {
-            // 同步更新 ChatDrawer 和 WorkZone
-            syncWorkflowUpdates();
-          }
-        };
-
-        // 执行初始步骤
-        for (const step of workflow.steps) {
-          // 如果工作流已失败，跳过剩余步骤
-          if (workflowFailed) {
-            workflowControl.updateStep(step.id, 'skipped');
-            syncWorkflowUpdates();
-            continue;
-          }
-
-          const success = await executeStep(step);
-          if (!success) {
-            workflowFailed = true;
-          }
-        }
-
-        // 执行动态添加的步骤（由 ai_analyze 通过 onAddSteps 添加）
-        if (!workflowFailed && pendingNewSteps.length > 0) {
-          // console.log(`[AIInputBar] Executing ${pendingNewSteps.length} dynamically added steps`);
-
-          // 获取当前工作流状态用于调试
-          const currentWorkflow = workflowControl.getWorkflow();
-          // console.log(`[AIInputBar] Current workflow steps:`, currentWorkflow?.steps.map(s => ({ id: s.id, mcp: s.mcp, status: s.status })));
-          // console.log(`[AIInputBar] Pending steps to execute:`, pendingNewSteps.map(s => ({ id: s.id, mcp: s.mcp })));
-
-          for (const newStep of pendingNewSteps) {
+          // 执行初始步骤
+          for (const step of workflow.steps) {
+            // 如果工作流已失败，跳过剩余步骤
             if (workflowFailed) {
-              workflowControl.updateStep(newStep.id, 'skipped');
+              workflowControl.updateStep(step.id, 'skipped');
               syncWorkflowUpdates();
               continue;
             }
 
-            // 从 workflowControl 获取完整的步骤信息
-            const fullStep = workflowControl
-              .getWorkflow()
-              ?.steps.find((s) => s.id === newStep.id);
-            // console.log(`[AIInputBar] Looking for step ${newStep.id}, found:`, fullStep ? 'yes' : 'no', 'status:', fullStep?.status);
-
-            if (!fullStep) {
-              console.warn(
-                `[AIInputBar] Step ${newStep.id} not found in workflow!`
-              );
-              continue;
-            }
-
-            // 如果步骤已标记为 completed（如 long-video-generation 预创建的任务），跳过执行
-            if (fullStep.status === 'completed') {
-              // console.log(`[AIInputBar] Skipping already completed step: ${fullStep.mcp}`);
-              continue;
-            }
-
-            // console.log(`[AIInputBar] Executing dynamic step: ${fullStep.mcp}`, fullStep.args);
-            const success = await executeStep(fullStep);
+            const success = await executeStep(step);
             if (!success) {
               workflowFailed = true;
             }
           }
-        }
 
-        // 检查工作流是否已完成（所有步骤都是 completed 或 failed/skipped）
-        // 如果没有创建任务（createdTaskIds 为空），则立即删除 WorkZone
-        const finalWorkflow = workflowControl.getWorkflow();
-        const allStepsFinished = finalWorkflow?.steps.every(
-          (s) =>
-            s.status === 'completed' ||
-            s.status === 'failed' ||
-            s.status === 'skipped'
-        );
-        const hasCreatedTasks = createdTaskIds.length > 0;
+          // 执行动态添加的步骤（由 ai_analyze 通过 onAddSteps 添加）
+          if (!workflowFailed && pendingNewSteps.length > 0) {
+            // console.log(`[AIInputBar] Executing ${pendingNewSteps.length} dynamically added steps`);
 
-        if (allStepsFinished && !hasCreatedTasks) {
-          // 所有步骤都已完成且没有创建任务，立即删除 WorkZone
-          const workZoneId = currentWorkZoneIdRef.current;
-          const imageAnchorIds = currentImageAnchorIdsRef.current;
-          const board = SelectionWatcherBoardRef.current;
-          if ((workZoneId || imageAnchorIds.length > 0) && board) {
-            // 检查是否所有后处理都已完成
-            const allPostProcessingFinished = finalWorkflow?.steps.every(
-              (step) => {
-                const stepResult = step.result as
-                  | { taskId?: string }
-                  | undefined;
-                if (stepResult?.taskId) {
-                  const isCompleted =
-                    workflowCompletionService.isPostProcessingCompleted(
-                      stepResult.taskId
-                    );
-                  // console.log(`[AIInputBar] Task ${stepResult.taskId} post-processing finished:`, isCompleted);
-                  return isCompleted;
-                }
-                return true;
+            // 获取当前工作流状态用于调试
+            const currentWorkflow = workflowControl.getWorkflow();
+            // console.log(`[AIInputBar] Current workflow steps:`, currentWorkflow?.steps.map(s => ({ id: s.id, mcp: s.mcp, status: s.status })));
+            // console.log(`[AIInputBar] Pending steps to execute:`, pendingNewSteps.map(s => ({ id: s.id, mcp: s.mcp })));
+
+            for (const newStep of pendingNewSteps) {
+              if (workflowFailed) {
+                workflowControl.updateStep(newStep.id, 'skipped');
+                syncWorkflowUpdates();
+                continue;
               }
-            );
 
-            // console.log(`[AIInputBar] WorkZone ${workZoneId} allStepsFinished: ${allStepsFinished}, hasCreatedTasks: ${hasCreatedTasks}, allPostProcessingFinished: ${allPostProcessingFinished}`);
+              // 从 workflowControl 获取完整的步骤信息
+              const fullStep = workflowControl
+                .getWorkflow()
+                ?.steps.find((s) => s.id === newStep.id);
+              // console.log(`[AIInputBar] Looking for step ${newStep.id}, found:`, fullStep ? 'yes' : 'no', 'status:', fullStep?.status);
 
-            if (allPostProcessingFinished) {
-              // 无队列任务的 image 仍走这里做一次兜底收口；
-              // 常规 image anchor 的删除由 useImageGenerationAnchorSync 统一处理。
-              setTimeout(() => {
-                if (workZoneId) {
-                  WorkZoneTransforms.removeWorkZone(board, workZoneId);
-                  currentWorkZoneIdRef.current = null;
-                }
-                if (imageAnchorIds.length > 0) {
-                  applyCurrentImageAnchorPresentationState(board, 'completed');
-                  removeCurrentImageAnchor(board);
-                }
-              }, 1500);
+              if (!fullStep) {
+                console.warn(
+                  `[AIInputBar] Step ${newStep.id} not found in workflow!`
+                );
+                continue;
+              }
+
+              // 如果步骤已标记为 completed（如 long-video-generation 预创建的任务），跳过执行
+              if (fullStep.status === 'completed') {
+                // console.log(`[AIInputBar] Skipping already completed step: ${fullStep.mcp}`);
+                continue;
+              }
+
+              // console.log(`[AIInputBar] Executing dynamic step: ${fullStep.mcp}`, fullStep.args);
+              const success = await executeStep(fullStep);
+              if (!success) {
+                workflowFailed = true;
+              }
             }
           }
-        }
-        trackSubmitStatus(workflowFailed ? 'failed' : 'success', {
-          submitMode: 'main_thread',
-          submit_mode: 'main_thread',
-          workflowId: workflow.id,
-          workflow_id: workflow.id,
-          stepCount: finalWorkflow?.steps.length || workflow.steps.length,
-          step_count: finalWorkflow?.steps.length || workflow.steps.length,
-          createdTaskCount: createdTaskIds.length,
-          created_task_count: createdTaskIds.length,
-          failureReason: workflowFailed ? 'workflow_step_failed' : undefined,
-          failure_reason: workflowFailed ? 'workflow_step_failed' : undefined,
-        });
-      } catch (error) {
-        console.error('Failed to create generation task:', error);
-        trackSubmitStatus('failed', {
-          submitMode: 'setup',
-          submit_mode: 'setup',
-          error: error instanceof Error ? error.message : String(error),
-        });
-        if (generationType === 'image') {
-          applyCurrentImageAnchorPresentationState(
-            SelectionWatcherBoardRef.current,
-            'failed',
-            {
-              error:
-                error instanceof Error ? error.message : '创建图片任务失败',
-            }
+          // 检查工作流是否已完成（所有步骤都是 completed 或 failed/skipped）
+          // 如果没有创建任务（createdTaskIds 为空），则立即删除 WorkZone
+          const finalWorkflow = workflowControl.getWorkflow();
+          const allStepsFinished = finalWorkflow?.steps.every(
+            (s) =>
+              s.status === 'completed' ||
+              s.status === 'failed' ||
+              s.status === 'skipped'
           );
+          const hasCreatedTasks = createdTaskIds.length > 0;
+
+          if (allStepsFinished && !hasCreatedTasks) {
+            // 所有步骤都已完成且没有创建任务，立即删除 WorkZone
+            const workZoneId = currentWorkZoneIdRef.current;
+            const imageAnchorIds = currentImageAnchorIdsRef.current;
+            const board = SelectionWatcherBoardRef.current;
+            if ((workZoneId || imageAnchorIds.length > 0) && board) {
+              // 检查是否所有后处理都已完成
+              const allPostProcessingFinished = finalWorkflow?.steps.every(
+                (step) => {
+                  const stepResult = step.result as
+                    | { taskId?: string }
+                    | undefined;
+                  if (stepResult?.taskId) {
+                    const isCompleted =
+                      workflowCompletionService.isPostProcessingCompleted(
+                        stepResult.taskId
+                      );
+                    // console.log(`[AIInputBar] Task ${stepResult.taskId} post-processing finished:`, isCompleted);
+                    return isCompleted;
+                  }
+                  return true;
+                }
+              );
+
+              // console.log(`[AIInputBar] WorkZone ${workZoneId} allStepsFinished: ${allStepsFinished}, hasCreatedTasks: ${hasCreatedTasks}, allPostProcessingFinished: ${allPostProcessingFinished}`);
+
+              if (allPostProcessingFinished) {
+                // 无队列任务的 image 仍走这里做一次兜底收口；
+                // 常规 image anchor 的删除由 useImageGenerationAnchorSync 统一处理。
+                setTimeout(() => {
+                  if (workZoneId) {
+                    WorkZoneTransforms.removeWorkZone(board, workZoneId);
+                    currentWorkZoneIdRef.current = null;
+                  }
+                  if (imageAnchorIds.length > 0) {
+                    applyCurrentImageAnchorPresentationState(
+                      board,
+                      'completed'
+                    );
+                    removeCurrentImageAnchor(board);
+                  }
+                }, 1500);
+              }
+            }
+          }
+          trackSubmitStatus(workflowFailed ? 'failed' : 'success', {
+            submitMode: 'main_thread',
+            submit_mode: 'main_thread',
+            workflowId: workflow.id,
+            workflow_id: workflow.id,
+            stepCount: finalWorkflow?.steps.length || workflow.steps.length,
+            step_count: finalWorkflow?.steps.length || workflow.steps.length,
+            createdTaskCount: createdTaskIds.length,
+            created_task_count: createdTaskIds.length,
+            failureReason: workflowFailed ? 'workflow_step_failed' : undefined,
+            failure_reason: workflowFailed ? 'workflow_step_failed' : undefined,
+          });
+        } catch (error) {
+          console.error('Failed to create generation task:', error);
+          trackSubmitStatus('failed', {
+            submitMode: 'setup',
+            submit_mode: 'setup',
+            error: error instanceof Error ? error.message : String(error),
+          });
+          if (effectiveGenerationType === 'image') {
+            applyCurrentImageAnchorPresentationState(
+              SelectionWatcherBoardRef.current,
+              'failed',
+              {
+                error:
+                  error instanceof Error ? error.message : '创建图片任务失败',
+              }
+            );
+          }
+          workflowControl.abortWorkflow();
+          submitLockRef.current = false;
+          setIsSubmitting(false);
         }
-        workflowControl.abortWorkflow();
-        submitLockRef.current = false;
-        setIsSubmitting(false);
-      }
-    }, [
-      prompt,
-      allContent,
-      isSubmitting,
-      selectedModel,
-      selectedModelRef,
-      workflowControl,
-      submitWorkflowToSW,
-      addPromptHistory,
-      selectedParams,
-      knowledgeContextRefs,
-      agentMediaDefaultModels,
-      agentMediaDefaultModelRefs,
-      generationType,
-      selectedCount,
-      bindCurrentImageAnchorTask,
-      applyCurrentImageAnchorPresentationState,
-      removeCurrentImageAnchor,
-      onEnableRuntime,
-    ]);
+      },
+      [
+        prompt,
+        allContent,
+        isSubmitting,
+        selectedModel,
+        selectedModelRef,
+        workflowControl,
+        submitWorkflowToSW,
+        addPromptHistory,
+        selectedParams,
+        knowledgeContextRefs,
+        agentMediaDefaultModels,
+        agentMediaDefaultModelRefs,
+        generationType,
+        selectedCount,
+        selectedSkillId,
+        bindCurrentImageAnchorTask,
+        applyCurrentImageAnchorPresentationState,
+        removeCurrentImageAnchor,
+        onEnableRuntime,
+      ]
+    );
+
+    useEffect(() => {
+      const submitFromDrawer = async (params: DrawerGenerationSubmitParams) => {
+        await handleGenerate({
+          prompt: params.prompt,
+          content: params.selectedContent.map((item) => ({
+            type: item.type,
+            url: item.url,
+            maskImage: item.maskImage,
+            text: item.text,
+            name: item.name,
+            width: item.width,
+            height: item.height,
+          })),
+          generationType: params.generationType,
+          selectedModel: params.selectedModel,
+          selectedModelRef: params.selectedModelRef,
+          selectedParams: params.selectedParams,
+          selectedCount: params.selectedCount,
+          appendToCurrentChatSession: true,
+        });
+      };
+
+      registerGenerationSubmitterRef.current(submitFromDrawer);
+      return () => {
+        registerGenerationSubmitterRef.current(null);
+      };
+    }, [handleGenerate]);
 
     // 处理工作流重试（从指定步骤开始）
     // workZoneId: 从 WorkZone 按钮发起重试时传入的 WorkZone 元素 ID
@@ -4553,7 +4761,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
       setCanPromptManuallyExpand(shouldShowExpandButton);
       if (!shouldShowExpandButton && isPromptManuallyExpanded) {
         setIsPromptManuallyExpanded(false);
-        resizeAIInputTextarea(textarea, shouldKeepExpanded ? 'expanded' : 'collapsed');
+        resizeAIInputTextarea(
+          textarea,
+          shouldKeepExpanded ? 'expanded' : 'collapsed'
+        );
         return;
       }
 
@@ -4575,254 +4786,250 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           )}
           data-testid="ai-input-bar"
         >
-        <SelectionWatcher
-          language={language}
-          onSelectionChange={handleSelectionChange}
-          externalBoardRef={SelectionWatcherBoardRef}
-          onCanvasEmptyChange={setIsCanvasEmpty}
-          isDataReady={isDataReady}
-          onFrameSelected={handleFrameSelected}
-        />
+          <SelectionWatcher
+            language={language}
+            onSelectionChange={handleSelectionChange}
+            externalBoardRef={SelectionWatcherBoardRef}
+            onCanvasEmptyChange={setIsCanvasEmpty}
+            isDataReady={isDataReady}
+            onFrameSelected={handleFrameSelected}
+          />
 
-        <InspirationBoard
-          isCanvasEmpty={showInspirationBoard}
-          onSelectPrompt={handleSelectInspirationPrompt}
-          onOpenPromptTool={handleOpenPromptToolFromInspiration}
-        />
+          <InspirationBoard
+            isCanvasEmpty={showInspirationBoard}
+            onSelectPrompt={handleSelectInspirationPrompt}
+            onOpenPromptTool={handleOpenPromptToolFromInspiration}
+          />
 
-        <div
-          className={classNames('ai-input-bar__container', {
-            'ai-input-bar__container--expanded': shouldKeepExpanded,
-          })}
-        >
-          <div className="ai-input-bar__bottom-bar">
-            <div className="ai-input-bar__bottom-start">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-              />
+          <AIInputComposerShell
+            variant="canvas"
+            expanded={shouldKeepExpanded}
+            longText={isPromptManuallyExpanded}
+            disabled={isSubmitting}
+            leftTools={
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
 
-              <HoverTip
-                content={language === 'zh' ? '上传图片' : 'Upload images'}
-                showArrow={false}
-              >
-                <button
-                  className="ai-input-bar__upload-btn"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onClick={handleUploadClick}
-                  data-track="ai_input_click_upload"
+                <HoverTip
+                  content={language === 'zh' ? '上传图片' : 'Upload images'}
+                  showArrow={false}
                 >
-                  <ImageUploadIcon size={18} />
-                </button>
-              </HoverTip>
+                  <button
+                    className="ai-input-bar__upload-btn"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={handleUploadClick}
+                    data-track="ai_input_click_upload"
+                  >
+                    <ImageUploadIcon size={18} />
+                  </button>
+                </HoverTip>
 
-              <HoverTip
-                content={
-                  language === 'zh' ? '从素材库选择' : 'Select from library'
-                }
-                showArrow={false}
-              >
-                <button
-                  className="ai-input-bar__library-btn"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onClick={() => setShowMediaLibrary(true)}
-                  data-track="ai_input_click_library"
+                <HoverTip
+                  content={
+                    language === 'zh' ? '从素材库选择' : 'Select from library'
+                  }
+                  showArrow={false}
                 >
-                  <MediaLibraryIcon size={18} />
-                </button>
-              </HoverTip>
+                  <button
+                    className="ai-input-bar__library-btn"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={() => setShowMediaLibrary(true)}
+                    data-track="ai_input_click_library"
+                  >
+                    <MediaLibraryIcon size={18} />
+                  </button>
+                </HoverTip>
 
-              <KnowledgeNoteContextSelector
-                value={knowledgeContextRefs}
-                onChange={handleKnowledgeContextChange}
-                disabled={isSubmitting}
-                language={language}
-                variant="compact"
-                className="ai-input-bar__knowledge-selector"
-              />
-            </div>
-
-            <div className="ai-input-bar__bottom-controls">
-              <GenerationTypeDropdown
-                value={generationType}
-                onSelect={setGenerationType}
-                disabled={isSubmitting}
-              />
-
-              {/* Skill 下拉框：仅在 Agent 模式下显示 */}
-              {generationType === 'agent' && (
-                <SkillDropdown
-                  value={selectedSkillId}
-                  onSelect={setSelectedSkillId}
-                  onSelectSkill={handleSkillOptionSelect}
-                  onAddSkill={handleAddSkill}
+                <KnowledgeNoteContextSelector
+                  value={knowledgeContextRefs}
+                  onChange={handleKnowledgeContextChange}
+                  disabled={isSubmitting}
+                  language={language}
+                  variant="compact"
+                  className="ai-input-bar__knowledge-selector"
+                />
+              </>
+            }
+            controls={
+              <>
+                <GenerationTypeDropdown
+                  value={generationType}
+                  onSelect={setGenerationType}
                   disabled={isSubmitting}
                 />
-              )}
 
-              <ModelDropdown
-                selectedModel={selectedModel}
-                selectedSelectionKey={getSelectionKey(
-                  selectedModel,
-                  selectedModelRef
-                )}
-                onSelect={handleModelSelect}
-                onSelectModel={handleModelConfigSelect}
-                language={language}
-                models={currentModels}
-                header={
-                  language === 'zh'
-                    ? generationType === 'agent'
-                      ? '选择文本模型 (↑↓ Tab)'
-                      : '选择模型 (↑↓ Tab)'
-                    : generationType === 'agent'
-                    ? 'Select text model (↑↓ Tab)'
-                    : 'Select model (↑↓ Tab)'
-                }
-                isOpen={modelDropdownOpen}
-                onOpenChange={handleModelDropdownChange}
-              />
-
-              {generationType === 'agent' &&
-                selectedSkillId !== SKILL_AUTO_ID &&
-                selectedSkillMediaTypes.includes('image') && (
-                  <ModelDropdown
-                    selectedModel={selectedAgentImageModel}
-                    selectedSelectionKey={getSelectionKey(
-                      selectedAgentImageModel,
-                      selectedAgentImageModelRef
-                    )}
-                    onSelect={(modelId, modelRef) =>
-                      handleAgentMediaModelSelect('image', modelId, modelRef)
-                    }
-                    onSelectModel={(model) =>
-                      handleAgentMediaModelConfigSelect('image', model)
-                    }
-                    language={language}
-                    models={visibleAgentImageModels}
-                    header={
-                      language === 'zh'
-                        ? '选择图片模型 (↑↓ Tab)'
-                        : 'Select image model (↑↓ Tab)'
-                    }
-                  />
-                )}
-
-              {generationType === 'agent' &&
-                selectedSkillId !== SKILL_AUTO_ID &&
-                selectedSkillMediaTypes.includes('video') && (
-                  <ModelDropdown
-                    selectedModel={selectedAgentVideoModel}
-                    selectedSelectionKey={getSelectionKey(
-                      selectedAgentVideoModel,
-                      selectedAgentVideoModelRef
-                    )}
-                    onSelect={(modelId, modelRef) =>
-                      handleAgentMediaModelSelect('video', modelId, modelRef)
-                    }
-                    onSelectModel={(model) =>
-                      handleAgentMediaModelConfigSelect('video', model)
-                    }
-                    language={language}
-                    models={visibleAgentVideoModels}
-                    header={
-                      language === 'zh'
-                        ? '选择视频模型 (↑↓ Tab)'
-                        : 'Select video model (↑↓ Tab)'
-                    }
-                  />
-                )}
-
-              {generationType === 'agent' &&
-                selectedSkillId !== SKILL_AUTO_ID &&
-                selectedSkillMediaTypes.includes('audio') && (
-                  <ModelDropdown
-                    selectedModel={selectedAgentAudioModel}
-                    selectedSelectionKey={getSelectionKey(
-                      selectedAgentAudioModel,
-                      selectedAgentAudioModelRef
-                    )}
-                    onSelect={(modelId, modelRef) =>
-                      handleAgentMediaModelSelect('audio', modelId, modelRef)
-                    }
-                    onSelectModel={(model) =>
-                      handleAgentMediaModelConfigSelect('audio', model)
-                    }
-                    language={language}
-                    models={visibleAgentAudioModels}
-                    header={
-                      language === 'zh'
-                        ? '选择音频模型 (↑↓ Tab)'
-                        : 'Select audio model (↑↓ Tab)'
-                    }
-                  />
-                )}
-
-              {/* Parameters dropdown selector - Hidden for Agent mode */}
-              {generationType !== 'agent' && compatibleParams.length > 0 && (
-                <ParametersDropdown
-                  key={selectedModel} // 强制在模型切换时重新挂载以刷新可配置参数
-                  selectedParams={selectedParams}
-                  onParamChange={handleParamSelect}
-                  compatibleParams={compatibleParams}
-                  modelId={selectedModel}
-                  language={language}
-                  isOpen={paramsDropdownOpen}
-                  onOpenChange={handleParamsDropdownChange}
-                />
-              )}
-
-              {generationType !== 'agent' &&
-                generationType !== 'text' &&
-                generationType !== 'audio' && (
-                  <CountDropdown
-                    value={selectedCount}
-                    onSelect={handleCountSelect}
+                {/* Skill 下拉框：仅在 Agent 模式下显示 */}
+                {generationType === 'agent' && (
+                  <SkillDropdown
+                    value={selectedSkillId}
+                    onSelect={setSelectedSkillId}
+                    onSelectSkill={handleSkillOptionSelect}
+                    onAddSkill={handleAddSkill}
                     disabled={isSubmitting}
-                    isOpen={countDropdownOpen}
-                    onOpenChange={handleCountDropdownChange}
                   />
                 )}
-            </div>
 
-            <button
-              className={classNames('ai-input-bar__send-btn', {
-                active: canGenerate,
-                loading: isSubmitting,
-                'ai-input-bar__send-btn--guide': shouldHighlightInspirationSend,
-              })}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onClick={() => handleGenerate('button')}
-              disabled={!canGenerate || isSubmitting}
-              data-track="ai_input_click_send"
-              data-track-params={sendButtonTrackParams}
-              data-testid="ai-send-btn"
-            >
-              <Send size={18} />
-            </button>
-          </div>
+                <ModelDropdown
+                  selectedModel={selectedModel}
+                  selectedSelectionKey={getSelectionKey(
+                    selectedModel,
+                    selectedModelRef
+                  )}
+                  onSelect={handleModelSelect}
+                  onSelectModel={handleModelConfigSelect}
+                  language={language}
+                  models={currentModels}
+                  header={
+                    language === 'zh'
+                      ? generationType === 'agent'
+                        ? '选择文本模型 (↑↓ Tab)'
+                        : '选择模型 (↑↓ Tab)'
+                      : generationType === 'agent'
+                      ? 'Select text model (↑↓ Tab)'
+                      : 'Select model (↑↓ Tab)'
+                  }
+                  isOpen={modelDropdownOpen}
+                  onOpenChange={handleModelDropdownChange}
+                />
 
-          <div
-            className={classNames('ai-input-bar__input-area', {
-              'ai-input-bar__input-area--expanded': shouldKeepExpanded,
-              'ai-input-bar__input-area--long-text': isPromptManuallyExpanded,
-            })}
-          >
-            {allContent.length > 0 && (
-              <div className="ai-input-bar__content-preview">
+                {generationType === 'agent' &&
+                  selectedSkillId !== SKILL_AUTO_ID &&
+                  selectedSkillMediaTypes.includes('image') && (
+                    <ModelDropdown
+                      selectedModel={selectedAgentImageModel}
+                      selectedSelectionKey={getSelectionKey(
+                        selectedAgentImageModel,
+                        selectedAgentImageModelRef
+                      )}
+                      onSelect={(modelId, modelRef) =>
+                        handleAgentMediaModelSelect('image', modelId, modelRef)
+                      }
+                      onSelectModel={(model) =>
+                        handleAgentMediaModelConfigSelect('image', model)
+                      }
+                      language={language}
+                      models={visibleAgentImageModels}
+                      header={
+                        language === 'zh'
+                          ? '选择图片模型 (↑↓ Tab)'
+                          : 'Select image model (↑↓ Tab)'
+                      }
+                    />
+                  )}
+
+                {generationType === 'agent' &&
+                  selectedSkillId !== SKILL_AUTO_ID &&
+                  selectedSkillMediaTypes.includes('video') && (
+                    <ModelDropdown
+                      selectedModel={selectedAgentVideoModel}
+                      selectedSelectionKey={getSelectionKey(
+                        selectedAgentVideoModel,
+                        selectedAgentVideoModelRef
+                      )}
+                      onSelect={(modelId, modelRef) =>
+                        handleAgentMediaModelSelect('video', modelId, modelRef)
+                      }
+                      onSelectModel={(model) =>
+                        handleAgentMediaModelConfigSelect('video', model)
+                      }
+                      language={language}
+                      models={visibleAgentVideoModels}
+                      header={
+                        language === 'zh'
+                          ? '选择视频模型 (↑↓ Tab)'
+                          : 'Select video model (↑↓ Tab)'
+                      }
+                    />
+                  )}
+
+                {generationType === 'agent' &&
+                  selectedSkillId !== SKILL_AUTO_ID &&
+                  selectedSkillMediaTypes.includes('audio') && (
+                    <ModelDropdown
+                      selectedModel={selectedAgentAudioModel}
+                      selectedSelectionKey={getSelectionKey(
+                        selectedAgentAudioModel,
+                        selectedAgentAudioModelRef
+                      )}
+                      onSelect={(modelId, modelRef) =>
+                        handleAgentMediaModelSelect('audio', modelId, modelRef)
+                      }
+                      onSelectModel={(model) =>
+                        handleAgentMediaModelConfigSelect('audio', model)
+                      }
+                      language={language}
+                      models={visibleAgentAudioModels}
+                      header={
+                        language === 'zh'
+                          ? '选择音频模型 (↑↓ Tab)'
+                          : 'Select audio model (↑↓ Tab)'
+                      }
+                    />
+                  )}
+
+                {/* Parameters dropdown selector - Hidden for Agent mode */}
+                {generationType !== 'agent' && compatibleParams.length > 0 && (
+                  <ParametersDropdown
+                    key={selectedModel} // 强制在模型切换时重新挂载以刷新可配置参数
+                    selectedParams={selectedParams}
+                    onParamChange={handleParamSelect}
+                    compatibleParams={compatibleParams}
+                    modelId={selectedModel}
+                    language={language}
+                    isOpen={paramsDropdownOpen}
+                    onOpenChange={handleParamsDropdownChange}
+                  />
+                )}
+
+                {generationType !== 'agent' &&
+                  generationType !== 'text' &&
+                  generationType !== 'audio' && (
+                    <CountDropdown
+                      value={selectedCount}
+                      onSelect={handleCountSelect}
+                      disabled={isSubmitting}
+                      isOpen={countDropdownOpen}
+                      onOpenChange={handleCountDropdownChange}
+                    />
+                  )}
+              </>
+            }
+            sendButton={
+              <button
+                className={classNames('ai-input-bar__send-btn', {
+                  active: canGenerate,
+                  loading: isSubmitting,
+                  'ai-input-bar__send-btn--guide':
+                    shouldHighlightInspirationSend,
+                })}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={() => handleGenerate('button')}
+                disabled={!canGenerate || isSubmitting}
+                data-track="ai_input_click_send"
+                data-track-params={sendButtonTrackParams}
+                data-testid="ai-send-btn"
+              >
+                <Send size={18} />
+              </button>
+            }
+            preview={
+              allContent.length > 0 ? (
                 <SelectedContentPreview
                   items={allContent}
                   language={language}
@@ -4830,129 +5037,133 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                   onRemove={handleRemoveUploadedContent}
                   removableStartIndex={uploadedContent.length}
                 />
-              </div>
-            )}
-
-            <div className="ai-input-bar__prompt-row">
-              <div className="ai-input-bar__rich-input">
-                {canPromptManuallyExpand ? (
-                  <HoverTip content={promptExpandLabel} showArrow={false}>
-                    <button
-                      type="button"
-                      className={classNames('ai-input-bar__prompt-expand-btn', {
-                        'ai-input-bar__prompt-expand-btn--active':
-                          isPromptManuallyExpanded,
-                      })}
-                      aria-label={promptExpandLabel}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      onClick={handleTogglePromptExpanded}
-                      disabled={isSubmitting}
-                    >
-                      {isPromptManuallyExpanded ? (
-                        <Minimize2 size={13} aria-hidden="true" />
-                      ) : (
-                        <Maximize2 size={13} aria-hidden="true" />
-                      )}
-                    </button>
-                  </HoverTip>
-                ) : null}
-                <textarea
-                  ref={inputRef}
-                  className={classNames('ai-input-bar__input', {
-                    'ai-input-bar__input--focused': shouldKeepExpanded,
-                    'ai-input-bar__input--long-text': isPromptManuallyExpanded,
-                  })}
-                  value={prompt}
-                  onChange={handleInputChange}
-                  onKeyDown={handleKeyDown}
-                  onFocus={handleFocus}
-                  onBlur={handleBlur}
-                  placeholder={
-                    generationType === 'agent'
-                      ? language === 'zh'
-                        ? '输入指令，让 Agent 为你工作...'
-                        : 'Type instructions for Agent...'
-                      : generationType === 'text'
-                      ? language === 'zh'
-                        ? '输入你想生成的文本内容、文章、摘要或 Markdown'
-                        : 'Describe the text, article, summary, or markdown you want'
-                      : generationType === 'audio'
-                      ? hasSelectedTextContent
+              ) : null
+            }
+            textarea={
+              <>
+                <div className="ai-input-bar__rich-input">
+                  {canPromptManuallyExpand ? (
+                    <HoverTip content={promptExpandLabel} showArrow={false}>
+                      <button
+                        type="button"
+                        className={classNames(
+                          'ai-input-bar__prompt-expand-btn',
+                          {
+                            'ai-input-bar__prompt-expand-btn--active':
+                              isPromptManuallyExpanded,
+                          }
+                        )}
+                        aria-label={promptExpandLabel}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={handleTogglePromptExpanded}
+                        disabled={isSubmitting}
+                      >
+                        {isPromptManuallyExpanded ? (
+                          <Minimize2 size={13} aria-hidden="true" />
+                        ) : (
+                          <Maximize2 size={13} aria-hidden="true" />
+                        )}
+                      </button>
+                    </HoverTip>
+                  ) : null}
+                  <textarea
+                    ref={inputRef}
+                    className={classNames('ai-input-bar__input', {
+                      'ai-input-bar__input--focused': shouldKeepExpanded,
+                      'ai-input-bar__input--long-text':
+                        isPromptManuallyExpanded,
+                    })}
+                    value={prompt}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
+                    placeholder={
+                      generationType === 'agent'
                         ? language === 'zh'
-                          ? '已有文本，无需额外提示词，直接发送'
-                          : 'Text already selected. No extra prompt needed, just send'
+                          ? '输入指令，让 Agent 为你工作...'
+                          : 'Type instructions for Agent...'
+                        : generationType === 'text'
+                        ? language === 'zh'
+                          ? '输入你想生成的文本内容、文章、摘要或 Markdown'
+                          : 'Describe the text, article, summary, or markdown you want'
+                        : generationType === 'audio'
+                        ? hasSelectedTextContent
+                          ? language === 'zh'
+                            ? '已有文本，无需额外提示词，直接发送'
+                            : 'Text already selected. No extra prompt needed, just send'
+                          : language === 'zh'
+                          ? '描述你想要生成的音乐、风格、歌词或情绪'
+                          : 'Describe the music, style, lyrics, or mood you want'
                         : language === 'zh'
-                        ? '描述你想要生成的音乐、风格、歌词或情绪'
-                        : 'Describe the music, style, lyrics, or mood you want'
-                      : language === 'zh'
-                      ? `描述你想要创建的${
-                          generationType === 'image' ? '图片' : '视频'
-                        }`
-                      : `Describe the ${
-                          generationType === 'image' ? 'image' : 'video'
-                        } you want to create`
-                  }
-                  rows={
-                    isPromptManuallyExpanded
-                      ? AI_INPUT_LONG_TEXT_ROWS
-                      : shouldKeepExpanded
-                      ? AI_INPUT_EXPANDED_ROWS
-                      : AI_INPUT_COLLAPSED_ROWS
-                  }
-                  disabled={isSubmitting}
-                  data-testid="ai-input-textarea"
-                />
-              </div>
+                        ? `描述你想要创建的${
+                            generationType === 'image' ? '图片' : '视频'
+                          }`
+                        : `Describe the ${
+                            generationType === 'image' ? 'image' : 'video'
+                          } you want to create`
+                    }
+                    rows={
+                      isPromptManuallyExpanded
+                        ? AI_INPUT_LONG_TEXT_ROWS
+                        : shouldKeepExpanded
+                        ? AI_INPUT_EXPANDED_ROWS
+                        : AI_INPUT_COLLAPSED_ROWS
+                    }
+                    disabled={isSubmitting}
+                    data-testid="ai-input-textarea"
+                  />
+                </div>
 
-              <PromptHistoryPopover
-                generationType={generationType}
-                onSelectPrompt={handleSelectHistoryPrompt}
-                language={language}
-                onBeforeOpenMyPrompts={onEnableToolWindows}
-                extraActions={
-                  shouldKeepExpanded ? (
-                    <PromptOptimizeButton
-                      className="prompt-history-popover__action-btn"
-                      originalPrompt={prompt}
-                      language={language}
-                      scenarioId={`ai-input.${generationType}` as const}
-                      disabled={isSubmitting}
-                      allowStructuredMode={true}
-                      onOpenChange={setIsPromptOptimizeOpen}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setIsFocused(true);
-                      }}
-                      onApply={(optimizedPrompt) => {
-                        setPrompt(optimizedPrompt);
-                        setIsFocused(true);
-                        requestAnimationFrame(() => {
-                          inputRef.current?.focus();
-                        });
-                      }}
-                    />
-                  ) : null
-                }
-              />
-            </div>
-          </div>
-        </div>
+                <PromptHistoryPopover
+                  generationType={generationType}
+                  onSelectPrompt={handleSelectHistoryPrompt}
+                  language={language}
+                  onBeforeOpenMyPrompts={onEnableToolWindows}
+                  extraActions={
+                    shouldKeepExpanded ? (
+                      <PromptOptimizeButton
+                        className="prompt-history-popover__action-btn"
+                        originalPrompt={prompt}
+                        language={language}
+                        scenarioId={`ai-input.${generationType}` as const}
+                        disabled={isSubmitting}
+                        allowStructuredMode={true}
+                        onOpenChange={setIsPromptOptimizeOpen}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setIsFocused(true);
+                        }}
+                        onApply={(optimizedPrompt) => {
+                          setPrompt(optimizedPrompt);
+                          setIsFocused(true);
+                          requestAnimationFrame(() => {
+                            inputRef.current?.focus();
+                          });
+                        }}
+                      />
+                    ) : null
+                  }
+                />
+              </>
+            }
+          />
 
           {showMediaLibrary && (
-          <MediaLibraryModal
-            isOpen={showMediaLibrary}
-            onClose={() => setShowMediaLibrary(false)}
-            mode={SelectionMode.SELECT}
-            filterType={AssetType.IMAGE}
-            onSelect={handleMediaLibrarySelect}
-            onSelectMultiple={handleMediaLibrarySelectMultiple}
-            batchSelectButtonText="批量插入对话框"
-          />
-        )}
+            <MediaLibraryModal
+              isOpen={showMediaLibrary}
+              onClose={() => setShowMediaLibrary(false)}
+              mode={SelectionMode.SELECT}
+              filterType={AssetType.IMAGE}
+              onSelect={handleMediaLibrarySelect}
+              onSelectMultiple={handleMediaLibrarySelectMultiple}
+              batchSelectButtonText="批量插入对话框"
+            />
+          )}
         </div>
       </>
     );

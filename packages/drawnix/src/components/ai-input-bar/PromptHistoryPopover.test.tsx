@@ -95,20 +95,28 @@ vi.mock('../shared', () => ({
   },
 }));
 
-vi.mock('../../constants/built-in-tools', () => ({
-  BUILT_IN_TOOLS: [
-    {
-      id: 'prompt-history',
-      name: '我的提示词',
-      component: 'prompt-history',
-    },
-  ],
+vi.mock('../shared/hover', () => ({
+  HoverTip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('../../services/tool-window-service', () => ({
   toolWindowService: {
     openTool: mockOpenTool,
     getToolState: vi.fn(),
+  },
+}));
+
+vi.mock('../../tools/registry', () => ({
+  toolRegistry: {
+    getManifestById: (id: string) =>
+      id === 'prompt-history'
+        ? {
+            id: 'prompt-history',
+            name: '我的提示词',
+            component: 'prompt-history',
+          }
+        : null,
+    isBuiltInTool: (id: string) => id === 'prompt-history',
   },
 }));
 
@@ -371,7 +379,11 @@ describe('PromptHistoryPopover', () => {
 
     expect(screen.getByText('我的提示词')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('我的提示词'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('我的提示词'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     expect(onBeforeOpenMyPrompts).toHaveBeenCalledTimes(1);
     expect(mockOpenTool).toHaveBeenCalledWith(

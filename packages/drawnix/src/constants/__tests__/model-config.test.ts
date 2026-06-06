@@ -1,12 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
+  clearRuntimeModelConfigs,
   getCompatibleParams,
   getSizeOptionsForModel,
   getStaticModelConfig,
   ModelVendor,
+  setRuntimeModelConfigs,
 } from '../model-config';
 
 describe('model-config image size options', () => {
+  afterEach(() => {
+    clearRuntimeModelConfigs();
+  });
+
   it('为 gpt-image-2 系列暴露扩展比例', () => {
     const expected = [
       'auto',
@@ -67,6 +73,57 @@ describe('model-config image size options', () => {
     ]);
   });
 
+  it('为 Midjourney 暴露 V8 和 V8.1 版本参数', () => {
+    const params = getCompatibleParams('mj-imagine');
+    const versionParam = params.find((param) => param.id === 'mj_v');
+
+    expect(versionParam?.options?.map((option) => option.value)).toEqual([
+      'default',
+      '8.1',
+      '8',
+      '7',
+      '6',
+    ]);
+  });
+
+  it('为 Midjourney 参数使用标签兼容而不是固定模型 ID', () => {
+    const params = getCompatibleParams('mj-imagine');
+
+    ['mj_ar', 'mj_v', 'mj_style', 'mj_s', 'mj_q', 'mj_seed'].forEach(
+      (paramId) => {
+        expect(params.find((param) => param.id === paramId)?.compatibleModels).toEqual([]);
+        expect(params.find((param) => param.id === paramId)?.compatibleTags).toEqual([
+          'mj',
+          'midjourney',
+        ]);
+      }
+    );
+  });
+
+  it('只为 Midjourney 模型暴露 Midjourney 参数', () => {
+    setRuntimeModelConfigs([
+      {
+        id: 'mj_fast_background_eraser',
+        label: 'mj_fast_background_eraser',
+        type: 'image',
+        vendor: ModelVendor.MIDJOURNEY,
+        tags: ['runtime', 'mj'],
+      },
+    ]);
+
+    const mjRuntimeParamIds = getCompatibleParams(
+      'mj_fast_background_eraser'
+    ).map((param) => param.id);
+    const gptParamIds = getCompatibleParams('gpt-image-2').map(
+      (param) => param.id
+    );
+
+    expect(mjRuntimeParamIds).toContain('mj_ar');
+    expect(mjRuntimeParamIds).toContain('mj_v');
+    expect(gptParamIds).not.toContain('mj_ar');
+    expect(gptParamIds).not.toContain('mj_v');
+  });
+
   it('按模型暴露 HappyHorse 参数控制', () => {
     const t2vParams = getCompatibleParams('happyhorse-1.0-t2v');
     const i2vParams = getCompatibleParams('happyhorse-1.0-i2v');
@@ -123,5 +180,44 @@ describe('model-config image size options', () => {
     expect(getStaticModelConfig('happyhorse-1.0-t2v')?.vendor).toBe(
       ModelVendor.HAPPYHORSE
     );
+  });
+
+  it('为 Omni Flash 系列按 Veo 3.1 暴露视频参数', () => {
+    const omniFlashParams = getCompatibleParams('omni-flash');
+    const omniComponentsParams = getCompatibleParams('omni-flash-components');
+
+    expect(getStaticModelConfig('omni-flash')).toMatchObject({
+      label: 'Gemini Omni Flash',
+      type: 'video',
+      vendor: ModelVendor.GEMINI,
+      videoDefaults: {
+        duration: '8',
+        size: '1280x720',
+        aspectRatio: '16:9',
+      },
+    });
+    expect(getStaticModelConfig('omni-flash-components')).toMatchObject({
+      label: 'Gemini Omni Flash Components',
+      type: 'video',
+      vendor: ModelVendor.GEMINI,
+      videoDefaults: {
+        duration: '8',
+        size: '1280x720',
+        aspectRatio: '16:9',
+      },
+    });
+
+    for (const params of [omniFlashParams, omniComponentsParams]) {
+      expect(
+        params
+          .find((param) => param.id === 'duration')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['8']);
+      expect(
+        params
+          .find((param) => param.id === 'size')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['1280x720', '720x1280']);
+    }
   });
 });

@@ -9,7 +9,7 @@ import { ToolDefinition } from '../../types/toolbox.types';
 import {
   TOOL_CATEGORY_LABELS,
   sortToolCategories,
-} from '../../constants/built-in-tools';
+} from '../../constants/toolbox-shared';
 import { ToolItem } from './ToolItem';
 
 export interface ToolListProps {

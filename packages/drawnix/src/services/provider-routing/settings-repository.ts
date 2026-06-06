@@ -112,6 +112,7 @@ function toProviderProfileSnapshot(
     | 'apiKey'
     | 'authType'
     | 'imageApiCompatibility'
+    | 'preferAsyncImageEndpoint'
     | 'extraHeaders'
   >
 ): ProviderProfileSnapshot {
@@ -128,6 +129,7 @@ function toProviderProfileSnapshot(
     ),
     imageApiCompatibility:
       profile.imageApiCompatibility || DEFAULT_PROVIDER_IMAGE_API_COMPATIBILITY,
+    preferAsyncImageEndpoint: profile.preferAsyncImageEndpoint ?? false,
     extraHeaders: profile.extraHeaders,
   };
 }
@@ -210,6 +212,8 @@ function buildLegacyProfileSnapshot(): ProviderProfileSnapshot {
     imageApiCompatibility:
       existingLegacyProfile?.imageApiCompatibility ||
       legacyImageApiCompatibilityFallback,
+    preferAsyncImageEndpoint:
+      existingLegacyProfile?.preferAsyncImageEndpoint ?? false,
   };
 }
 

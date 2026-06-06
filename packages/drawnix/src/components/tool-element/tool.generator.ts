@@ -13,7 +13,6 @@ import React, { Suspense } from 'react';
 import { ToolProviderWrapper } from '../startup/ToolProviderWrapper';
 import { ToolTransforms } from './tool.transforms';
 import { toolWindowService } from '../../services/tool-window-service';
-import { BUILT_IN_TOOLS } from '../../constants/built-in-tools';
 import { processToolUrl, hasTemplateVariables } from '../../utils/url-template';
 import { toolRegistry } from '../../tools/registry';
 
@@ -847,9 +846,7 @@ export class ToolGenerator {
    * 查找工具定义
    */
   private findToolDefinition(element: PlaitTool): ToolDefinition | undefined {
-    const builtInTool =
-      toolRegistry.getManifestById(element.toolId)
-      || BUILT_IN_TOOLS.find((tool) => tool.id === element.toolId);
+    const builtInTool = toolRegistry.getManifestById(element.toolId);
     if (builtInTool) {
       return builtInTool;
     }

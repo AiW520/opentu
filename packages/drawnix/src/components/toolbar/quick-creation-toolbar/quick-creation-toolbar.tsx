@@ -45,6 +45,8 @@ import { SelectionMode, Asset, AssetType } from '../../../types/asset.types';
 import { insertImageFromUrl } from '../../../data/image';
 import { insertVideoFromUrl } from '../../../data/video';
 import { insertAudioFromUrl } from '../../../data/audio';
+import { executeCanvasInsertion } from '../../../services/canvas-operations';
+import { logCanvasInsertionDebug, calculateImageDisplayDimensions, CANVAS_INSERTION_LAYOUT } from '../../../utils/canvas-insertion-layout';
 import { MessagePlugin } from 'tdesign-react';
 import './quick-creation-toolbar.scss';
 
@@ -233,20 +235,66 @@ export const QuickCreationToolbar: React.FC<QuickCreationToolbarProps> = ({
     }
   };
 
+  /**
+   * 预加载图片并计算合理的显示尺寸（素材库图片为本地缓存，加载几乎即时）
+   * 使用与 buildImage 一致的缩放逻辑，确保网格布局正确
+   */
+  const loadImageDimensions = (
+    url: string
+  ): Promise<{ width: number; height: number }> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const dimensions = calculateImageDisplayDimensions(
+          img.naturalWidth, 
+          img.naturalHeight,
+          CANVAS_INSERTION_LAYOUT.MEDIA_MAX_SIZE
+        );
+        resolve(dimensions);
+      };
+      img.onerror = () => resolve({ width: 400, height: 400 });
+      img.src = url;
+    });
+
   const handleInsertMultipleAssets = async (assets: Asset[]) => {
     if (assets.length === 0) return;
 
-    let successCount = 0;
-    let failCount = 0;
+    // 预加载所有图片的真实尺寸，供排位系统使用
+    const imageDimensionsMap = new Map<string, { width: number; height: number }>();
+    const imageAssets = assets.filter((a) => a.type === AssetType.IMAGE);
+    if (imageAssets.length > 0) {
+      const results = await Promise.all(
+        imageAssets.map((a) => loadImageDimensions(a.url))
+      );
+      imageAssets.forEach((a, i) => imageDimensionsMap.set(a.url, results[i]));
+    }
 
-    for (const asset of assets) {
-      try {
+    logCanvasInsertionDebug('[CanvasInsertion][Toolbar] batch assets begin', {
+      source: 'quick-creation-toolbar',
+      strategy: 'shared-batch-layout',
+      assetsCount: assets.length,
+      assetTypes: assets.map((asset) => asset.type),
+      zoom: (board as any)?.viewport?.zoom || 1,
+    });
+
+    const insertionResult = await executeCanvasInsertion({
+      items: assets.map((asset) => {
         if (asset.type === AssetType.IMAGE) {
-          await insertImageFromUrl(board, asset.url);
-        } else if (asset.type === AssetType.VIDEO) {
-          await insertVideoFromUrl(board, asset.url);
-        } else if (asset.type === AssetType.AUDIO) {
-          await insertAudioFromUrl(board, asset.url, {
+          return {
+            type: 'image' as const,
+            content: asset.url,
+            dimensions: imageDimensionsMap.get(asset.url),
+          };
+        }
+
+        if (asset.type === AssetType.VIDEO) {
+          return { type: 'video' as const, content: asset.url };
+        }
+
+        return {
+          type: 'audio' as const,
+          content: asset.url,
+          metadata: {
             title: asset.name,
             duration: asset.duration,
             previewImageUrl: asset.thumbnail,
@@ -254,23 +302,21 @@ export const QuickCreationToolbar: React.FC<QuickCreationToolbarProps> = ({
             mv: asset.modelName,
             clipId: asset.clipId,
             providerTaskId: asset.providerTaskId,
-          });
-        }
-        successCount++;
-      } catch (error) {
-        console.error('Failed to insert asset:', asset.name, error);
-        failCount++;
-      }
-    }
+          },
+        };
+      }),
+      // 素材库批量插入时使用更大的间隔，让图片之间更清晰
+      horizontalGap: 30,
+      verticalGap: 40,
+    });
 
-    if (failCount === 0) {
-      MessagePlugin.success(
-        `已成功插入 ${successCount} 个素材到画板`
-      );
+    if (insertionResult.success) {
+      const insertedCount =
+        (insertionResult.data as { insertedCount?: number } | undefined)
+          ?.insertedCount ?? assets.length;
+      MessagePlugin.success(`已成功插入 ${insertedCount} 个素材到画板`);
     } else {
-      MessagePlugin.warning(
-        `已插入 ${successCount} 个素材，${failCount} 个失败`
-      );
+      MessagePlugin.error(insertionResult.error || '插入素材失败');
     }
 
     setMediaLibraryOpen(false);

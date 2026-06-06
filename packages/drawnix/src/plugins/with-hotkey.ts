@@ -337,6 +337,17 @@ export const buildDrawnixHotkeyPlugin = (
             event.preventDefault();
             return;
           }
+          if (
+            event.key === 'Backspace' &&
+            PlaitBoard.isInPointer(board, [
+              FreehandShape.feltTipPen,
+              FreehandShape.mask,
+            ])
+          ) {
+            board.undo();
+            event.preventDefault();
+            return;
+          }
           if (event.key === 'h') {
             BoardTransforms.updatePointerType(board, PlaitPointerType.hand);
             updateAppState({ pointer: PlaitPointerType.hand });

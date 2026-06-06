@@ -833,13 +833,16 @@ const AIVideoGeneration = ({
   // Convert ReferenceImage[] to UploadedVideoImage[]
   const referenceImagesToUploadedImages = React.useCallback(
     (refImages: ReferenceImage[], labels: string[]): UploadedVideoImage[] => {
-      return refImages.map((img, index) => ({
-        slot: index,
-        slotLabel: labels[index] || `参考图${index + 1}`,
-        url: img.url,
-        name: img.name,
-        file: img.file,
-      }));
+      return refImages.map((img, index) => {
+        const slot = img.slot ?? index;
+        return {
+          slot,
+          slotLabel: labels[slot] || `参考图${slot + 1}`,
+          url: img.url,
+          name: img.name,
+          file: img.file,
+        };
+      });
     },
     []
   );
@@ -851,6 +854,7 @@ const AIVideoGeneration = ({
         url: img.url,
         name: img.name,
         file: img.file,
+        slot: img.slot,
       }));
     },
     []

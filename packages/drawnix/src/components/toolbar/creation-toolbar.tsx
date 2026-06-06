@@ -53,6 +53,8 @@ import { SelectionMode, Asset, AssetType } from '../../types/asset.types';
 import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
 import { insertAudioFromUrl } from '../../data/audio';
+import { executeCanvasInsertion } from '../../services/canvas-operations';
+import { logCanvasInsertionDebug } from '../../utils/canvas-insertion-layout';
 import { Popover, PopoverContent, PopoverTrigger } from '../popover/popover';
 import { FreehandShape } from '../../plugins/freehand/type';
 import { PenShape } from '../../plugins/pen/type';
@@ -317,17 +319,28 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
     async (assets: Asset[]) => {
       if (assets.length === 0) return;
 
-      let successCount = 0;
-      let failCount = 0;
+      logCanvasInsertionDebug('[CanvasInsertion][Toolbar] batch assets begin', {
+        source: 'creation-toolbar',
+        strategy: 'shared-batch-layout',
+        assetsCount: assets.length,
+        assetTypes: assets.map((asset) => asset.type),
+        zoom: (board as any)?.viewport?.zoom || 1,
+      });
 
-      for (const asset of assets) {
-        try {
+      const insertionResult = await executeCanvasInsertion({
+        items: assets.map((asset) => {
           if (asset.type === AssetType.IMAGE) {
-            await insertImageFromUrl(board, asset.url);
-          } else if (asset.type === AssetType.VIDEO) {
-            await insertVideoFromUrl(board, asset.url);
-          } else if (asset.type === AssetType.AUDIO) {
-            await insertAudioFromUrl(board, asset.url, {
+            return { type: 'image' as const, content: asset.url };
+          }
+
+          if (asset.type === AssetType.VIDEO) {
+            return { type: 'video' as const, content: asset.url };
+          }
+
+          return {
+            type: 'audio' as const,
+            content: asset.url,
+            metadata: {
               title: asset.name,
               duration: asset.duration,
               previewImageUrl: asset.thumbnail,
@@ -335,21 +348,18 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
               mv: asset.modelName,
               clipId: asset.clipId,
               providerTaskId: asset.providerTaskId,
-            });
-          }
-          successCount++;
-        } catch (error) {
-          console.error('Failed to insert asset:', asset.name, error);
-          failCount++;
-        }
-      }
+            },
+          };
+        }),
+      });
 
-      if (failCount === 0) {
-        MessagePlugin.success(`已成功插入 ${successCount} 个素材到画板`);
+      if (insertionResult.success) {
+        const insertedCount =
+          (insertionResult.data as { insertedCount?: number } | undefined)
+            ?.insertedCount ?? assets.length;
+        MessagePlugin.success(`已成功插入 ${insertedCount} 个素材到画板`);
       } else {
-        MessagePlugin.warning(
-          `已插入 ${successCount} 个素材，${failCount} 个失败`
-        );
+        MessagePlugin.error(insertionResult.error || '插入素材失败');
       }
     },
     [board]
@@ -900,8 +910,8 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
     (
       buttonId: string,
       index: number,
-      isVisible: boolean = true,
-      visibleIndex: number = -1
+      isVisible = true,
+      visibleIndex = -1
     ) => {
       const buttonElement = renderButtonById(buttonId, index);
       if (!buttonElement) return null;

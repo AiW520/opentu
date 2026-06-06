@@ -477,6 +477,15 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
   const [showBatchImportModal, setShowBatchImportModal] = useState(false);
   const [pendingImportFiles, setPendingImportFiles] = useState<File[]>([]);
   const [importStartRow, setImportStartRow] = useState<number>(1); // 从第几行开始插入（1-based）
+  const normalizedImagesPerRow = Math.min(
+    5,
+    Math.max(1, Math.floor(Number.isFinite(imagesPerRow) ? imagesPerRow : 1))
+  );
+  const pendingImportRowCount =
+    pendingImportFiles.length > 0
+      ? Math.ceil(pendingImportFiles.length / normalizedImagesPerRow)
+      : 0;
+  const maxImportStartRow = Math.max(1, tasks.length + pendingImportRowCount);
 
   // 创建预览图片的 Blob URL（防止渲染时重复创建导致内存泄漏）
   const previewUrls = useMemo(() => {
@@ -1460,7 +1469,7 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
     if (pendingImportFiles.length === 0) return;
     const endTrack = trackMemory(`批量导入(${pendingImportFiles.length}张)`);
 
-    const perRow = imagesPerRow;
+    const perRow = normalizedImagesPerRow;
     const totalImages = pendingImportFiles.length;
     const rowsNeeded = Math.ceil(totalImages / perRow);
     const startIndex = importStartRow - 1; // 转为 0-based index
@@ -1545,7 +1554,7 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
     MessagePlugin.success(message);
   }, [
     pendingImportFiles,
-    imagesPerRow,
+    normalizedImagesPerRow,
     importStartRow,
     taskIdCounter,
     tasks.length,
@@ -3662,13 +3671,14 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
                   <input
                     type="number"
                     min={1}
-                    max={
-                      tasks.length +
-                      Math.ceil(pendingImportFiles.length / imagesPerRow)
-                    }
+                    max={maxImportStartRow}
                     value={importStartRow}
                     onChange={(e) => {
-                      const val = Math.max(1, parseInt(e.target.value) || 1);
+                      const parsed = parseInt(e.target.value, 10);
+                      const val = Math.min(
+                        maxImportStartRow,
+                        Math.max(1, Number.isFinite(parsed) ? parsed : 1)
+                      );
                       setImportStartRow(val);
                     }}
                     className="start-row-input"
@@ -3682,11 +3692,18 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
                   <div className="per-row-options">
                     {[1, 2, 3, 4, 5].map((num) => (
                       <button
+                        type="button"
                         key={num}
                         className={`per-row-btn ${
-                          imagesPerRow === num ? 'active' : ''
+                          normalizedImagesPerRow === num ? 'active' : ''
                         }`}
                         onClick={() => setImagesPerRow(num)}
+                        aria-pressed={normalizedImagesPerRow === num}
+                        aria-label={
+                          language === 'zh'
+                            ? `每行 ${num} 张图片`
+                            : `${num} image${num > 1 ? 's' : ''} per row`
+                        }
                       >
                         {num}
                       </button>
@@ -3697,19 +3714,18 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
 
               <p className="import-preview">
                 {language === 'zh'
-                  ? `从第 ${importStartRow} 行开始，填充 ${Math.ceil(
-                      pendingImportFiles.length / imagesPerRow
-                    )} 行，每行 ${imagesPerRow} 张图片`
-                  : `Starting from row ${importStartRow}, filling ${Math.ceil(
-                      pendingImportFiles.length / imagesPerRow
-                    )} rows with ${imagesPerRow} image(s) each`}
+                  ? `从第 ${importStartRow} 行开始，填充 ${pendingImportRowCount} 行，每行 ${normalizedImagesPerRow} 张图片`
+                  : `Starting from row ${importStartRow}, filling ${pendingImportRowCount} rows with ${normalizedImagesPerRow} image(s) each`}
               </p>
 
               {/* 图片预览（使用预创建的 Blob URL 避免内存泄漏） */}
               <div className="import-preview-grid">
                 {previewUrls.map((url, index) => (
                   <div key={index} className="preview-item">
-                    <img src={url} alt="" />
+                    <img
+                      src={url}
+                      alt={pendingImportFiles[index]?.name || ''}
+                    />
                   </div>
                 ))}
                 {pendingImportFiles.length > 12 && (
@@ -3735,7 +3751,7 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
                 data-track="batch_import_modal_confirm_click"
                 data-track-params={JSON.stringify({
                   imageCount: pendingImportFiles.length,
-                  imagesPerRow,
+                  imagesPerRow: normalizedImagesPerRow,
                   startRow: importStartRow,
                 })}
               >

@@ -27,8 +27,6 @@ import {
   type ResolvedPromptItem,
 } from '../ttd-dialog/shared/prompt-utils';
 import { analytics } from '../../utils/posthog-analytics';
-import { BUILT_IN_TOOLS } from '../../constants/built-in-tools';
-import { toolWindowService } from '../../services/tool-window-service';
 import './prompt-history-popover.scss';
 
 /** 选择提示词回调的参数类型 */
@@ -213,8 +211,12 @@ export const PromptHistoryPopover: React.FC<PromptHistoryPopoverProps> = ({
     [generationType, promptItems]
   );
 
-  const handleOpenMyPrompts = useCallback(() => {
-    const tool = BUILT_IN_TOOLS.find((item) => item.id === 'prompt-history');
+  const handleOpenMyPrompts = useCallback(async () => {
+    const [{ toolWindowService }, { toolRegistry }] = await Promise.all([
+      import('../../services/tool-window-service'),
+      import('../../tools/registry'),
+    ]);
+    const tool = toolRegistry.getManifestById('prompt-history');
     if (!tool) {
       analytics.trackPromptAction({
         action: 'open_tool',

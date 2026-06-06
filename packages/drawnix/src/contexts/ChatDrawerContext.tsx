@@ -4,8 +4,23 @@
  * 提供 ChatDrawer 的 ref 访问，使其他组件可以控制 ChatDrawer
  */
 
-import React, { createContext, useContext, useRef, useCallback, useState, type MutableRefObject } from 'react';
-import type { ChatDrawerRef, WorkflowMessageData, WorkflowMessageParams, AgentLogEntry } from '../types/chat.types';
+import React, {
+  createContext,
+  useContext,
+  useRef,
+  useCallback,
+  useState,
+  type MutableRefObject,
+} from 'react';
+import type {
+  ChatDrawerRef,
+  WorkflowMessageData,
+  WorkflowMessageParams,
+  AgentLogEntry,
+} from '../types/chat.types';
+import type { GenerationType } from '../utils/ai-input-parser';
+import type { ModelRef } from '../utils/settings-manager';
+import type { Task } from '../types/task.types';
 
 /** 选中内容类型 */
 export type SelectedContentType = 'image' | 'video' | 'graphics' | 'text';
@@ -22,14 +37,35 @@ export interface SelectedContentItem {
 }
 
 /** 重试处理器类型 */
-export type RetryHandler = (workflow: WorkflowMessageData, startStepIndex: number, workZoneId?: string) => Promise<void>;
+export type RetryHandler = (
+  workflow: WorkflowMessageData,
+  startStepIndex: number,
+  workZoneId?: string
+) => Promise<void>;
+
+export interface DrawerGenerationSubmitParams {
+  prompt: string;
+  selectedContent: SelectedContentItem[];
+  generationType: GenerationType;
+  selectedModel: string;
+  selectedModelRef?: ModelRef | null;
+  selectedParams: Record<string, string>;
+  selectedCount: number;
+}
+
+export type DrawerGenerationSubmitter = (
+  params: DrawerGenerationSubmitParams
+) => Promise<void>;
 
 interface ChatDrawerContextValue {
   chatDrawerRef: MutableRefObject<ChatDrawerRef | null>;
   /** 注册重试处理器 */
   registerRetryHandler: (handler: RetryHandler) => void;
   /** 执行重试 */
-  executeRetry: (workflow: WorkflowMessageData, startStepIndex: number) => Promise<void>;
+  executeRetry: (
+    workflow: WorkflowMessageData,
+    startStepIndex: number
+  ) => Promise<void>;
   /** 选中内容 */
   selectedContent: SelectedContentItem[];
   /** 设置选中内容 */
@@ -42,6 +78,16 @@ interface ChatDrawerContextValue {
   drawerWidth: number;
   /** 设置抽屉宽度 */
   setDrawerWidth: (width: number) => void;
+  /** 注册抽屉生成提交处理器 */
+  registerGenerationSubmitter: (
+    submitter: DrawerGenerationSubmitter | null
+  ) => void;
+  /** 从抽屉提交生成任务 */
+  submitGenerationFromDrawer: (
+    params: DrawerGenerationSubmitParams
+  ) => Promise<boolean>;
+  /** 根据任务队列事件同步已有工作流消息 */
+  syncWorkflowTaskUpdate: (task: Task) => boolean;
 }
 
 const ChatDrawerContext = createContext<ChatDrawerContextValue | null>(null);
@@ -51,18 +97,22 @@ export interface ChatDrawerProviderProps {
 }
 
 // 默认抽屉宽度
-const DEFAULT_DRAWER_WIDTH = typeof window !== 'undefined' 
-  ? Math.max(375, window.innerWidth * 0.5) 
-  : 600;
+const DEFAULT_DRAWER_WIDTH =
+  typeof window !== 'undefined' ? Math.max(375, window.innerWidth * 0.5) : 600;
 
 /**
  * ChatDrawer Provider
  * 提供 ChatDrawer ref 的访问
  */
-export const ChatDrawerProvider: React.FC<ChatDrawerProviderProps> = ({ children }) => {
+export const ChatDrawerProvider: React.FC<ChatDrawerProviderProps> = ({
+  children,
+}) => {
   const chatDrawerRef = useRef<ChatDrawerRef>(null);
   const retryHandlerRef = useRef<RetryHandler | null>(null);
-  const [selectedContent, setSelectedContent] = useState<SelectedContentItem[]>([]);
+  const generationSubmitterRef = useRef<DrawerGenerationSubmitter | null>(null);
+  const [selectedContent, setSelectedContent] = useState<SelectedContentItem[]>(
+    []
+  );
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerWidth, setDrawerWidth] = useState(DEFAULT_DRAWER_WIDTH);
 
@@ -70,26 +120,57 @@ export const ChatDrawerProvider: React.FC<ChatDrawerProviderProps> = ({ children
     retryHandlerRef.current = handler;
   }, []);
 
-  const executeRetry = useCallback(async (workflow: WorkflowMessageData, startStepIndex: number) => {
-    if (retryHandlerRef.current) {
-      await retryHandlerRef.current(workflow, startStepIndex);
-    } else {
-      console.warn('[ChatDrawerContext] No retry handler registered');
-    }
+  const executeRetry = useCallback(
+    async (workflow: WorkflowMessageData, startStepIndex: number) => {
+      if (retryHandlerRef.current) {
+        await retryHandlerRef.current(workflow, startStepIndex);
+      } else {
+        console.warn('[ChatDrawerContext] No retry handler registered');
+      }
+    },
+    []
+  );
+
+  const registerGenerationSubmitter = useCallback(
+    (submitter: DrawerGenerationSubmitter | null) => {
+      generationSubmitterRef.current = submitter;
+    },
+    []
+  );
+
+  const submitGenerationFromDrawer = useCallback(
+    async (params: DrawerGenerationSubmitParams) => {
+      if (!generationSubmitterRef.current) {
+        return false;
+      }
+
+      await generationSubmitterRef.current(params);
+      return true;
+    },
+    []
+  );
+
+  const syncWorkflowTaskUpdate = useCallback((task: Task) => {
+    return chatDrawerRef.current?.syncWorkflowTaskUpdate(task) ?? false;
   }, []);
 
   return (
-    <ChatDrawerContext.Provider value={{ 
-      chatDrawerRef, 
-      registerRetryHandler, 
-      executeRetry, 
-      selectedContent, 
-      setSelectedContent,
-      isDrawerOpen,
-      setIsDrawerOpen,
-      drawerWidth,
-      setDrawerWidth,
-    }}>
+    <ChatDrawerContext.Provider
+      value={{
+        chatDrawerRef,
+        registerRetryHandler,
+        executeRetry,
+        selectedContent,
+        setSelectedContent,
+        isDrawerOpen,
+        setIsDrawerOpen,
+        drawerWidth,
+        setDrawerWidth,
+        registerGenerationSubmitter,
+        submitGenerationFromDrawer,
+        syncWorkflowTaskUpdate,
+      }}
+    >
       {children}
     </ChatDrawerContext.Provider>
   );
@@ -111,16 +192,19 @@ export function useChatDrawer(): ChatDrawerContextValue {
  * 提供便捷的方法来控制 ChatDrawer
  */
 export function useChatDrawerControl() {
-  const { 
-    chatDrawerRef, 
-    registerRetryHandler, 
-    executeRetry, 
-    selectedContent, 
+  const {
+    chatDrawerRef,
+    registerRetryHandler,
+    executeRetry,
+    selectedContent,
     setSelectedContent,
     isDrawerOpen,
     setIsDrawerOpen,
     drawerWidth,
     setDrawerWidth,
+    registerGenerationSubmitter,
+    submitGenerationFromDrawer,
+    syncWorkflowTaskUpdate,
   } = useChatDrawer();
 
   return {
@@ -171,13 +255,22 @@ export function useChatDrawerControl() {
     /** 注册重试处理器 */
     registerRetryHandler,
     /** 从失败步骤重试工作流 */
-    retryWorkflowFromStep: async (workflow: WorkflowMessageData, stepIndex: number) => {
+    retryWorkflowFromStep: async (
+      workflow: WorkflowMessageData,
+      stepIndex: number
+    ) => {
       await executeRetry(workflow, stepIndex);
     },
     /** 选中内容 */
     selectedContent,
     /** 设置选中内容 */
     setSelectedContent,
+    /** 注册抽屉生成提交处理器 */
+    registerGenerationSubmitter,
+    /** 从抽屉提交生成任务 */
+    submitGenerationFromDrawer,
+    /** 根据任务队列事件同步已有工作流消息 */
+    syncWorkflowTaskUpdate,
   };
 }
 

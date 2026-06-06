@@ -245,10 +245,7 @@ function getTaskImageDimensions(
   task: Task,
   fallback?: { width: number; height: number }
 ): { width: number; height: number } | undefined {
-  if (fallback) {
-    return fallback;
-  }
-
+  // 优先使用任务返回的真实尺寸
   const result = task.result as { width?: number; height?: number } | undefined;
 
   if (
@@ -261,6 +258,10 @@ function getTaskImageDimensions(
       width: result.width,
       height: result.height,
     };
+  }
+
+  if (fallback) {
+    return fallback;
   }
 
   return parseSizeToPixels(task.params.size);

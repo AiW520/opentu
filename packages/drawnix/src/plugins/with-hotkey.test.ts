@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlaitBoard } from '@plait/core';
+import { buildDrawnixHotkeyPlugin } from './with-hotkey';
 
 const {
   updatePointerTypeMock,
@@ -159,8 +162,6 @@ vi.mock('./with-lasso-selection', () => ({
   LassoPointerType: 'lasso',
 }));
 
-import { buildDrawnixHotkeyPlugin } from './with-hotkey';
-
 type TestBoard = PlaitBoard & {
   globalKeyDown: (event: KeyboardEvent) => void;
   keyDown: (event: KeyboardEvent) => void;
@@ -247,6 +248,62 @@ describe('buildDrawnixHotkeyPlugin', () => {
 
     expect(updatePointerTypeMock).not.toHaveBeenCalled();
     expect(updateAppStateMock).not.toHaveBeenCalled();
+    expect(globalKeyDownMock).toHaveBeenCalledWith(event);
+  });
+
+  it.each(['felt-tip-pen', 'mask'])(
+    'undoes the last stroke with Backspace while using %s',
+    (pointer) => {
+      const board = buildDrawnixHotkeyPlugin(updateAppStateMock)({
+        ...createBoard(),
+        pointer,
+      } as TestBoard & { pointer: string }) as TestBoard;
+      const event = new KeyboardEvent('keydown', {
+        key: 'Backspace',
+        cancelable: true,
+      });
+
+      board.globalKeyDown(event);
+
+      expect(board.undo).toHaveBeenCalledTimes(1);
+      expect(event.defaultPrevented).toBe(true);
+      expect(globalKeyDownMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['eraser', 'laser-pointer', 'selection'])(
+    'does not undo with Backspace while using %s',
+    (pointer) => {
+      const board = buildDrawnixHotkeyPlugin(updateAppStateMock)({
+        ...createBoard(),
+        pointer,
+      } as TestBoard & { pointer: string }) as TestBoard;
+      const event = new KeyboardEvent('keydown', {
+        key: 'Backspace',
+        cancelable: true,
+      });
+
+      board.globalKeyDown(event);
+
+      expect(board.undo).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not undo with Backspace while typing in an input', () => {
+    const board = buildDrawnixHotkeyPlugin(updateAppStateMock)({
+      ...createBoard(),
+      pointer: 'felt-tip-pen',
+    } as TestBoard & { pointer: string }) as TestBoard;
+    const input = document.createElement('input');
+    const event = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      cancelable: true,
+    });
+    Object.defineProperty(event, 'target', { value: input });
+
+    board.globalKeyDown(event);
+
+    expect(board.undo).not.toHaveBeenCalled();
     expect(globalKeyDownMock).toHaveBeenCalledWith(event);
   });
 
