@@ -95,14 +95,20 @@ jobs:
         with:
           node-version: "20"
       - uses: pnpm/action-setup@v4
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend first
+        working-directory: apps/desktop
+        run: |
+          echo "Building frontend renderer..."
+          pnpm run build:renderer
+          ls -la dist/
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "apps/desktop/src-tauri -> target"
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Build Desktop
         working-directory: apps/desktop
         env:
@@ -110,8 +116,8 @@ jobs:
           CI: true
           RUST_BACKTRACE: "1"
         run: |
-          echo "Starting build..."
-          pnpm tauri build --target aarch64-apple-darwin --verbose
+          echo "Starting Tauri build..."
+          pnpm tauri build --target aarch64-apple-darwin --verbose 2>&1
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,19 +142,25 @@ jobs:
         with:
           node-version: "20"
       - uses: pnpm/action-setup@v4
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend first
+        working-directory: apps/desktop
+        run: |
+          echo "Building frontend renderer..."
+          pnpm run build:renderer
+          Get-ChildItem -Path dist/
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "apps/desktop/src-tauri -> target"
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Build Desktop
         working-directory: apps/desktop
         env:
           CI: true
         run: |
-          echo "Starting build..."
-          pnpm tauri build --verbose
+          echo "Starting Tauri build..."
+          pnpm tauri build --verbose 2>&1
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -179,11 +191,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev imagemagick
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
       - uses: pnpm/action-setup@v4
+      - name: Fix PNG icons to RGBA format
+        run: |
+          convert apps/desktop/src-tauri/icons/32x32.png -alpha on apps/desktop/src-tauri/icons/32x32.png
+          convert apps/desktop/src-tauri/icons/128x128.png -alpha on apps/desktop/src-tauri/icons/128x128.png
+          convert apps/desktop/src-tauri/icons/128x128@2x.png -alpha on apps/desktop/src-tauri/icons/128x128@2x.png
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
@@ -197,7 +214,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           echo "Starting build..."
-          pnpm tauri build --verbose
+          pnpm tauri build --verbose 2>&1
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
