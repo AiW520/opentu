@@ -12,6 +12,7 @@ import type {
   DebugStatusResult,
 } from './types';
 import { callWithDefault, callOperation } from './rpc-helpers';
+import { generateThumbnails } from '../thumbnail-generator';
 
 // ============================================================================
 // 事件处理器类型
@@ -437,7 +438,21 @@ export class SWChannelClient {
     mimeType: string,
     sizes?: ('small' | 'large')[]
   ): Promise<TaskOperationResult> {
-    this.ensureInitialized();
+    // 如果 SW 未初始化，使用本地回退
+    if (!this.initialized || !this.channel) {
+      console.log('[SWChannelClient] SW not available, using local thumbnail generation');
+      try {
+        const result = await generateThumbnails(blob, mimeType, mediaType, sizes);
+        if (result.success) {
+          return { success: true, data: result };
+        } else {
+          return { success: false, error: result.error };
+        }
+      } catch (error) {
+        console.error('[SWChannelClient] Local thumbnail generation failed:', error);
+        return { success: false, error: String(error) };
+      }
+    }
 
     try {
       const response = await this.channel!.call('thumbnail:generate', {
