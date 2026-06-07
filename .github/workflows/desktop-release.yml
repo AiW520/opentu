@@ -99,9 +99,11 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build frontend first
         working-directory: apps/desktop
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Building frontend renderer..."
-          pnpm run build:renderer
+          pnpm run build:renderer 2>&1
           ls -la dist/
       - uses: dtolnay/rust-toolchain@stable
         with:
