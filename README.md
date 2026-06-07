@@ -34,6 +34,58 @@
 - **工具箱与扩展**：支持内部 React 工具、iframe 工具、Skill/Agent 和插件化运行时。
 - **PPT 与内容工作流**：支持 Frame 幻灯片、PPT 导出、Markdown/Mermaid 转换和多媒体编辑。
 
+## 桌面应用
+
+### 下载与安装
+
+桌面应用支持 Windows、macOS 和 Linux 系统。
+
+**v1.0.3 版本下载：**
+
+| 平台 | 架构 | 下载链接 |
+|------|------|---------|
+| Windows | x64 | [Opentu-Setup-v1.0.3.exe](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-Setup-v1.0.3.exe) |
+| macOS | ARM64 | [Opentu-macos-aarch64-v1.0.3.dmg](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-macos-aarch64-v1.0.3.dmg) |
+| macOS | x64 | [Opentu-macos-x86_64-v1.0.3.dmg](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-macos-x86_64-v1.0.3.dmg) |
+| Linux | AppImage | [Opentu-linux-x86_64-v1.0.3.AppImage](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-linux-x86_64-v1.0.3.AppImage) |
+| Linux | deb | [Opentu-linux-amd64-v1.0.3.deb](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-linux-amd64-v1.0.3.deb) |
+
+**访问所有版本：** [GitHub Releases](https://github.com/ljquan/opentu/releases)
+
+### 安装路径设置
+
+首次启动应用时，会弹出路径选择对话框，让您自定义生成产物的存放位置：
+
+- **默认路径**：系统默认文档目录下的 `Opentu/媒体资源` 文件夹
+- **自定义路径**：点击浏览按钮选择任意目录
+- **分类存储**：应用会自动在您选择的路径下创建三个子目录：
+  - `图片` - 存放生成的图片文件
+  - `视频` - 存放生成的视频文件
+  - `音频` - 存放生成的音频文件
+
+### 修改存储路径
+
+您可以随时在应用的设置页面中修改存储路径，修改后新生成的文件会保存到新路径，已有的文件不会自动迁移。
+
+### 桌面应用构建
+
+```bash
+# 进入桌面应用目录
+cd apps/desktop
+
+# 安装依赖
+pnpm install
+
+# 开发模式
+pnpm dev
+
+# 构建生产版本
+pnpm build
+
+# Tauri 构建
+pnpm tauri build
+```
+
 ## 本地开发
 
 ### 环境要求
