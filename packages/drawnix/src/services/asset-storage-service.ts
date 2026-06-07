@@ -348,11 +348,35 @@ class AssetStorageService {
       });
       // console.log('[AssetStorageService] Media cached via unified cache service');
 
+      // 在桌面环境中，尝试保存文件到文件系统并获取路径
+      let filePath: string | undefined;
+      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+        try {
+          const fileName = assetUrl.split('/').pop() || `${assetId}.bin`;
+          const arrayBuffer = await data.blob.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          const result = await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
+            fileName,
+            buffer: Array.from(uint8Array),
+            fileType: cacheType,
+          });
+          
+          if (result && typeof result === 'string') {
+            filePath = result;
+          }
+          console.log('[AssetStorageService] Saved to file system:', filePath);
+        } catch (error) {
+          console.warn('[AssetStorageService] Failed to save to file system:', error);
+        }
+      }
+
       const asset: Asset = {
         id: assetId,
         type: data.type,
         source: data.source,
         url: assetUrl,
+        filePath,
         name: data.name,
         mimeType: data.mimeType,
         createdAt: Date.now(),

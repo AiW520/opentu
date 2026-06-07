@@ -5,6 +5,22 @@
  */
 
 import { memo, useCallback } from 'react';
+
+/**
+ * 获取素材的显示 URL
+ * 在桌面环境中，如果有文件系统路径，优先使用 file:// 协议
+ */
+function getDisplayUrl(asset: Asset): string {
+  // 在桌面环境中，优先使用文件系统路径
+  if (
+    typeof window !== 'undefined' &&
+    (window as any).__TAURI_INTERNALS__ &&
+    asset.filePath
+  ) {
+    return `file://${asset.filePath}`;
+  }
+  return asset.url;
+}
 import {
   Image as ImageIcon,
   Video as VideoIcon,
@@ -184,14 +200,14 @@ export const AssetItem = memo<AssetItemProps>(
             )
           ) : asset.type === 'IMAGE' ? (
             <LazyImage
-              src={thumbnailUrl || asset.url}
+              src={thumbnailUrl || getDisplayUrl(asset)}
               alt={asset.name}
               className="asset-item__image"
               rootMargin="100px"
             />
           ) : (
             <VideoPosterPreview
-              src={asset.url}
+              src={getDisplayUrl(asset)}
               className="asset-item__video"
               alt={asset.name}
               poster={asset.thumbnail}
