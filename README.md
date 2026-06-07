@@ -38,7 +38,19 @@
 
 ### 下载与安装
 
-桌面应用支持 Windows、macOS 和 Linux 系统，可从 [GitHub Releases](https://github.com/ljquan/opentu/releases) 页面下载最新版本。
+桌面应用支持 Windows、macOS 和 Linux 系统。
+
+**v1.0.3 版本下载：**
+
+| 平台 | 架构 | 下载链接 |
+|------|------|---------|
+| Windows | x64 | [Opentu-Setup-v1.0.3.exe](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-Setup-v1.0.3.exe) |
+| macOS | ARM64 | [Opentu-macos-aarch64-v1.0.3.dmg](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-macos-aarch64-v1.0.3.dmg) |
+| macOS | x64 | [Opentu-macos-x86_64-v1.0.3.dmg](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-macos-x86_64-v1.0.3.dmg) |
+| Linux | AppImage | [Opentu-linux-x86_64-v1.0.3.AppImage](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-linux-x86_64-v1.0.3.AppImage) |
+| Linux | deb | [Opentu-linux-amd64-v1.0.3.deb](https://github.com/ljquan/opentu/releases/download/v1.0.3/Opentu-linux-amd64-v1.0.3.deb) |
+
+**访问所有版本：** [GitHub Releases](https://github.com/ljquan/opentu/releases)
 
 ### 安装路径设置
 
