@@ -488,6 +488,7 @@ export async function smartDownload(
 
     // 如果有自定义保存路径，使用该路径
     if (item.saveLocation) {
+      const saveLocation = item.saveLocation;
       const result = await runSingleDownloadWithFallback(assetUrl, async () => {
         const response = await fetch(assetUrl, { referrerPolicy: 'no-referrer' });
         if (!response.ok) {
@@ -495,7 +496,7 @@ export async function smartDownload(
         }
         const blob = await response.blob();
         const arrayBuffer = await blob.arrayBuffer();
-        await saveToCustomLocation(item.saveLocation, new Uint8Array(arrayBuffer));
+        await saveToCustomLocation(saveLocation, new Uint8Array(arrayBuffer));
       });
       reportProgress(onProgress, 100);
       return result;
