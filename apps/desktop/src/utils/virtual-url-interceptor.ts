@@ -1,5 +1,5 @@
-import { unifiedCacheService } from '@aitu/drawnix';
-import { isVirtualMediaUrl } from '@aitu/drawnix';
+import { unifiedCacheService } from '@drawnix/drawnix';
+import { isVirtualMediaUrl } from '@drawnix/drawnix';
 
 /**
  * 虚拟 URL 拦截器
