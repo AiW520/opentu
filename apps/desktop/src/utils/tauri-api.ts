@@ -132,3 +132,135 @@ export async function setLocalSetting(key: string, value: string): Promise<void>
 export async function removeLocalSetting(key: string): Promise<void> {
   return invoke<void>('remove_local', { key });
 }
+
+// ===== 文件保存对话框 =====
+
+/**
+ * 显示保存文件对话框，让用户选择保存位置
+ * @param defaultName 默认文件名
+ * @returns 用户选择的文件路径，如果取消则返回 null
+ */
+export async function pickSaveLocation(defaultName: string): Promise<string | null> {
+  return invoke<string | null>('pick_save_location', {
+    defaultName,
+  });
+}
+
+// ===== 文件管理器 API =====
+
+/** 文件操作结果 */
+export interface FileOperationResult {
+  success: boolean;
+  message: string;
+  targetPath?: string;
+  fileSize?: number;
+}
+
+/** 文件冲突处理策略 */
+export enum ConflictStrategy {
+  Overwrite = 'Overwrite',  // 覆盖
+  Rename = 'Rename',        // 重命名（添加数字后缀）
+  Skip = 'Skip',            // 跳过
+  Fail = 'Fail',            // 失败
+}
+
+/**
+ * 移动文件到媒体目录
+ * @param sourcePath 源文件路径
+ * @param fileType 文件类型（image/video/audio）
+ * @param conflictStrategy 冲突处理策略
+ * @returns 操作结果
+ */
+export async function moveFileToMedia(
+  sourcePath: string,
+  fileType?: string,
+  conflictStrategy: ConflictStrategy = ConflictStrategy.Rename
+): Promise<FileOperationResult> {
+  return invoke<FileOperationResult>('move_file_to_media', {
+    sourcePath,
+    fileType,
+    conflictStrategy,
+  });
+}
+
+/**
+ * 复制文件到媒体目录
+ * @param sourcePath 源文件路径
+ * @param fileType 文件类型（image/video/audio）
+ * @param conflictStrategy 冲突处理策略
+ * @returns 操作结果
+ */
+export async function copyFileToMedia(
+  sourcePath: string,
+  fileType?: string,
+  conflictStrategy: ConflictStrategy = ConflictStrategy.Rename
+): Promise<FileOperationResult> {
+  return invoke<FileOperationResult>('copy_file_to_media', {
+    sourcePath,
+    fileType,
+    conflictStrategy,
+  });
+}
+
+/**
+ * 删除媒体目录中的文件
+ * @param fileName 文件名
+ * @param fileType 文件类型（image/video/audio）
+ * @returns 操作结果
+ */
+export async function deleteMediaFile(
+  fileName: string,
+  fileType?: string
+): Promise<FileOperationResult> {
+  return invoke<FileOperationResult>('delete_media_file', {
+    fileName,
+    fileType,
+  });
+}
+
+/**
+ * 验证文件是否存在并可访问
+ * @param fileName 文件名
+ * @param fileType 文件类型（image/video/audio）
+ * @returns 操作结果
+ */
+export async function verifyFileAccessible(
+  fileName: string,
+  fileType?: string
+): Promise<FileOperationResult> {
+  return invoke<FileOperationResult>('verify_file_accessible', {
+    fileName,
+    fileType,
+  });
+}
+
+/** 媒体文件信息 */
+export interface MediaFileInfo {
+  name: string;
+  path: string;
+  size: number;
+  modifiedAt?: number;
+}
+
+/**
+ * 获取媒体目录中所有文件列表
+ * @param fileType 文件类型（image/video/audio）
+ * @returns 文件列表
+ */
+export async function listMediaFiles(fileType?: string): Promise<MediaFileInfo[]> {
+  return invoke<MediaFileInfo[]>('list_media_files', {
+    fileType,
+  });
+}
+
+/** 保存数据到用户选择的位置
+ * @param savePath 用户选择的保存路径
+ * @param data 要保存的数据（Uint8Array）
+ */
+export async function saveToLocation(
+  savePath: string,
+  data: Uint8Array
+): Promise<void> {
+  const { writeFile } = await import('@tauri-apps/plugin-fs');
+  await writeFile(savePath, data);
+}

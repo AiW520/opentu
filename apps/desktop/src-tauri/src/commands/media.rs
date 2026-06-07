@@ -98,6 +98,23 @@ pub async fn pick_media_folder(
     Ok(folder_path.map(|p| p.to_string()))
 }
 
+/// 显示保存文件对话框，让用户选择保存位置
+#[tauri::command]
+pub async fn pick_save_location(
+    app: tauri::AppHandle,
+    default_name: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file_path = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .blocking_save_file();
+
+    Ok(file_path.map(|p| p.to_string()))
+}
+
 #[tauri::command]
 pub fn get_cached_media_file(
     file_name: String,

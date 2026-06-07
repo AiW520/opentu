@@ -92,6 +92,8 @@ async function runSingleDownloadWithFallback(
  * @param prompt - The prompt text to use for filename
  * @param format - File extension (e.g., 'png', 'mp4', 'webp')
  * @param fallbackName - Fallback name if prompt is empty
+ * @param audioMetadata - Optional metadata for audio files
+ * @param saveLocation - Optional custom save location (e.g., from Tauri save dialog)
  * @returns Promise that resolves when download is complete, or object with opened flag for new tab
  */
 export async function downloadMediaFile(
@@ -99,7 +101,8 @@ export async function downloadMediaFile(
   prompt: string,
   format: string,
   fallbackName = 'media',
-  audioMetadata?: AudioDownloadMetadata
+  audioMetadata?: AudioDownloadMetadata,
+  saveLocation?: string
 ): Promise<SmartDownloadResult> {
   const normalizedUrl = normalizeImageDataUrl(url);
 
@@ -110,6 +113,20 @@ export async function downloadMediaFile(
 
   const sanitizedPrompt = sanitizeFilename(prompt);
   const filename = `${sanitizedPrompt || fallbackName}.${format}`;
+
+  // 如果提供了自定义保存位置，使用该位置
+  if (saveLocation) {
+    return runSingleDownloadWithFallback(normalizedUrl, async () => {
+      const response = await fetch(normalizedUrl, { referrerPolicy: 'no-referrer' });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${normalizedUrl}: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      // 调用外部提供的保存函数
+      await saveToCustomLocation(saveLocation, new Uint8Array(arrayBuffer));
+    });
+  }
 
   if (fallbackName === 'audio') {
     return runSingleDownloadWithFallback(normalizedUrl, async () => {
@@ -131,6 +148,24 @@ export async function downloadMediaFile(
     normalizedUrl,
     async () => downloadFile(normalizedUrl, filename)
   );
+}
+
+/**
+ * 保存数据到自定义位置的函数类型
+ */
+export type SaveToLocationFn = (path: string, data: Uint8Array) => Promise<void>;
+
+// 默认实现：浏览器下载
+let saveToCustomLocation: SaveToLocationFn = async (path, data) => {
+  const blob = new Blob([data]);
+  downloadFromBlob(blob, path.split('/').pop() || 'download');
+};
+
+/**
+ * 设置自定义保存函数（桌面环境调用）
+ */
+export function setSaveLocationFn(fn: SaveToLocationFn): void {
+  saveToCustomLocation = fn;
 }
 
 export function buildDownloadFilename(
@@ -155,6 +190,8 @@ export interface BatchDownloadItem {
   filename?: string;
   /** 音频下载时写入的元数据 */
   audioMetadata?: AudioDownloadMetadata;
+  /** 自定义保存路径（桌面环境使用） */
+  saveLocation?: string;
 }
 
 export type DownloadProgressCallback = (progress: number) => void;
@@ -448,6 +485,22 @@ export async function smartDownload(
   if (items.length === 1) {
     const item = items[0];
     const assetUrl = item.type === 'image' ? normalizeImageDataUrl(item.url) : item.url;
+
+    // 如果有自定义保存路径，使用该路径
+    if (item.saveLocation) {
+      const result = await runSingleDownloadWithFallback(assetUrl, async () => {
+        const response = await fetch(assetUrl, { referrerPolicy: 'no-referrer' });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${assetUrl}: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        await saveToCustomLocation(item.saveLocation, new Uint8Array(arrayBuffer));
+      });
+      reportProgress(onProgress, 100);
+      return result;
+    }
+
     if (item.type === 'audio') {
       const result = await runSingleDownloadWithFallback(assetUrl, async () => {
         const response = await fetch(assetUrl, { referrerPolicy: 'no-referrer' });

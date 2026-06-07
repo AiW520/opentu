@@ -41,6 +41,7 @@ import {
   buildTaskDownloadItems,
   smartDownload,
 } from '../../utils/download-utils';
+import { isTauriEnvironment } from '../../utils/tauri-env';
 import { BaseDrawer } from '../side-drawer';
 import { CharacterCreateDialog } from '../character/CharacterCreateDialog';
 import { CharacterList } from '../character/CharacterList';
@@ -508,6 +509,17 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
     if (downloadItems.length === 0) return;
 
     try {
+      // 在 Tauri 环境中，弹出保存位置选择对话框
+      if (isTauriEnvironment() && downloadItems.length === 1) {
+        const item = downloadItems[0];
+        const saveLocation = await (window as any).__TAURI_INTERNALS__.invoke('pick_save_location', {
+          defaultName: item.filename || `${task.type}_download`,
+        });
+        if (saveLocation) {
+          item.saveLocation = saveLocation;
+        }
+      }
+
       const result = await smartDownload(downloadItems);
       if (result.openedCount > 0 && result.downloadedCount === 0) {
         MessagePlugin.success(

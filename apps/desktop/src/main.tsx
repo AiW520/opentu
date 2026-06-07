@@ -1,5 +1,5 @@
 import '../web/src/utils/permissions-policy-fix';
-import { isTauriEnvironment, getLocalSetting, setLocalSetting } from './utils/tauri-api';
+import { isTauriEnvironment } from './utils/tauri-api';
 import { initializeVirtualUrlInterceptor } from './utils/virtual-url-interceptor';
 
 function updateBootProgress(progress: number) {
@@ -21,92 +21,41 @@ function hideBootScreen() {
   }
 }
 
-async function checkFirstRun(): Promise<boolean> {
-  if (!isTauriEnvironment()) {
-    return false;
-  }
-  try {
-    const hasRun = await getLocalSetting('first_run_completed');
-    return hasRun !== 'true';
-  } catch {
-    return true;
-  }
-}
-
-async function markFirstRunCompleted(): Promise<void> {
-  try {
-    await setLocalSetting('first_run_completed', 'true');
-  } catch {
-    // 忽略保存失败
-  }
-}
-
-async function showStorageSetup(): Promise<void> {
-  return new Promise((resolve) => {
-    // 动态导入 React 和组件
-    import('react').then((React) => {
-      import('react-dom/client').then((ReactDOM) => {
-        import('./components/storage-setup-dialog').then((module) => {
-          const StorageSetupDialog = module.default;
-
-          // 创建一个挂载点
-          const mountPoint = document.createElement('div');
-          mountPoint.id = 'storage-setup-root';
-          document.body.appendChild(mountPoint);
-
-          const root = ReactDOM.createRoot(mountPoint);
-
-          const handleComplete = async () => {
-            await markFirstRunCompleted();
-            root.unmount();
-            mountPoint.remove();
-            resolve();
-          };
-
-          root.render(
-            React.createElement(StorageSetupDialog, {
-              visible: true,
-              onComplete: handleComplete,
-            })
-          );
-        });
-      });
-    });
-  });
+// 立即初始化虚拟 URL 拦截器（在应用启动前）
+if (isTauriEnvironment()) {
+  console.log('[Desktop] Early initialize virtual URL interceptor');
+  initializeVirtualUrlInterceptor();
 }
 
 async function bootstrap() {
   updateBootProgress(30);
 
-  // 检查是否为首次运行
-  const isFirstRun = await checkFirstRun();
-
-  if (isFirstRun) {
-    // 隐藏启动画面，显示设置向导
-    hideBootScreen();
-    await showStorageSetup();
+  // 初始化保存位置函数（仅在桌面环境中）
+  if (isTauriEnvironment()) {
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
+    // 动态设置保存函数
+    const { setSaveLocationFn } = await import('@drawnix/drawnix');
+    setSaveLocationFn(async (path: string, data: Uint8Array) => {
+      await writeFile(path, data);
+    });
   }
 
   updateBootProgress(60);
 
   import('../web/src/app/bootstrap').then(() => {
     updateBootProgress(100);
-    
-    // 初始化虚拟 URL 拦截器（仅在桌面环境中）
+
+    // 再次确保拦截器已初始化（兜底）
     if (isTauriEnvironment()) {
       initializeVirtualUrlInterceptor();
     }
-    
-    if (!isFirstRun) {
-      setTimeout(hideBootScreen, 200);
-    }
+
+    setTimeout(hideBootScreen, 200);
   }).catch((error) => {
     console.error('[Desktop] Failed to load app bootstrap:', error);
     updateBootProgress(100);
-    if (!isFirstRun) {
-      const tip = document.querySelector('.app-boot-tip');
-      if (tip) tip.textContent = '启动失败，请重启应用';
-    }
+    const tip = document.querySelector('.app-boot-tip');
+    if (tip) tip.textContent = '启动失败，请重启应用';
   });
 }
 

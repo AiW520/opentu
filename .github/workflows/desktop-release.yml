@@ -83,28 +83,26 @@ jobs:
           2. 在文件资源管理器中打开该路径
           3. 进入对应的「图片」、「视频」或「音频」文件夹即可找到生成的文件
           4. 也可在应用的素材库面板中直接预览和管理生成的资源
-          " \
-            --draft
+          "
 
   build-macos-arm:
     needs: create-release
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install imagemagick
+        run: brew install imagemagick
+      - name: Fix PNG icons to RGBA format
+        run: |
+          convert apps/desktop/src-tauri/icons/32x32.png -alpha on apps/desktop/src-tauri/icons/32x32.png
+          convert apps/desktop/src-tauri/icons/128x128.png -alpha on apps/desktop/src-tauri/icons/128x128.png
+          convert apps/desktop/src-tauri/icons/128x128@2x.png -alpha on apps/desktop/src-tauri/icons/128x128@2x.png
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
       - uses: pnpm/action-setup@v4
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build frontend first
-        working-directory: apps/desktop
-        env:
-          NODE_OPTIONS: "--max-old-space-size=8192"
-        run: |
-          echo "Building frontend renderer..."
-          pnpm run build:renderer 2>&1
-          ls -la dist/
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -117,6 +115,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: "-"
           CI: true
           RUST_BACKTRACE: "1"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Starting Tauri build..."
           pnpm tauri build --target aarch64-apple-darwin --verbose 2>&1
@@ -146,12 +145,6 @@ jobs:
       - uses: pnpm/action-setup@v4
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build frontend first
-        working-directory: apps/desktop
-        run: |
-          echo "Building frontend renderer..."
-          pnpm run build:renderer
-          Get-ChildItem -Path dist/
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
@@ -160,6 +153,7 @@ jobs:
         working-directory: apps/desktop
         env:
           CI: true
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Starting Tauri build..."
           pnpm tauri build --verbose 2>&1
@@ -214,6 +208,7 @@ jobs:
         env:
           CI: true
           RUST_BACKTRACE: "1"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Starting build..."
           pnpm tauri build --verbose 2>&1
