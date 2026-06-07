@@ -135,24 +135,14 @@ export async function removeLocalSetting(key: string): Promise<void> {
 
 // ===== 文件保存对话框 =====
 
-/** 文件过滤器 */
-export interface FileFilter {
-  name: string;
-  extensions: string[];
-}
-
-/** 显示保存文件对话框，让用户选择保存位置
+/**
+ * 显示保存文件对话框，让用户选择保存位置
  * @param defaultName 默认文件名
- * @param filters 文件过滤器（可选）
  * @returns 用户选择的文件路径，如果取消则返回 null
  */
-export async function pickSaveLocation(
-  defaultName: string,
-  filters?: FileFilter[]
-): Promise<string | null> {
+export async function pickSaveLocation(defaultName: string): Promise<string | null> {
   return invoke<string | null>('pick_save_location', {
     defaultName,
-    filters: filters || null,
   });
 }
 

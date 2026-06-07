@@ -103,34 +103,16 @@ pub async fn pick_media_folder(
 pub async fn pick_save_location(
     app: tauri::AppHandle,
     default_name: String,
-    filters: Option<Vec<FileFilter>>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    use tauri_plugin_dialog::FilePath;
 
-    let mut dialog = app.dialog().file().set_file_name(&default_name);
-
-    if let Some(filters) = filters {
-        let tauri_filters: Vec<tauri_plugin_dialog::FileFilter> = filters
-            .into_iter()
-            .map(|f| tauri_plugin_dialog::FileFilter {
-                name: f.name,
-                extensions: f.extensions,
-            })
-            .collect();
-        dialog = dialog.add_filter_list(tauri_filters);
-    }
-
-    let file_path = dialog.blocking_save_file();
+    let file_path = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .blocking_save_file();
 
     Ok(file_path.map(|p| p.to_string()))
-}
-
-/// 文件过滤器
-#[derive(Debug, serde::Deserialize)]
-pub struct FileFilter {
-    pub name: String,
-    pub extensions: Vec<String>,
 }
 
 #[tauri::command]

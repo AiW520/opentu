@@ -514,7 +514,6 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
         const item = downloadItems[0];
         const saveLocation = await (window as any).__TAURI_INTERNALS__.invoke('pick_save_location', {
           defaultName: item.filename || `${task.type}_download`,
-          filters: null,
         });
         if (saveLocation) {
           item.saveLocation = saveLocation;
