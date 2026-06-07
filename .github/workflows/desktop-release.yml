@@ -91,6 +91,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install imagemagick
+        run: brew install imagemagick
+      - name: Fix PNG icons to RGBA format
+        run: |
+          convert apps/desktop/src-tauri/icons/32x32.png -alpha on apps/desktop/src-tauri/icons/32x32.png
+          convert apps/desktop/src-tauri/icons/128x128.png -alpha on apps/desktop/src-tauri/icons/128x128.png
+          convert apps/desktop/src-tauri/icons/128x128@2x.png -alpha on apps/desktop/src-tauri/icons/128x128@2x.png
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
