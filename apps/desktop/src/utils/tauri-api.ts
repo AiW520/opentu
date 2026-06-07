@@ -132,3 +132,38 @@ export async function setLocalSetting(key: string, value: string): Promise<void>
 export async function removeLocalSetting(key: string): Promise<void> {
   return invoke<void>('remove_local', { key });
 }
+
+// ===== 文件保存对话框 =====
+
+/** 文件过滤器 */
+export interface FileFilter {
+  name: string;
+  extensions: string[];
+}
+
+/** 显示保存文件对话框，让用户选择保存位置
+ * @param defaultName 默认文件名
+ * @param filters 文件过滤器（可选）
+ * @returns 用户选择的文件路径，如果取消则返回 null
+ */
+export async function pickSaveLocation(
+  defaultName: string,
+  filters?: FileFilter[]
+): Promise<string | null> {
+  return invoke<string | null>('pick_save_location', {
+    defaultName,
+    filters: filters || null,
+  });
+}
+
+/** 保存数据到用户选择的位置
+ * @param savePath 用户选择的保存路径
+ * @param data 要保存的数据（Uint8Array）
+ */
+export async function saveToLocation(
+  savePath: string,
+  data: Uint8Array
+): Promise<void> {
+  const { writeFile } = await import('@tauri-apps/plugin-fs');
+  await writeFile(savePath, data);
+}

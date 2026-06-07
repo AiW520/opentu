@@ -14,6 +14,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let db = Database::new(app.handle())?;
             app.manage(AppState {
@@ -34,6 +35,7 @@ pub fn run() {
             commands::media::set_media_root_path,
             commands::media::reset_media_root_path,
             commands::media::pick_media_folder,
+            commands::media::pick_save_location,
             commands::media::get_cached_media_file,
             commands::export::show_save_dialog,
         ])
