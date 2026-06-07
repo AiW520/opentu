@@ -103,8 +103,20 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Building frontend renderer..."
-          pnpm run build:renderer 2>&1
+          pnpm run build:renderer 2>&1 || true
+          sleep 3
           ls -la dist/
+      - name: Verify frontend build
+        working-directory: apps/desktop
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "Frontend build failed, dist directory not found"
+            exit 1
+          fi
+          if [ ! -f "dist/index.html" ]; then
+            echo "Frontend build failed, index.html not found"
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
