@@ -47,6 +47,7 @@ function isVirtualMediaUrl(url: string): boolean {
  */
 
 let isInitialized = false;
+const processedImages = new WeakSet<HTMLImageElement>();
 
 export function initializeVirtualUrlInterceptor(): void {
   if (isInitialized) return;
@@ -54,66 +55,57 @@ export function initializeVirtualUrlInterceptor(): void {
 
   console.log('[VirtualUrlInterceptor] Initializing for desktop environment...');
 
-  // 创建一个 IntersectionObserver 来处理图片加载
-  const observer = new IntersectionObserver(
-    async (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          const img = entry.target as HTMLImageElement;
-          observer.unobserve(img);
-          await handleVirtualImageUrl(img);
-        }
-      }
-    },
-    { rootMargin: '50px', threshold: 0.1 }
-  );
+  // 立即处理所有已存在的图片（不等待 DOMReady）
+  document.querySelectorAll('img').forEach((img) => {
+    if (isVirtualMediaUrl(img.src) && !processedImages.has(img)) {
+      processedImages.add(img);
+      handleVirtualImageUrl(img).catch(console.error);
+    }
+  });
 
-  // 监听 DOM 变化
+  // 监听 DOM 变化，处理新增的图片
   const mutationObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         for (const node of mutation.addedNodes) {
           if (node instanceof HTMLImageElement) {
-            handleImageElement(node, observer);
+            handleImageElement(node);
           } else if (node instanceof HTMLElement) {
             const images = node.querySelectorAll('img');
-            images.forEach((img) => handleImageElement(img, observer));
+            images.forEach(handleImageElement);
           }
         }
       } else if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
         if (mutation.attributeName === 'src') {
-          handleImageElement(mutation.target, observer);
+          handleImageElement(mutation.target);
         }
       }
     }
   });
 
-  mutationObserver.observe(document.body, {
+  // 使用 document 而不是 body，确保能捕获所有变化
+  mutationObserver.observe(document, {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ['src'],
   });
 
-  // 处理已存在的图片
-  document.querySelectorAll('img').forEach((img) => {
-    handleImageElement(img, observer);
-  });
+  // 定期检查新增的图片（兜底方案）
+  setInterval(() => {
+    document.querySelectorAll('img').forEach(handleImageElement);
+  }, 500);
 
-  // 立即处理所有虚拟 URL 图片
-  setTimeout(() => {
-    document.querySelectorAll('img').forEach((img) => {
-      if (isVirtualMediaUrl(img.src)) {
-        handleVirtualImageUrl(img).catch(console.error);
-      }
-    });
-  }, 100);
+  console.log('[VirtualUrlInterceptor] Initialization complete');
 }
 
-function handleImageElement(img: HTMLImageElement, observer: IntersectionObserver): void {
+function handleImageElement(img: HTMLImageElement): void {
+  if (processedImages.has(img)) return;
+  
   const src = img.src;
   if (src && isVirtualMediaUrl(src)) {
-    observer.observe(img);
+    processedImages.add(img);
+    handleVirtualImageUrl(img).catch(console.error);
   }
 }
 
@@ -123,6 +115,9 @@ async function handleVirtualImageUrl(img: HTMLImageElement): Promise<void> {
     if (!src || !isVirtualMediaUrl(src)) return;
 
     console.log('[VirtualUrlInterceptor] Handling virtual image URL:', src);
+
+    // 标记图片正在处理
+    img.dataset.virtualProcessing = 'true';
 
     // 尝试从统一缓存服务获取 blob（优先使用 Cache API）
     let blob = await unifiedCacheService.getCachedBlob(src);
@@ -139,32 +134,46 @@ async function handleVirtualImageUrl(img: HTMLImageElement): Promise<void> {
       
       // 尝试显示占位图或错误提示
       img.style.background = '#f5f5f5';
+      img.alt = `加载失败: ${src}`;
       return;
     }
 
     // 创建 blob URL
     const blobUrl = URL.createObjectURL(blob);
+    
+    // 保存原始 src，以便如果失败可以回退
+    const originalSrc = img.src;
+    
     img.src = blobUrl;
 
     console.log('[VirtualUrlInterceptor] Successfully loaded virtual image:', src);
 
     // 监听图片加载完成后释放 blob URL
     img.onload = () => {
+      console.log('[VirtualUrlInterceptor] Image loaded successfully:', src);
       setTimeout(() => {
         try {
           URL.revokeObjectURL(blobUrl);
         } catch {
           // 忽略释放错误
         }
-      }, 5000);
+      }, 10000); // 延迟释放，确保图片已渲染
     };
 
     img.onerror = () => {
       console.error('[VirtualUrlInterceptor] Failed to load blob URL:', blobUrl);
-      URL.revokeObjectURL(blobUrl);
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        // 忽略
+      }
+      // 回退到原图
+      img.src = originalSrc;
     };
   } catch (error) {
     console.error('[VirtualUrlInterceptor] Failed to load virtual image:', error);
+  } finally {
+    img.dataset.virtualProcessing = 'false';
   }
 }
 
@@ -181,14 +190,19 @@ async function getBlobFromTauriFileSystem(url: string): Promise<Blob | null> {
       return null;
     }
 
+    console.log('[VirtualUrlInterceptor] Trying to read from file system:', fileName);
+
     // 调用 Tauri 命令获取缓存文件
     const base64Data = await (window as any).__TAURI_INTERNALS__.invoke('get_cached_media_file', {
       fileName,
     });
 
     if (!base64Data) {
+      console.warn('[VirtualUrlInterceptor] No base64 data returned for:', fileName);
       return null;
     }
+
+    console.log('[VirtualUrlInterceptor] Got base64 data, decoding...');
 
     // 解码 base64 数据
     const byteString = atob(base64Data);
@@ -199,9 +213,15 @@ async function getBlobFromTauriFileSystem(url: string): Promise<Blob | null> {
       ia[i] = byteString.charCodeAt(i);
     }
 
-    return new Blob([ab], { type: mimeType });
+    const blob = new Blob([ab], { type: mimeType });
+    console.log('[VirtualUrlInterceptor] Created blob from file system:', {
+      size: blob.size,
+      type: blob.type,
+    });
+
+    return blob;
   } catch (error) {
-    console.warn('[VirtualUrlInterceptor] Failed to get blob from Tauri:', error);
+    console.error('[VirtualUrlInterceptor] Failed to get blob from Tauri:', error);
     return null;
   }
 }

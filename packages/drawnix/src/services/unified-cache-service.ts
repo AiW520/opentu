@@ -1248,6 +1248,15 @@ class UnifiedCacheService {
       const contentHash =
         normalizedOptions?.contentHash || (await calculateBlobChecksum(blob));
 
+      // ===== 桌面环境特殊处理：同时保存到文件系统 =====
+      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+        try {
+          await this.saveToTauriFileSystem(cacheUrl, blob, type, contentHash);
+        } catch (error) {
+          console.warn('[UnifiedCache] Failed to save to Tauri file system:', error);
+        }
+      }
+
       // 1. 将 blob 放入 Cache API（通过创建 Response）
       if (typeof caches !== 'undefined') {
         const cache = await caches.open(IMAGE_CACHE_NAME);
@@ -1321,6 +1330,51 @@ class UnifiedCacheService {
       console.error('[UnifiedCache] Failed to cache media from blob:', error);
       throw error;
     }
+  }
+
+  /**
+   * 在桌面环境中保存到 Tauri 文件系统
+   */
+  private async saveToTauriFileSystem(
+    url: string,
+    blob: Blob,
+    type: CacheMediaType,
+    contentHash: string
+  ): Promise<void> {
+    try {
+      // 从 URL 提取文件名
+      const fileName = this.getFileNameFromUrl(url);
+      
+      // 将 blob 转换为 base64 或 arrayBuffer
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      // 调用 Tauri 命令保存文件
+      await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
+        fileName,
+        buffer: Array.from(uint8Array), // 转换为普通数组以便传递给 Rust
+        fileType: type,
+      });
+
+      console.log('[UnifiedCache] Successfully saved to Tauri file system:', fileName);
+    } catch (error) {
+      console.error('[UnifiedCache] Failed to save to Tauri file system:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 从 URL 提取文件名
+   */
+  private getFileNameFromUrl(url: string): string {
+    const pathname = url.split('?')[0].split('#')[0];
+    const fileName = pathname.split('/').pop() || `unknown-${Date.now()}`;
+    
+    // 添加文件扩展名（如果没有的话）
+    if (!fileName.includes('.')) {
+      return `${fileName}.png`;
+    }
+    return fileName;
   }
 
   /**

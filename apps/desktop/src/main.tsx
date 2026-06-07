@@ -21,6 +21,12 @@ function hideBootScreen() {
   }
 }
 
+// 立即初始化虚拟 URL 拦截器（在应用启动前）
+if (isTauriEnvironment()) {
+  console.log('[Desktop] Early initialize virtual URL interceptor');
+  initializeVirtualUrlInterceptor();
+}
+
 async function bootstrap() {
   updateBootProgress(30);
 
@@ -39,7 +45,7 @@ async function bootstrap() {
   import('../web/src/app/bootstrap').then(() => {
     updateBootProgress(100);
 
-    // 初始化虚拟 URL 拦截器（仅在桌面环境中）
+    // 再次确保拦截器已初始化（兜底）
     if (isTauriEnvironment()) {
       initializeVirtualUrlInterceptor();
     }
