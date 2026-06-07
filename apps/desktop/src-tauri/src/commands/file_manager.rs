@@ -2,10 +2,9 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use base64::{engine::general_purpose, Engine as _};
-use tauri::{AppHandle, State};
+use tauri::State;
 
-use crate::app_state::AppState;
+use crate::AppState;
 use crate::database::Database;
 
 /// 文件操作结果
@@ -328,7 +327,8 @@ fn resolve_target_path(
         }
     }
     
-    Ok((target_path, target_path.exists()))
+    let exists = target_path.exists();
+    Ok((target_path, exists))
 }
 
 fn generate_unique_path(base_path: &Path) -> PathBuf {
