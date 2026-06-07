@@ -27,6 +27,7 @@ import { AssetType, SelectionMode } from '../../types/asset.types';
 import type { Asset } from '../../types/asset.types';
 import { compressImageBlob, getCompressionStrategy } from '@aitu/utils';
 import { HoverTip } from '../shared/hover';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 import './image-fill-panel.scss';
 
 const MediaLibraryModal = lazy(() =>
@@ -122,7 +123,7 @@ export const ImageFillPanel: React.FC<ImageFillPanelProps> = ({
   // 处理从素材库选择
   const handleSelectFromLibrary = useCallback(
     (asset: Asset) => {
-      updateConfig({ imageUrl: asset.url });
+      updateConfig({ imageUrl: getAssetRuntimeUrl(asset) });
       setShowMediaLibrary(false);
     },
     [updateConfig]

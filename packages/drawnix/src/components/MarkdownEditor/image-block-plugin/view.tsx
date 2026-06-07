@@ -8,6 +8,7 @@ import { subscribeAssetMap, getAssetMapSnapshot } from '../../../stores/asset-ma
 import { AssetType } from '../../../types/asset.types';
 import { extractAssetIdFromUrl } from '../../../utils/markdown-asset-embeds';
 import { parseMarkdownImageAlt } from '../../../utils/markdown-image-blocks';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 import { RetryImage } from '../../retry-image';
 import {
   clamp,
@@ -158,7 +159,7 @@ function RenderedImageBlock({
       if (asset.type !== AssetType.IMAGE) {
         return null;
       }
-      return normalizeImageDataUrl(asset.url);
+      return normalizeImageDataUrl(getAssetRuntimeUrl(asset));
     }
 
     return normalizeImageDataUrl(attrs.src);

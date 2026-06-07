@@ -3,7 +3,7 @@
  * 提供带保存位置选择的下载功能
  */
 
-import { isTauriEnvironment, pickSaveLocation } from '../tauri-api';
+import { isTauriEnvironment, pickSaveLocation } from './tauri-api';
 import { sanitizeFilename } from '@aitu/utils';
 
 /** 图片下载过滤器 */

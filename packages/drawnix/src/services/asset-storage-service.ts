@@ -17,6 +17,13 @@ import {
 import { canAddAssetBySize } from '../utils/storage-quota';
 import { unifiedCacheService } from './unified-cache-service';
 import { analytics } from '../utils/posthog-analytics';
+import {
+  convertLocalFilePathToAssetUrl,
+  getFileNameFromPath,
+  getNativeFilePath,
+  isDesktopAssetUrl,
+  isTauriEnvironment,
+} from '../utils/desktop-asset-url';
 import type {
   Asset,
   StoredAsset,
@@ -34,6 +41,25 @@ import {
 
 /** 素材库 URL 前缀（用于本地上传的素材） */
 const ASSET_URL_PREFIX = '/asset-library/';
+
+interface DesktopAssetImportResult {
+  contentHash: string;
+  fileName: string;
+  originalName: string;
+  localPath: string;
+  fileType: string;
+  mimeType: string;
+  size: number;
+  createdAt: number;
+}
+
+export interface DesktopPickedMediaFile {
+  path: string;
+  name: string;
+  mimeType: string;
+  fileType: string;
+  size: number;
+}
 
 /**
  * Custom Error Classes
@@ -108,7 +134,7 @@ class AssetStorageService {
    */
   private async findAssetByContentHash(
     contentHash: string,
-    blob: Blob
+    blob?: Blob
   ): Promise<Asset | null> {
     if (!this.store) return null;
 
@@ -122,13 +148,13 @@ class AssetStorageService {
         if (stored.contentHash) {
           if (stored.contentHash === contentHash) {
             // console.log('[AssetStorageService] Found duplicate asset by hash:', stored.id);
-            return storedAssetToAsset(stored);
+            return this.toRuntimeAsset(stored);
           }
           continue;
         }
 
         // 对于没有 contentHash 的旧素材，先用文件大小筛选
-        if (stored.size !== blob.size) {
+        if (!blob || stored.size !== blob.size) {
           continue;
         }
 
@@ -146,7 +172,7 @@ class AssetStorageService {
 
             if (oldHash === contentHash) {
               // console.log('[AssetStorageService] Found duplicate asset by computed hash:', stored.id);
-              return storedAssetToAsset(stored);
+              return this.toRuntimeAsset(stored);
             }
           }
         } catch (err) {
@@ -173,6 +199,139 @@ class AssetStorageService {
       ? 'mp3'
       : 'png';
     return `${ASSET_URL_PREFIX}content-${contentHash}.${resolvedExtension}`;
+  }
+
+  private getDesktopFileType(type: AssetType): 'image' | 'video' | 'audio' {
+    if (type === AssetType.VIDEO) {
+      return 'video';
+    }
+    if (type === AssetType.AUDIO) {
+      return 'audio';
+    }
+    return 'image';
+  }
+
+  private toRuntimeAsset(stored: StoredAsset): Asset {
+    const asset = storedAssetToAsset(stored);
+    if (asset.filePath && isTauriEnvironment()) {
+      asset.url = convertLocalFilePathToAssetUrl(asset.filePath);
+    }
+    return asset;
+  }
+
+  private async invokeDesktopCommand<T>(
+    command: string,
+    args?: Record<string, unknown>
+  ): Promise<T> {
+    const internals = (window as any).__TAURI_INTERNALS__;
+    if (!internals?.invoke) {
+      throw new Error('Not running in Tauri environment');
+    }
+    return internals.invoke(command, args);
+  }
+
+  private async importDesktopLocalAsset(data: AddAssetData): Promise<Asset | null> {
+    if (data.source !== AssetSource.LOCAL || !isTauriEnvironment()) {
+      return null;
+    }
+
+    const sourcePath = data.sourcePath || getNativeFilePath(data.blob);
+    if (!sourcePath) {
+      return null;
+    }
+
+    const nameValidation = validateAssetName(data.name);
+    if (!nameValidation.valid) {
+      throw new ValidationError(nameValidation.error!);
+    }
+
+    const importResult = await this.invokeDesktopCommand<DesktopAssetImportResult>(
+      'import_local_asset',
+      {
+        sourcePath,
+        fileType: this.getDesktopFileType(data.type),
+        originalName: data.name,
+        mimeType: data.mimeType,
+      }
+    );
+
+    const mimeType = importResult.mimeType || data.mimeType;
+    const mimeValidation = validateMimeType(mimeType);
+    if (!mimeValidation.valid) {
+      throw new ValidationError(mimeValidation.error!);
+    }
+
+    const existingAsset = await this.findAssetByContentHash(importResult.contentHash);
+    if (
+      existingAsset &&
+      (existingAsset.filePath || isDesktopAssetUrl(existingAsset.url))
+    ) {
+      return existingAsset;
+    }
+
+    const asset: Asset = {
+      id: generateUUID(),
+      type: data.type,
+      source: data.source,
+      url: convertLocalFilePathToAssetUrl(importResult.localPath),
+      filePath: importResult.localPath,
+      name: data.name || importResult.originalName,
+      mimeType,
+      createdAt: importResult.createdAt || Date.now(),
+      size: importResult.size,
+      contentHash: importResult.contentHash,
+      prompt: data.prompt,
+      modelName: data.modelName,
+      category: data.category,
+      characterMeta: data.characterMeta,
+    };
+
+    const storedAsset = assetToStoredAsset(asset);
+    storedAsset.contentHash = importResult.contentHash;
+    storedAsset.filePath = importResult.localPath;
+    await this.store!.setItem(asset.id, storedAsset);
+
+    analytics.track('asset_upload_success', {
+      assetId: asset.id,
+      type: asset.type,
+      source: asset.source,
+      size: asset.size,
+      mimeType: asset.mimeType,
+      storage: 'desktop-file',
+    });
+
+    return asset;
+  }
+
+  async pickDesktopMediaFiles(): Promise<DesktopPickedMediaFile[]> {
+    if (!isTauriEnvironment()) {
+      return [];
+    }
+    return this.invokeDesktopCommand<DesktopPickedMediaFile[]>('pick_media_files');
+  }
+
+  async addDesktopLocalAssetFromPath(input: {
+    path: string;
+    type?: AssetType;
+    name?: string;
+    mimeType?: string;
+  }): Promise<Asset> {
+    this.ensureInitialized();
+
+    const fileName = input.name || getFileNameFromPath(input.path);
+    const pickedType = input.type || AssetType.IMAGE;
+    const mimeType = input.mimeType || 'application/octet-stream';
+    const emptyBlob = new Blob([], { type: mimeType });
+    const asset = await this.addAsset({
+      type: pickedType,
+      source: AssetSource.LOCAL,
+      name: fileName,
+      blob: emptyBlob,
+      mimeType,
+      sourcePath: input.path,
+    });
+
+    return asset;
   }
 
   /**
@@ -294,6 +453,11 @@ class AssetStorageService {
 
     this.ensureInitialized();
 
+    const desktopAsset = await this.importDesktopLocalAsset(data);
+    if (desktopAsset) {
+      return desktopAsset;
+    }
+
     // 计算内容哈希用于去重
     // console.log('[AssetStorageService] Computing content hash...');
     const contentHash = await this.calculateBlobChecksum(data.blob);
@@ -348,35 +512,11 @@ class AssetStorageService {
       });
       // console.log('[AssetStorageService] Media cached via unified cache service');
 
-      // 在桌面环境中，尝试保存文件到文件系统并获取路径
-      let filePath: string | undefined;
-      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
-        try {
-          const fileName = assetUrl.split('/').pop() || `${assetId}.bin`;
-          const arrayBuffer = await data.blob.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          const result = await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
-            fileName,
-            buffer: Array.from(uint8Array),
-            fileType: cacheType,
-          });
-          
-          if (result && typeof result === 'string') {
-            filePath = result;
-          }
-          console.log('[AssetStorageService] Saved to file system:', filePath);
-        } catch (error) {
-          console.warn('[AssetStorageService] Failed to save to file system:', error);
-        }
-      }
-
       const asset: Asset = {
         id: assetId,
         type: data.type,
         source: data.source,
         url: assetUrl,
-        filePath,
         name: data.name,
         mimeType: data.mimeType,
         createdAt: Date.now(),
@@ -475,6 +615,9 @@ class AssetStorageService {
             // 验证 Cache Storage 中是否有实际数据
             // 只检查 /asset-library/ 前缀的本地上传素材
             if (stored.url.startsWith('/asset-library/')) {
+              if (stored.filePath || isDesktopAssetUrl(stored.url)) {
+                return this.toRuntimeAsset(stored);
+              }
               if (validCacheUrls.size > 0 && !validCacheUrls.has(stored.url)) {
                 // Cache Storage 中没有实际数据，跳过此素材
                 return null;
@@ -482,7 +625,7 @@ class AssetStorageService {
             }
 
             // 直接使用存储的 URL
-            return storedAssetToAsset(stored);
+            return this.toRuntimeAsset(stored);
           } catch (err) {
             console.error(`[AssetStorageService] Failed to load asset ${key}:`, err);
             return null;
@@ -518,7 +661,7 @@ class AssetStorageService {
       }
 
       // 直接使用存储的 URL
-      return storedAssetToAsset(stored);
+      return this.toRuntimeAsset(stored);
     } catch (error: any) {
       throw new AssetStorageError(
         `Failed to get asset: ${error.message}`,

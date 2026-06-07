@@ -6,8 +6,8 @@
  */
 
 import { useState, useEffect } from 'react';
-import { normalizeImageDataUrl } from '@aitu/utils';
 import { swChannelClient } from '../services/sw-channel/client';
+import { isDesktopAssetUrl } from '../utils/desktop-asset-url';
 
 // 内存缓存：记录已检查过的缩略图 URL（按尺寸区分）
 // key: `${originalUrl}|${size}`, value: 检查时间戳
@@ -24,6 +24,28 @@ let isProcessingQueue = false;
 // 缓存的 Cache 对象引用，避免重复调用 caches.open
 let thumbCachePromise: Promise<Cache> | null = null;
 let imageCachePromise: Promise<Cache> | null = null;
+
+function normalizeImageDataUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+  if (
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../')
+  ) {
+    return trimmed;
+  }
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) && trimmed.length >= 32) {
+    return `data:image/png;base64,${trimmed}`;
+  }
+  return trimmed;
+}
 
 /**
  * 获取或创建缓存引用
@@ -68,6 +90,7 @@ function shouldBypassThumbnailForUrl(
   return (
     originalUrl.startsWith('data:') ||
     originalUrl.startsWith('blob:') ||
+    isDesktopAssetUrl(originalUrl) ||
     (
       type !== 'video' &&
       (originalUrl.startsWith('http://') || originalUrl.startsWith('https://'))

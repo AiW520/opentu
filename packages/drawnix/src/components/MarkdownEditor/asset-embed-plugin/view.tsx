@@ -33,6 +33,7 @@ import {
 import { RetryImage } from '../../retry-image';
 import { VideoPosterPreview } from '../../shared/VideoPosterPreview';
 import { assetEmbedSchema } from './schema';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 
 interface AssetEmbedViewProps {
   assetId: string;
@@ -287,10 +288,11 @@ const AssetEmbedView: React.FC<AssetEmbedViewProps> = ({
   }
 
   if (asset.type === AssetType.IMAGE) {
+    const runtimeUrl = getAssetRuntimeUrl(asset);
     return (
       <RetryImage
         className="collimind-asset-embed__image"
-        src={normalizeImageDataUrl(asset.url)}
+        src={normalizeImageDataUrl(runtimeUrl)}
         alt={label || asset.name || '素材图片'}
         showSkeleton={false}
         eager
@@ -299,11 +301,12 @@ const AssetEmbedView: React.FC<AssetEmbedViewProps> = ({
   }
 
   if (asset.type === AssetType.VIDEO) {
+    const runtimeUrl = getAssetRuntimeUrl(asset);
     return mediaFrame(
       <div className="collimind-asset-embed__video-wrap">
         <VideoPosterPreview
           className="collimind-asset-embed__video"
-          src={asset.url}
+          src={runtimeUrl}
           poster={asset.thumbnail}
           alt={label || asset.name || '素材视频'}
           thumbnailSize="large"

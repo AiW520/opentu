@@ -128,6 +128,34 @@ export async function downloadMediaFile(
     });
   }
 
+  if (isTauriEnvironment()) {
+    const type =
+      fallbackName === 'video'
+        ? 'video'
+        : fallbackName === 'audio'
+        ? 'audio'
+        : 'image';
+    const desktopPath = await getDesktopDefaultSavePath(filename, type);
+    if (desktopPath) {
+      return runSingleDownloadWithFallback(normalizedUrl, async () => {
+        const response = await fetch(normalizedUrl, { referrerPolicy: 'no-referrer' });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${normalizedUrl}: ${response.status}`);
+        }
+        const sourceBlob = await response.blob();
+        const blob =
+          type === 'audio'
+            ? await applyAudioMetadataToBlob(
+                sourceBlob,
+                audioMetadata,
+                normalizedUrl
+              )
+            : sourceBlob;
+        await writeBlobToLocation(desktopPath, blob);
+      });
+    }
+  }
+
   if (fallbackName === 'audio') {
     return runSingleDownloadWithFallback(normalizedUrl, async () => {
       const response = await fetch(normalizedUrl, { referrerPolicy: 'no-referrer' });
@@ -160,6 +188,33 @@ let saveToCustomLocation: SaveToLocationFn = async (path, data) => {
   const blob = new Blob([data]);
   downloadFromBlob(blob, path.split('/').pop() || 'download');
 };
+
+function isTauriEnvironment(): boolean {
+  return typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+}
+
+function getDesktopFileType(type: BatchDownloadItem['type'] | 'archive'): string {
+  return type === 'archive' ? 'archive' : type;
+}
+
+async function getDesktopDefaultSavePath(
+  filename: string,
+  type: BatchDownloadItem['type'] | 'archive'
+): Promise<string | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+
+  return (window as any).__TAURI_INTERNALS__.invoke('get_default_save_path', {
+    fileName: filename,
+    fileType: getDesktopFileType(type),
+  });
+}
+
+async function writeBlobToLocation(path: string, blob: Blob): Promise<void> {
+  const arrayBuffer = await blob.arrayBuffer();
+  await saveToCustomLocation(path, new Uint8Array(arrayBuffer));
+}
 
 /**
  * 设置自定义保存函数（桌面环境调用）
@@ -458,7 +513,12 @@ export async function downloadAsZip(
       reportProgress(onProgress, 50 + metadata.percent / 2);
     }
   );
-  downloadFromBlob(content, finalZipName);
+  const desktopPath = await getDesktopDefaultSavePath(finalZipName, 'archive');
+  if (desktopPath) {
+    await writeBlobToLocation(desktopPath, content);
+  } else {
+    downloadFromBlob(content, finalZipName);
+  }
   reportProgress(onProgress, 100);
   return createDownloadResult({
     downloadedCount: addedCount,
@@ -500,6 +560,32 @@ export async function smartDownload(
       });
       reportProgress(onProgress, 100);
       return result;
+    }
+
+    if (isTauriEnvironment()) {
+      const ext = getFileExtension(assetUrl) || getTypeFallbackExtension(item.type);
+      const filename = item.filename || `${item.type}_download.${ext}`;
+      const desktopPath = await getDesktopDefaultSavePath(filename, item.type);
+      if (desktopPath) {
+        const result = await runSingleDownloadWithFallback(assetUrl, async () => {
+          const response = await fetch(assetUrl, { referrerPolicy: 'no-referrer' });
+          if (!response.ok) {
+            throw new Error(`Failed to fetch ${assetUrl}: ${response.status}`);
+          }
+          const sourceBlob = await response.blob();
+          const blob =
+            item.type === 'audio'
+              ? await applyAudioMetadataToBlob(
+                  sourceBlob,
+                  item.audioMetadata,
+                  assetUrl
+                )
+              : sourceBlob;
+          await writeBlobToLocation(desktopPath, blob);
+        });
+        reportProgress(onProgress, 100);
+        return result;
+      }
     }
 
     if (item.type === 'audio') {

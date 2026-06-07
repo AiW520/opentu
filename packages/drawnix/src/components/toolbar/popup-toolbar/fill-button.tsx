@@ -29,6 +29,7 @@ import { isSolidFill, isFillConfig } from '../../../types/fill.types';
 import { AssetType, SelectionMode } from '../../../types/asset.types';
 import type { Asset } from '../../../types/asset.types';
 import { useI18n } from '../../../i18n';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 
 // 懒加载 MediaLibraryModal
 const MediaLibraryModal = lazy(() => import('../../media-library').then(module => ({ default: module.MediaLibraryModal })));
@@ -152,7 +153,7 @@ export const PopupFillButton: React.FC<PopupFillButtonProps> = ({
     (asset: Asset) => {
       // 设置图片填充
       setImageFill(board, {
-        imageUrl: asset.url,
+        imageUrl: getAssetRuntimeUrl(asset),
         mode: 'stretch',
         scale: 1,
         offsetX: 0,

@@ -18,6 +18,7 @@ import { MediaLibraryModal } from '../../media-library/MediaLibraryModal';
 import { SelectionMode, AssetType, AssetSource } from '../../../types/asset.types';
 import type { Asset } from '../../../types/asset.types';
 import { useAssets } from '../../../contexts/AssetContext';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 import './MultiImageUpload.scss';
 
 interface MultiImageUploadProps {
@@ -145,7 +146,7 @@ export const MultiImageUpload: React.FC<MultiImageUploadProps> = ({
   }, [currentSlot, images, labels, onImagesChange]);
 
   const assetToUploadedImage = useCallback(async (asset: Asset, slot: number): Promise<UploadedVideoImage> => {
-    const response = await fetch(asset.url);
+    const response = await fetch(getAssetRuntimeUrl(asset));
     const blob = await response.blob();
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();

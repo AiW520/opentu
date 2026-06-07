@@ -1,13 +1,12 @@
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use tauri::State;
 
-use crate::AppState;
 use crate::database::Database;
+use crate::AppState;
 
-/// 文件操作结果
 #[derive(Debug, serde::Serialize)]
 pub struct FileOperationResult {
     pub success: bool,
@@ -16,16 +15,14 @@ pub struct FileOperationResult {
     pub file_size: Option<u64>,
 }
 
-/// 文件冲突处理策略
 #[derive(Debug, serde::Deserialize)]
 pub enum ConflictStrategy {
-    Overwrite,      // 覆盖
-    Rename,         // 重命名（添加数字后缀）
-    Skip,           // 跳过
-    Fail,           // 失败
+    Overwrite,
+    Rename,
+    Skip,
+    Fail,
 }
 
-/// 移动文件到媒体目录
 #[tauri::command]
 pub async fn move_file_to_media(
     state: State<'_, AppState>,
@@ -34,25 +31,22 @@ pub async fn move_file_to_media(
     conflict_strategy: Option<ConflictStrategy>,
 ) -> Result<FileOperationResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    
-    let result = move_file_to_media_internal(&db, &source_path, file_type.as_deref(), conflict_strategy.as_ref());
-    match result {
-        Ok((target_path, file_size)) => Ok(FileOperationResult {
-            success: true,
-            message: "文件移动成功".to_string(),
-            target_path: Some(target_path),
-            file_size: Some(file_size),
-        }),
-        Err(e) => Ok(FileOperationResult {
-            success: false,
-            message: e,
-            target_path: None,
-            file_size: None,
-        }),
+
+    match move_file_to_media_internal(
+        &db,
+        &source_path,
+        file_type.as_deref(),
+        conflict_strategy.as_ref(),
+    ) {
+        Ok((target_path, file_size)) => Ok(success_result(
+            "文件移动成功",
+            Some(target_path),
+            Some(file_size),
+        )),
+        Err(error) => Ok(fail_result(error)),
     }
 }
 
-/// 复制文件到媒体目录
 #[tauri::command]
 pub async fn copy_file_to_media(
     state: State<'_, AppState>,
@@ -61,25 +55,22 @@ pub async fn copy_file_to_media(
     conflict_strategy: Option<ConflictStrategy>,
 ) -> Result<FileOperationResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    
-    let result = copy_file_to_media_internal(&db, &source_path, file_type.as_deref(), conflict_strategy.as_ref());
-    match result {
-        Ok((target_path, file_size)) => Ok(FileOperationResult {
-            success: true,
-            message: "文件复制成功".to_string(),
-            target_path: Some(target_path),
-            file_size: Some(file_size),
-        }),
-        Err(e) => Ok(FileOperationResult {
-            success: false,
-            message: e,
-            target_path: None,
-            file_size: None,
-        }),
+
+    match copy_file_to_media_internal(
+        &db,
+        &source_path,
+        file_type.as_deref(),
+        conflict_strategy.as_ref(),
+    ) {
+        Ok((target_path, file_size)) => Ok(success_result(
+            "文件复制成功",
+            Some(target_path),
+            Some(file_size),
+        )),
+        Err(error) => Ok(fail_result(error)),
     }
 }
 
-/// 删除媒体目录中的文件
 #[tauri::command]
 pub async fn delete_media_file(
     state: State<'_, AppState>,
@@ -87,25 +78,13 @@ pub async fn delete_media_file(
     file_type: Option<String>,
 ) -> Result<FileOperationResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    
-    let result = delete_media_file_internal(&db, &file_name, file_type.as_deref());
-    match result {
-        Ok(_) => Ok(FileOperationResult {
-            success: true,
-            message: "文件删除成功".to_string(),
-            target_path: None,
-            file_size: None,
-        }),
-        Err(e) => Ok(FileOperationResult {
-            success: false,
-            message: e,
-            target_path: None,
-            file_size: None,
-        }),
+
+    match delete_media_file_internal(&db, &file_name, file_type.as_deref()) {
+        Ok(_) => Ok(success_result("文件删除成功", None, None)),
+        Err(error) => Ok(fail_result(error)),
     }
 }
 
-/// 验证文件是否存在并可访问
 #[tauri::command]
 pub async fn verify_file_accessible(
     state: State<'_, AppState>,
@@ -113,70 +92,65 @@ pub async fn verify_file_accessible(
     file_type: Option<String>,
 ) -> Result<FileOperationResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    
-    let subdir = get_media_subdir(file_type.as_deref().unwrap_or("image"));
-    let file_path = db.media_root.join(subdir).join(&file_name);
-    
+    let file_path = db
+        .media_root
+        .join(get_media_subdir(file_type.as_deref().unwrap_or("image")))
+        .join(sanitize_file_name(&file_name)?);
+
     match fs::metadata(&file_path) {
-        Ok(metadata) => {
-            if metadata.is_file() {
-                Ok(FileOperationResult {
-                    success: true,
-                    message: "文件存在且可访问".to_string(),
-                    target_path: Some(file_path.to_string_lossy().to_string()),
-                    file_size: Some(metadata.len()),
-                })
-            } else {
-                Ok(FileOperationResult {
-                    success: false,
-                    message: "路径不是文件".to_string(),
-                    target_path: Some(file_path.to_string_lossy().to_string()),
-                    file_size: None,
-                })
-            }
-        }
-        Err(e) => Ok(FileOperationResult {
+        Ok(metadata) if metadata.is_file() => Ok(success_result(
+            "文件存在且可访问",
+            Some(file_path.to_string_lossy().to_string()),
+            Some(metadata.len()),
+        )),
+        Ok(_) => Ok(FileOperationResult {
             success: false,
-            message: format!("文件不存在或无法访问: {}", e),
+            message: "路径不是文件".to_string(),
+            target_path: Some(file_path.to_string_lossy().to_string()),
+            file_size: None,
+        }),
+        Err(error) => Ok(FileOperationResult {
+            success: false,
+            message: format!("文件不存在或无法访问: {}", error),
             target_path: Some(file_path.to_string_lossy().to_string()),
             file_size: None,
         }),
     }
 }
 
-/// 获取媒体目录中所有文件列表
 #[tauri::command]
 pub async fn list_media_files(
     state: State<'_, AppState>,
     file_type: Option<String>,
 ) -> Result<Vec<MediaFileInfo>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    
-    let subdir = get_media_subdir(file_type.as_deref().unwrap_or("image"));
-    let media_dir = db.media_root.join(subdir);
-    
-    match fs::read_dir(&media_dir) {
-        Ok(entries) => {
-            let mut files = Vec::new();
-            for entry in entries.flatten() {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.is_file() {
-                        files.push(MediaFileInfo {
-                            name: entry.file_name().to_string_lossy().to_string(),
-                            path: entry.path().to_string_lossy().to_string(),
-                            size: metadata.len(),
-                            modified_at: metadata.modified().ok().map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()),
-                        });
-                    }
-                }
+    let media_dir = db
+        .media_root
+        .join(get_media_subdir(file_type.as_deref().unwrap_or("image")));
+
+    let entries = fs::read_dir(&media_dir).map_err(|error| format!("无法读取目录: {}", error))?;
+    let mut files = Vec::new();
+
+    for entry in entries.flatten() {
+        if let Ok(metadata) = entry.metadata() {
+            if metadata.is_file() {
+                files.push(MediaFileInfo {
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    path: entry.path().to_string_lossy().to_string(),
+                    size: metadata.len(),
+                    modified_at: metadata
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|duration| duration.as_secs()),
+                });
             }
-            Ok(files)
         }
-        Err(e) => Err(format!("无法读取目录: {}", e)),
     }
+
+    Ok(files)
 }
 
-/// 媒体文件信息
 #[derive(Debug, serde::Serialize)]
 pub struct MediaFileInfo {
     pub name: String,
@@ -185,7 +159,27 @@ pub struct MediaFileInfo {
     pub modified_at: Option<u64>,
 }
 
-// === 内部实现函数 ===
+fn success_result(
+    message: &str,
+    target_path: Option<String>,
+    file_size: Option<u64>,
+) -> FileOperationResult {
+    FileOperationResult {
+        success: true,
+        message: message.to_string(),
+        target_path,
+        file_size,
+    }
+}
+
+fn fail_result(message: String) -> FileOperationResult {
+    FileOperationResult {
+        success: false,
+        message,
+        target_path: None,
+        file_size: None,
+    }
+}
 
 fn move_file_to_media_internal(
     db: &Database,
@@ -193,44 +187,23 @@ fn move_file_to_media_internal(
     file_type: Option<&str>,
     conflict_strategy: Option<&ConflictStrategy>,
 ) -> Result<(String, u64), String> {
-    let source_path = Path::new(source_path);
-    
-    // 验证源文件存在
-    if !source_path.exists() {
-        return Err("源文件不存在".to_string());
-    }
-    
-    if !source_path.is_file() {
-        return Err("源路径不是文件".to_string());
-    }
-    
-    // 获取文件大小
-    let metadata = fs::metadata(source_path).map_err(|e| format!("无法读取源文件: {}", e))?;
-    let file_size = metadata.len();
-    
-    // 获取目标路径
-    let (target_path, _) = resolve_target_path(db, source_path, file_type, conflict_strategy)?;
-    
-    // 确保目标目录存在
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("无法创建目标目录: {}", e))?;
-    }
-    
-    // 执行移动操作
-    fs::rename(source_path, &target_path).map_err(|e| {
-        // 如果重命名失败（跨分区移动），尝试复制后删除
-        if e.kind() == std::io::ErrorKind::CrossesDevices {
-            if let Err(copy_err) = copy_file_internal(source_path, &target_path) {
-                return format!("跨分区移动失败，复制也失败: {}", copy_err);
-            }
-            if let Err(delete_err) = fs::remove_file(source_path) {
-                return format!("文件复制成功，但删除原文件失败: {}", delete_err);
-            }
-            return "".to_string();
+    let source_path = validate_source_file(source_path)?;
+    let file_size = fs::metadata(source_path)
+        .map_err(|error| format!("无法读取源文件: {}", error))?
+        .len();
+    let target_path = resolve_target_path(db, source_path, file_type, conflict_strategy)?;
+    ensure_parent_dir(&target_path)?;
+
+    if let Err(error) = fs::rename(source_path, &target_path) {
+        if error.kind() != std::io::ErrorKind::CrossesDevices {
+            return Err(format!("移动文件失败: {}", error));
         }
-        format!("移动文件失败: {}", e)
-    })?;
-    
+
+        copy_file_internal(source_path, &target_path)?;
+        fs::remove_file(source_path)
+            .map_err(|delete_error| format!("文件复制成功，但删除原文件失败: {}", delete_error))?;
+    }
+
     Ok((target_path.to_string_lossy().to_string(), file_size))
 }
 
@@ -240,32 +213,14 @@ fn copy_file_to_media_internal(
     file_type: Option<&str>,
     conflict_strategy: Option<&ConflictStrategy>,
 ) -> Result<(String, u64), String> {
-    let source_path = Path::new(source_path);
-    
-    // 验证源文件存在
-    if !source_path.exists() {
-        return Err("源文件不存在".to_string());
-    }
-    
-    if !source_path.is_file() {
-        return Err("源路径不是文件".to_string());
-    }
-    
-    // 获取文件大小
-    let metadata = fs::metadata(source_path).map_err(|e| format!("无法读取源文件: {}", e))?;
-    let file_size = metadata.len();
-    
-    // 获取目标路径
-    let (target_path, _) = resolve_target_path(db, source_path, file_type, conflict_strategy)?;
-    
-    // 确保目标目录存在
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("无法创建目标目录: {}", e))?;
-    }
-    
-    // 执行复制操作
+    let source_path = validate_source_file(source_path)?;
+    let file_size = fs::metadata(source_path)
+        .map_err(|error| format!("无法读取源文件: {}", error))?
+        .len();
+    let target_path = resolve_target_path(db, source_path, file_type, conflict_strategy)?;
+    ensure_parent_dir(&target_path)?;
     copy_file_internal(source_path, &target_path)?;
-    
+
     Ok((target_path.to_string_lossy().to_string(), file_size))
 }
 
@@ -274,24 +229,43 @@ fn delete_media_file_internal(
     file_name: &str,
     file_type: Option<&str>,
 ) -> Result<(), String> {
-    let subdir = get_media_subdir(file_type.unwrap_or("image"));
-    let file_path = db.media_root.join(subdir).join(file_name);
-    
+    let file_path = db
+        .media_root
+        .join(get_media_subdir(file_type.unwrap_or("image")))
+        .join(sanitize_file_name(file_name)?);
+
     if !file_path.exists() {
         return Err("文件不存在".to_string());
     }
-    
-    fs::remove_file(&file_path).map_err(|e| format!("删除文件失败: {}", e))
+
+    fs::remove_file(&file_path).map_err(|error| format!("删除文件失败: {}", error))
+}
+
+fn validate_source_file(source_path: &str) -> Result<&Path, String> {
+    let source_path = Path::new(source_path);
+    if !source_path.exists() {
+        return Err("源文件不存在".to_string());
+    }
+    if !source_path.is_file() {
+        return Err("源路径不是文件".to_string());
+    }
+    Ok(source_path)
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("无法创建目标目录: {}", error))?;
+    }
+    Ok(())
 }
 
 fn copy_file_internal(source: &Path, target: &Path) -> Result<(), String> {
-    let mut source_file = File::open(source).map_err(|e| format!("无法打开源文件: {}", e))?;
-    let mut target_file = File::create(target).map_err(|e| format!("无法创建目标文件: {}", e))?;
-    
-    let mut buffer = Vec::new();
-    source_file.read_to_end(&mut buffer).map_err(|e| format!("读取源文件失败: {}", e))?;
-    target_file.write_all(&buffer).map_err(|e| format!("写入目标文件失败: {}", e))?;
-    
+    let mut source_file =
+        File::open(source).map_err(|error| format!("无法打开源文件: {}", error))?;
+    let mut target_file =
+        File::create(target).map_err(|error| format!("无法创建目标文件: {}", error))?;
+    io::copy(&mut source_file, &mut target_file)
+        .map_err(|error| format!("复制文件失败: {}", error))?;
     Ok(())
 }
 
@@ -300,62 +274,64 @@ fn resolve_target_path(
     source_path: &Path,
     file_type: Option<&str>,
     conflict_strategy: Option<&ConflictStrategy>,
-) -> Result<(PathBuf, bool), String> {
-    let subdir = get_media_subdir(file_type.unwrap_or("image"));
-    let file_name = source_path.file_name()
+) -> Result<PathBuf, String> {
+    let file_name = source_path
+        .file_name()
         .ok_or_else(|| "无法获取文件名".to_string())?
         .to_string_lossy()
         .to_string();
-    
-    let mut target_path = db.media_root.join(subdir).join(&file_name);
-    
-    // 处理文件冲突
+    let mut target_path = db
+        .media_root
+        .join(get_media_subdir(file_type.unwrap_or("image")))
+        .join(sanitize_file_name(&file_name)?);
+
     if target_path.exists() {
         match conflict_strategy.unwrap_or(&ConflictStrategy::Rename) {
-            ConflictStrategy::Overwrite => {
-                // 直接覆盖，不需要修改路径
-            }
-            ConflictStrategy::Rename => {
-                target_path = generate_unique_path(&target_path);
-            }
-            ConflictStrategy::Skip => {
-                return Err("目标文件已存在，跳过操作".to_string());
-            }
-            ConflictStrategy::Fail => {
-                return Err("目标文件已存在".to_string());
-            }
+            ConflictStrategy::Overwrite => {}
+            ConflictStrategy::Rename => target_path = generate_unique_path(&target_path),
+            ConflictStrategy::Skip => return Err("目标文件已存在，跳过操作".to_string()),
+            ConflictStrategy::Fail => return Err("目标文件已存在".to_string()),
         }
     }
-    
-    let exists = target_path.exists();
-    Ok((target_path, exists))
+
+    Ok(target_path)
 }
 
 fn generate_unique_path(base_path: &Path) -> PathBuf {
     let parent = base_path.parent().unwrap_or_else(|| Path::new("."));
     let file_stem = base_path.file_stem().unwrap_or_default().to_string_lossy();
     let extension = base_path.extension().unwrap_or_default().to_string_lossy();
-    
-    for i in 1..1000 {
+
+    for index in 1..1000 {
         let new_name = if extension.is_empty() {
-            format!("{} ({})", file_stem, i)
+            format!("{} ({})", file_stem, index)
         } else {
-            format!("{} ({}).{}", file_stem, i, extension)
+            format!("{} ({}).{}", file_stem, index, extension)
         };
         let new_path = parent.join(new_name);
         if !new_path.exists() {
             return new_path;
         }
     }
-    
-    // 如果找不到可用的文件名，返回原路径（应该不会走到这里）
+
     base_path.to_path_buf()
 }
 
+fn sanitize_file_name(file_name: &str) -> Result<String, String> {
+    Path::new(file_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| "无效文件名".to_string())
+}
+
 fn get_media_subdir(file_type: &str) -> &str {
-    match file_type {
+    match file_type.to_ascii_lowercase().as_str() {
         "video" => "视频",
         "audio" => "音频",
+        "ppt" | "presentation" => "PPT",
+        "text" | "markdown" | "json" => "文本",
+        "archive" | "zip" => "压缩包",
         _ => "图片",
     }
 }

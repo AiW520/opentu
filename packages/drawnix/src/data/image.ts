@@ -19,9 +19,12 @@ import {
 import { assetStorageService } from '../services/asset-storage-service';
 import { analytics } from '../utils/posthog-analytics';
 import { cacheRemoteUrl } from '../services/media-executor/fallback-utils';
+import { unifiedCacheService } from '../services/unified-cache-service';
+import { isVirtualMediaUrl } from '../utils/virtual-media-url';
 import { normalizeImageDataUrl } from '@aitu/utils';
 import { AssetSource, AssetType } from '../types/asset.types';
 import { getInsertionPointFromSavedSelection, calculateImageDisplayDimensions } from '../utils/canvas-insertion-layout';
+import { isDesktopAssetUrl } from '../utils/desktop-asset-url';
 
 export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
   const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
@@ -101,7 +104,9 @@ export const loadHTMLImageElementWithRetry = (
   const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
   // 外部 URL 不设置 crossOrigin（避免 CORS），不追加参数（避免破坏签名）
   const isExternalUrl =
-    normalizedURL.startsWith('http://') || normalizedURL.startsWith('https://');
+    (normalizedURL.startsWith('http://') ||
+      normalizedURL.startsWith('https://')) &&
+    !isDesktopAssetUrl(normalizedURL);
 
   return new Promise((resolve, reject) => {
     let retryCount = 0;
@@ -341,8 +346,9 @@ export const insertImageFromUrl = async (
   // 外部 URL 和 data URL 先缓存到本地
   let resolvedUrl = normalizeImageDataUrl(imageUrl);
   if (
-    resolvedUrl.startsWith('http://') ||
-    resolvedUrl.startsWith('https://') ||
+    ((resolvedUrl.startsWith('http://') ||
+      resolvedUrl.startsWith('https://')) &&
+      !isDesktopAssetUrl(resolvedUrl)) ||
     resolvedUrl.startsWith('data:')
   ) {
     const cachedUrl = await cacheRemoteUrl(
@@ -353,6 +359,20 @@ export const insertImageFromUrl = async (
     );
     if (cachedUrl !== resolvedUrl) {
       resolvedUrl = cachedUrl;
+    }
+  }
+
+  let imageLoadUrl = resolvedUrl;
+  let imageLoadObjectUrl: string | undefined;
+  if (
+    typeof window !== 'undefined' &&
+    (window as any).__TAURI_INTERNALS__ &&
+    isVirtualMediaUrl(resolvedUrl)
+  ) {
+    const cachedBlob = await unifiedCacheService.getCachedBlob(resolvedUrl);
+    if (cachedBlob) {
+      imageLoadObjectUrl = URL.createObjectURL(cachedBlob);
+      imageLoadUrl = imageLoadObjectUrl;
     }
   }
 
@@ -401,17 +421,23 @@ export const insertImageFromUrl = async (
   } else {
     // 使用带重试的图片加载函数，支持自动绕过 SW
     // console.log(`[insertImageFromUrl] Loading image with retry...`);
-    const image = await loadHTMLImageElementWithRetry(
-      resolvedUrl as DataURL,
-      true
-    ); // 使用 crossOrigin 以支持外部 URL
-    imageItem = buildImage(
-      image,
-      resolvedUrl as DataURL,
-      defaultImageWidth,
-      true,
-      referenceDimensions
-    ); // 使用原始尺寸并传递参考尺寸
+    try {
+      const image = await loadHTMLImageElementWithRetry(
+        imageLoadUrl as DataURL,
+        true
+      );
+      imageItem = buildImage(
+        image,
+        resolvedUrl as DataURL,
+        defaultImageWidth,
+        true,
+        referenceDimensions
+      );
+    } finally {
+      if (imageLoadObjectUrl) {
+        URL.revokeObjectURL(imageLoadObjectUrl);
+      }
+    }
     // console.log(`[insertImageFromUrl] Image loaded, imageItem:`, imageItem);
   }
 

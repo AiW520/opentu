@@ -1377,6 +1377,37 @@ class UnifiedCacheService {
     return fileName;
   }
 
+  private getMediaTypeFromUrl(url: string): CacheMediaType {
+    const mimeType = this.getMimeTypeFromUrl(url);
+    if (mimeType.startsWith('video/')) {
+      return 'video';
+    }
+    if (mimeType.startsWith('audio/')) {
+      return 'audio';
+    }
+    return 'image';
+  }
+
+  private getMimeTypeFromUrl(url: string): string {
+    const extension = this.getFileNameFromUrl(url).split('.').pop()?.toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      svg: 'image/svg+xml',
+      mp4: 'video/mp4',
+      webm: 'video/webm',
+      mov: 'video/quicktime',
+      mp3: 'audio/mpeg',
+      wav: 'audio/wav',
+      ogg: 'audio/ogg',
+      m4a: 'audio/mp4',
+    };
+    return mimeTypes[extension || ''] || 'application/octet-stream';
+  }
+
   /**
    * 获取缓存的 Blob（兼容 urlCacheService.getVideoAsBlob）
    * 支持 taskId（如 "merged-video-xxx"）或完整 URL
@@ -1411,6 +1442,32 @@ class UnifiedCacheService {
         }
         if (response) {
           return await response.blob();
+        }
+      }
+
+      if (
+        isVirtualUrl &&
+        typeof window !== 'undefined' &&
+        (window as any).__TAURI_INTERNALS__
+      ) {
+        const fileName = this.getFileNameFromUrl(cacheUrl);
+        const base64Data = await (window as any).__TAURI_INTERNALS__.invoke(
+          'get_cached_media_file',
+          {
+            fileName,
+            fileType: this.getMediaTypeFromUrl(cacheUrl),
+          }
+        );
+
+        if (typeof base64Data === 'string' && base64Data) {
+          const binary = atob(base64Data);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          return new Blob([bytes], {
+            type: this.getMimeTypeFromUrl(cacheUrl),
+          });
         }
       }
 

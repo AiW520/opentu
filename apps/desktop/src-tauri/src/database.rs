@@ -15,14 +15,11 @@ impl Database {
             .path()
             .app_data_dir()
             .unwrap_or_else(|_| PathBuf::from("."));
-
-        // 确保目录存在
         fs::create_dir_all(&data_dir)?;
 
         let db_path = data_dir.join("opentu.db");
         let conn = Connection::open(&db_path)?;
 
-        // 启用 WAL 模式
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
 
@@ -33,7 +30,6 @@ impl Database {
         };
         db.init_schema()?;
 
-        // 从 settings 表中读取自定义路径
         let custom_root: Option<String> = db
             .conn
             .query_row(
@@ -51,7 +47,6 @@ impl Database {
             }
         }
 
-        // 确保媒体子目录存在
         db.ensure_media_dirs()?;
         fs::create_dir_all(data_dir.join("backups"))?;
         fs::create_dir_all(data_dir.join("exports"))?;
@@ -61,9 +56,9 @@ impl Database {
     }
 
     pub fn ensure_media_dirs(&self) -> Result<(), Box<dyn std::error::Error>> {
-        fs::create_dir_all(self.media_root.join("图片"))?;
-        fs::create_dir_all(self.media_root.join("视频"))?;
-        fs::create_dir_all(self.media_root.join("音频"))?;
+        for subdir in ["图片", "视频", "音频", "PPT", "文本", "压缩包"] {
+            fs::create_dir_all(self.media_root.join(subdir))?;
+        }
         Ok(())
     }
 
@@ -71,13 +66,11 @@ impl Database {
         fs::create_dir_all(&path)?;
         self.media_root = path.clone();
 
-        // 持久化到 settings 表
         self.conn.execute(
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('media_root_path', ?1, strftime('%s','now'))",
             rusqlite::params![path.to_string_lossy().to_string()],
         )?;
 
-        // 确保子目录存在
         self.ensure_media_dirs()?;
         Ok(())
     }

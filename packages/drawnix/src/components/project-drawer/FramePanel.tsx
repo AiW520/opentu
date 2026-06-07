@@ -138,6 +138,7 @@ import {
   type ModelRef,
 } from '../../utils/settings-manager';
 import { analytics } from '../../utils/posthog-analytics';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 import { IMAGE_GENERATION_TIMEOUT_MS } from '../../constants/TASK_CONSTANTS';
 import type { ModelConfig } from '../../constants/model-config';
 import { AssetType, SelectionMode, type Asset } from '../../types/asset.types';
@@ -2436,6 +2437,7 @@ export const FramePanel: React.FC<FramePanelProps> = ({
       if (!board) return;
 
       try {
+        const runtimeUrl = getAssetRuntimeUrl(asset);
         const targetFrame = board.children.find(
           (element) =>
             element.id === frameInfo.frame.id && isFrameElement(element)
@@ -2457,7 +2459,7 @@ export const FramePanel: React.FC<FramePanelProps> = ({
           const currentSlideImage = findPPTSlideImage(board, targetFrame.id);
           const insertResult = await insertMediaIntoFrame(
             board,
-            asset.url,
+            runtimeUrl,
             'image',
             targetFrame.id,
             frameSize
@@ -2477,7 +2479,7 @@ export const FramePanel: React.FC<FramePanelProps> = ({
             board,
             targetFrame.id,
             insertResult.elementId,
-            asset.url,
+            runtimeUrl,
             {
               replaceElementId: currentSlideImage?.elementId,
               prompt: asset.prompt || getPPTSlidePrompt(targetPPTMeta),
@@ -2517,7 +2519,7 @@ export const FramePanel: React.FC<FramePanelProps> = ({
         if (asset.type === AssetType.VIDEO) {
           await insertMediaIntoFrame(
             board,
-            asset.url,
+            runtimeUrl,
             'video',
             targetFrame.id,
             frameSize
@@ -2554,7 +2556,7 @@ export const FramePanel: React.FC<FramePanelProps> = ({
 
           await insertAudioFromUrl(
             board,
-            asset.url,
+            runtimeUrl,
             {
               ...metadata,
               width: size.width,

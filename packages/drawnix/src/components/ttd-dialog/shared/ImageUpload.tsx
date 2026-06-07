@@ -11,6 +11,7 @@ import {
 import { useAssets } from '../../../contexts/AssetContext';
 import { HoverCard } from '../../shared';
 import { Z_INDEX } from '../../../constants/z-index';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 
 const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024;
 const COMPRESSION_THRESHOLD_BYTES = 10 * 1024 * 1024;
@@ -205,7 +206,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
       throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
     }
 
-    const response = await fetch(asset.url);
+    const response = await fetch(getAssetRuntimeUrl(asset));
     let blob = await response.blob();
 
     if (blob.size > MAX_IMAGE_SIZE_BYTES) {

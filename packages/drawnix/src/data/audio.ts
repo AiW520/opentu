@@ -23,6 +23,7 @@ import {
 } from '../types/audio-node.types';
 import { AudioNodeTransforms } from './audio-node-transforms';
 import type { CanvasAudioPlaybackSource } from '../services/canvas-audio-playback-service';
+import { isDesktopAssetUrl } from '../utils/desktop-asset-url';
 
 export const AUDIO_CARD_DEFAULT_WIDTH = AUDIO_NODE_DEFAULT_WIDTH;
 export const AUDIO_CARD_DEFAULT_HEIGHT = AUDIO_NODE_DEFAULT_HEIGHT;
@@ -228,8 +229,9 @@ async function resolveArtworkDataUrl(previewImageUrl?: string): Promise<string |
 
   let resolvedUrl = previewImageUrl;
   if (
-    previewImageUrl.startsWith('http://') ||
-    previewImageUrl.startsWith('https://')
+    (previewImageUrl.startsWith('http://') ||
+      previewImageUrl.startsWith('https://')) &&
+    !isDesktopAssetUrl(previewImageUrl)
   ) {
     try {
       const cachedUrl = await cacheRemoteUrl(
@@ -424,7 +426,10 @@ export async function insertAudioFromUrl(
   }
 
   let resolvedAudioUrl = audioUrl;
-  if (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) {
+  if (
+    (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) &&
+    !isDesktopAssetUrl(audioUrl)
+  ) {
     try {
       const cacheKeySeed = getAudioCacheKeySeed(audioUrl, {
         clipId: metadata.clipId,
