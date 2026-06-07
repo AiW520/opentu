@@ -97,26 +97,6 @@ jobs:
       - uses: pnpm/action-setup@v4
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build frontend first
-        working-directory: apps/desktop
-        env:
-          NODE_OPTIONS: "--max-old-space-size=8192"
-        run: |
-          echo "Building frontend renderer..."
-          pnpm run build:renderer 2>&1 || true
-          sleep 3
-          ls -la dist/
-      - name: Verify frontend build
-        working-directory: apps/desktop
-        run: |
-          if [ ! -d "dist" ]; then
-            echo "Frontend build failed, dist directory not found"
-            exit 1
-          fi
-          if [ ! -f "dist/index.html" ]; then
-            echo "Frontend build failed, index.html not found"
-            exit 1
-          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -129,6 +109,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: "-"
           CI: true
           RUST_BACKTRACE: "1"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Starting Tauri build..."
           pnpm tauri build --target aarch64-apple-darwin --verbose 2>&1
@@ -158,12 +139,6 @@ jobs:
       - uses: pnpm/action-setup@v4
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build frontend first
-        working-directory: apps/desktop
-        run: |
-          echo "Building frontend renderer..."
-          pnpm run build:renderer
-          Get-ChildItem -Path dist/
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
@@ -172,6 +147,7 @@ jobs:
         working-directory: apps/desktop
         env:
           CI: true
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Starting Tauri build..."
           pnpm tauri build --verbose 2>&1
@@ -226,6 +202,7 @@ jobs:
         env:
           CI: true
           RUST_BACKTRACE: "1"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           echo "Starting build..."
           pnpm tauri build --verbose 2>&1
