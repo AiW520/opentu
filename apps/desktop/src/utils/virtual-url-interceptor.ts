@@ -1,5 +1,44 @@
 import { unifiedCacheService } from '@drawnix/drawnix';
-import { isVirtualMediaUrl } from '@drawnix/drawnix';
+
+// 内联 isVirtualMediaUrl 函数，避免复杂的跨包导入问题
+const ASSET_LIBRARY_URL_PREFIX = '/asset-library/';
+const CACHE_URL_PREFIX = '/__aitu_cache__/';
+const AI_GENERATED_URL_PREFIX = '/__aitu_generated__/';
+const AI_GENERATED_AUDIO_URL_PREFIX = `${AI_GENERATED_URL_PREFIX}audio/`;
+
+function normalizeVirtualMediaUrl(url: string): string {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url, 'http://aitu.local');
+    return parsed.pathname;
+  } catch {
+    return url;
+  }
+}
+
+function isAssetLibraryUrl(url: string): boolean {
+  return normalizeVirtualMediaUrl(url).startsWith(ASSET_LIBRARY_URL_PREFIX);
+}
+
+function isLegacyCacheUrl(url: string): boolean {
+  return normalizeVirtualMediaUrl(url).startsWith(CACHE_URL_PREFIX);
+}
+
+function isAIGeneratedAudioUrl(url: string): boolean {
+  return normalizeVirtualMediaUrl(url).startsWith(AI_GENERATED_AUDIO_URL_PREFIX);
+}
+
+function isAIGeneratedVirtualUrl(url: string): boolean {
+  return isAIGeneratedAudioUrl(url);
+}
+
+function isVirtualMediaUrl(url: string): boolean {
+  return (
+    isAssetLibraryUrl(url) ||
+    isLegacyCacheUrl(url) ||
+    isAIGeneratedVirtualUrl(url)
+  );
+}
 
 /**
  * 虚拟 URL 拦截器
