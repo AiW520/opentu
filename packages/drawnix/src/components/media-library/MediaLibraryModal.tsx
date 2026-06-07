@@ -19,7 +19,23 @@ import { useDrawnix } from '../../hooks/use-drawnix';
 import { removeElementsByAssetIds, removeElementsByAssetUrls, isCacheUrl } from '../../utils/asset-cleanup';
 import { isZipFile, extractMediaFromZip } from '../../utils/zip-utils';
 import { buildAssetDownloadItem, smartDownload } from '../../utils/download-utils';
+import { assetStorageService } from '../../services/asset-storage-service';
+import { getNativeFilePath, isTauriEnvironment } from '../../utils/desktop-asset-url';
 import './MediaLibraryModal.scss';
+
+function getAssetTypeFromDesktopFile(fileType: string, mimeType: string): AssetType | null {
+  const normalizedFileType = fileType.toLowerCase();
+  if (normalizedFileType === 'image' || mimeType.startsWith('image/')) {
+    return AssetType.IMAGE;
+  }
+  if (normalizedFileType === 'video' || mimeType.startsWith('video/')) {
+    return AssetType.VIDEO;
+  }
+  if (normalizedFileType === 'audio' || mimeType.startsWith('audio/')) {
+    return AssetType.AUDIO;
+  }
+  return null;
+}
 
 export function MediaLibraryModal({
   isOpen,
@@ -235,7 +251,12 @@ export function MediaLibraryModal({
         }
 
         const maxSize = 100 * 1024 * 1024;
+        const canUseNativePath = isTauriEnvironment() && !!getNativeFilePath(file);
         if (file.size > maxSize) {
+          if (canUseNativePath) {
+            validFiles.push(file);
+            continue;
+          }
           console.warn(`[MediaLibrary] File too large: ${file.size} bytes`);
           MessagePlugin.warning(`文件 "${file.name}" 超过 100MB 限制`);
           continue;
@@ -294,10 +315,52 @@ export function MediaLibraryModal({
     [addAsset, loadAssets],
   );
 
+  const handleDesktopNativeUpload = useCallback(async () => {
+    try {
+      const files = await assetStorageService.pickDesktopMediaFiles();
+      if (files.length === 0) {
+        return;
+      }
+
+      let importedCount = 0;
+      let skippedCount = 0;
+      for (const file of files) {
+        const type = getAssetTypeFromDesktopFile(file.fileType, file.mimeType);
+        if (!type) {
+          skippedCount++;
+          continue;
+        }
+
+        await assetStorageService.addDesktopLocalAssetFromPath({
+          path: file.path,
+          type,
+          name: file.name,
+          mimeType: file.mimeType,
+        });
+        importedCount++;
+      }
+
+      if (importedCount > 0) {
+        MessagePlugin.success(`成功上传 ${importedCount} 个文件`);
+        await loadAssets();
+      }
+      if (skippedCount > 0) {
+        MessagePlugin.warning(`已跳过 ${skippedCount} 个不支持的文件`);
+      }
+    } catch (error) {
+      console.error('[MediaLibrary] Desktop native upload error:', error);
+      MessagePlugin.error('本地素材上传失败');
+    }
+  }, [loadAssets]);
+
   // 打开文件选择器
   const handleUploadClick = useCallback(() => {
+    if (isTauriEnvironment()) {
+      void handleDesktopNativeUpload();
+      return;
+    }
     fileInputRef.current?.click();
-  }, []);
+  }, [handleDesktopNativeUpload]);
 
   // 文件输入变化
   const handleFileInputChange = useCallback(

@@ -444,7 +444,7 @@ export class SWChannelClient {
       try {
         const result = await generateThumbnails(blob, mimeType, mediaType, sizes);
         if (result.success) {
-          return { success: true, data: result };
+          return { success: true };
         } else {
           return { success: false, error: result.error };
         }

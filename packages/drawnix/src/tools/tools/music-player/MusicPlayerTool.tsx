@@ -43,6 +43,7 @@ import {
   type PlaybackQueueItem,
   type PlaybackMode,
 } from '../../../services/canvas-audio-playback-service';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 import { toolWindowService } from '../../../services/tool-window-service';
 import { MUSIC_PLAYER_TOOL_ID } from '../../tool-ids';
 import type { ToolInstanceContextProps } from '../../../types/toolbox.types';
@@ -283,7 +284,7 @@ export const MusicPlayerTool: React.FC<MusicPlayerToolProps> = ({
   const audioAssetDurationSources = useMemo(
     () =>
       storedAudioAssets.map((asset) => ({
-        audioUrl: asset.url,
+        audioUrl: getAssetRuntimeUrl(asset),
       })),
     [storedAudioAssets]
   );
@@ -300,7 +301,7 @@ export const MusicPlayerTool: React.FC<MusicPlayerToolProps> = ({
 
     return {
       elementId: `asset:${asset.id}`,
-      audioUrl: asset.url,
+      audioUrl: getAssetRuntimeUrl(asset),
       title: asset.name,
       duration: asset.duration,
       previewImageUrl: asset.thumbnail,
@@ -331,7 +332,11 @@ export const MusicPlayerTool: React.FC<MusicPlayerToolProps> = ({
         const assetId = item.elementId?.startsWith('asset:')
           ? item.elementId.slice('asset:'.length)
           : (
-            assets.find((asset) => asset.type === AssetType.AUDIO && asset.url === item.audioUrl)?.id || null
+            assets.find(
+              (asset) =>
+                asset.type === AssetType.AUDIO &&
+                (asset.url === item.audioUrl || getAssetRuntimeUrl(asset) === item.audioUrl)
+            )?.id || null
           );
         return {
           id: getQueueItemId(item, index),
@@ -378,13 +383,22 @@ export const MusicPlayerTool: React.FC<MusicPlayerToolProps> = ({
     }
 
     const exactUrlAndTitleMatch = storedAudioAssets.find(
-      (asset) => asset.url === playback.activeAudioUrl && asset.name === playback.activeTitle
+      (asset) =>
+        (asset.url === playback.activeAudioUrl ||
+          getAssetRuntimeUrl(asset) === playback.activeAudioUrl) &&
+        asset.name === playback.activeTitle
     );
     if (exactUrlAndTitleMatch) {
       return exactUrlAndTitleMatch;
     }
 
-    return storedAudioAssets.find((asset) => asset.url === playback.activeAudioUrl) || null;
+    return (
+      storedAudioAssets.find(
+        (asset) =>
+          asset.url === playback.activeAudioUrl ||
+          getAssetRuntimeUrl(asset) === playback.activeAudioUrl
+      ) || null
+    );
   }, [assetById, storedAudioAssets, playback.activeAudioUrl, playback.activeElementId, playback.activeTitle]);
   const activeReadingNoteId =
     playback.activeReadingOrigin?.kind === 'kb-note' ? playback.activeReadingOrigin.id : null;
@@ -416,7 +430,8 @@ export const MusicPlayerTool: React.FC<MusicPlayerToolProps> = ({
         id: `asset:${asset.id}`,
         title: asset.name,
         subtitle: formatTrackSubtitle(
-          resolvedAudioAssetDurations.get(asset.url) ?? asset.duration,
+          resolvedAudioAssetDurations.get(getAssetRuntimeUrl(asset)) ??
+            asset.duration,
           asset.createdAt
         ),
         previewImageUrl: asset.thumbnail,
@@ -447,7 +462,8 @@ export const MusicPlayerTool: React.FC<MusicPlayerToolProps> = ({
             id: `asset:${asset.id}`,
             title: asset.name,
             subtitle: formatTrackSubtitle(
-              resolvedAudioAssetDurations.get(asset.url) ?? asset.duration,
+              resolvedAudioAssetDurations.get(getAssetRuntimeUrl(asset)) ??
+                asset.duration,
               asset.createdAt
             ),
             previewImageUrl: asset.thumbnail,

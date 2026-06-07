@@ -59,7 +59,8 @@ export interface Asset {
   category?: AssetCategory; // 业务类别
 
   // 内容
-  url: string; // Blob URL for display
+  url: string; // Blob URL for display（虚拟URL或Blob URL）
+  filePath?: string; // 文件系统路径（桌面环境使用）
   name: string; // 用户可见名称
   mimeType: string; // MIME类型 (image/jpeg, video/mp4, etc.)
 
@@ -93,6 +94,7 @@ export interface StoredAsset {
   source: AssetSource;
   category?: AssetCategory;
   url: string; // 统一缓存中的 URL
+  filePath?: string; // 桌面端本地文件路径
   name: string;
   mimeType: string;
   createdAt: number;
@@ -133,6 +135,7 @@ export interface AddAssetData {
   name: string;
   blob: Blob;
   mimeType: string;
+  sourcePath?: string; // 桌面端本地源文件路径
   prompt?: string;
   modelName?: string;
   category?: AssetCategory;

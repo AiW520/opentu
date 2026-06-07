@@ -35,6 +35,7 @@ import { finishPenOnToolSwitch } from '../../../plugins/pen/with-pen-create';
 import { DrawnixPointerType, useSetPointer } from '../../../hooks/use-drawnix';
 import { addImage } from '../../../utils/image';
 import { useI18n } from '../../../i18n';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 import { BoardCreationMode, setCreationMode } from '@plait/common';
 import { Popover, PopoverContent, PopoverTrigger } from '../../popover/popover';
 import { ShapePicker } from '../../shape-picker';
@@ -207,12 +208,13 @@ export const QuickCreationToolbar: React.FC<QuickCreationToolbarProps> = ({
 
   const handleInsertAsset = async (asset: Asset) => {
     try {
+      const runtimeUrl = getAssetRuntimeUrl(asset);
       if (asset.type === AssetType.IMAGE) {
-        await insertImageFromUrl(board, asset.url);
+        await insertImageFromUrl(board, runtimeUrl);
       } else if (asset.type === AssetType.VIDEO) {
-        await insertVideoFromUrl(board, asset.url);
+        await insertVideoFromUrl(board, runtimeUrl);
       } else if (asset.type === AssetType.AUDIO) {
-        await insertAudioFromUrl(board, asset.url, {
+        await insertAudioFromUrl(board, runtimeUrl, {
           title: asset.name,
           duration: asset.duration,
           previewImageUrl: asset.thumbnail,
@@ -264,9 +266,11 @@ export const QuickCreationToolbar: React.FC<QuickCreationToolbarProps> = ({
     const imageAssets = assets.filter((a) => a.type === AssetType.IMAGE);
     if (imageAssets.length > 0) {
       const results = await Promise.all(
-        imageAssets.map((a) => loadImageDimensions(a.url))
+        imageAssets.map((a) => loadImageDimensions(getAssetRuntimeUrl(a)))
       );
-      imageAssets.forEach((a, i) => imageDimensionsMap.set(a.url, results[i]));
+      imageAssets.forEach((a, i) =>
+        imageDimensionsMap.set(getAssetRuntimeUrl(a), results[i])
+      );
     }
 
     logCanvasInsertionDebug('[CanvasInsertion][Toolbar] batch assets begin', {
@@ -279,21 +283,22 @@ export const QuickCreationToolbar: React.FC<QuickCreationToolbarProps> = ({
 
     const insertionResult = await executeCanvasInsertion({
       items: assets.map((asset) => {
+        const runtimeUrl = getAssetRuntimeUrl(asset);
         if (asset.type === AssetType.IMAGE) {
           return {
             type: 'image' as const,
-            content: asset.url,
-            dimensions: imageDimensionsMap.get(asset.url),
+            content: runtimeUrl,
+            dimensions: imageDimensionsMap.get(runtimeUrl),
           };
         }
 
         if (asset.type === AssetType.VIDEO) {
-          return { type: 'video' as const, content: asset.url };
+          return { type: 'video' as const, content: runtimeUrl };
         }
 
         return {
           type: 'audio' as const,
-          content: asset.url,
+          content: runtimeUrl,
           metadata: {
             title: asset.name,
             duration: asset.duration,

@@ -97,6 +97,7 @@ import {
   buildAssetDownloadItems,
   smartDownload,
 } from '../../utils/download-utils';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 import './MediaLibraryGrid.scss';
 import './VirtualAssetGrid.scss';
 import { HoverTip } from '../shared/hover';
@@ -510,15 +511,18 @@ export function MediaLibraryGrid({
         onSelect: async (asset) => {
           const audioQueue = filteredResult.assets
             .filter((item) => item.type === AssetType.AUDIO)
-            .map((item) => ({
-              elementId: `asset:${item.id}`,
-              audioUrl: item.url,
-              title: item.name,
-              duration: item.duration,
-              previewImageUrl: item.thumbnail,
-              clipId: item.clipId,
-              providerTaskId: item.providerTaskId,
-            }));
+            .map((item) => {
+              const audioUrl = getAssetRuntimeUrl(item);
+              return {
+                elementId: `asset:${item.id}`,
+                audioUrl,
+                title: item.name,
+                duration: item.duration,
+                previewImageUrl: item.thumbnail,
+                clipId: item.clipId,
+                providerTaskId: item.providerTaskId,
+              };
+            });
           const activePlaylist = selectedPlaylistId
             ? playlists.find(
                 (playlist) => playlist.id === selectedPlaylistId
@@ -528,7 +532,7 @@ export function MediaLibraryGrid({
           await openMusicPlayerToolAndPlay({
             source: {
               elementId: `asset:${asset.id}`,
-              audioUrl: asset.url,
+              audioUrl: getAssetRuntimeUrl(asset),
               title: asset.name,
               duration: asset.duration,
               previewImageUrl: asset.thumbnail,
@@ -1208,25 +1212,28 @@ export function MediaLibraryGrid({
   // 将素材转换为预览项
   const convertToMediaItems = useCallback(
     (assetList: Asset[]): UnifiedMediaItem[] => {
-      return assetList.map((asset) => ({
-        id: asset.id,
-        url:
-          asset.type === AssetType.IMAGE
-            ? normalizeImageDataUrl(asset.url)
-            : asset.url,
-        type:
-          asset.type === AssetType.VIDEO
-            ? 'video'
-            : asset.type === AssetType.AUDIO
-            ? 'audio'
-            : 'image',
-        title: asset.name,
-        alt: asset.name,
-        posterUrl: asset.thumbnail,
-        prompt: asset.prompt,
-        artist: asset.modelName,
-        album: asset.type === AssetType.AUDIO ? 'Aitu Generated' : undefined,
-      }));
+      return assetList.map((asset) => {
+        const runtimeUrl = getAssetRuntimeUrl(asset);
+        return {
+          id: asset.id,
+          url:
+            asset.type === AssetType.IMAGE
+              ? normalizeImageDataUrl(runtimeUrl)
+              : runtimeUrl,
+          type:
+            asset.type === AssetType.VIDEO
+              ? 'video'
+              : asset.type === AssetType.AUDIO
+              ? 'audio'
+              : 'image',
+          title: asset.name,
+          alt: asset.name,
+          posterUrl: asset.thumbnail,
+          prompt: asset.prompt,
+          artist: asset.modelName,
+          album: asset.type === AssetType.AUDIO ? 'Aitu Generated' : undefined,
+        };
+      });
     },
     []
   );

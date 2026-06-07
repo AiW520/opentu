@@ -68,6 +68,7 @@ import { HoverTip } from '../shared/hover';
 import { ParametersDropdown } from './ParametersDropdown';
 import { PromptHistoryPopover } from './PromptHistoryPopover';
 import { usePromptHistory } from '../../hooks/usePromptHistory';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 import {
   addImagePromptHistory,
   addVideoPromptHistory,
@@ -2335,12 +2336,13 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     const assetToSelectedContent = useCallback(
       (asset: Asset): Promise<SelectedContent> =>
         new Promise((resolve) => {
+          const runtimeUrl = getAssetRuntimeUrl(asset);
           try {
             const img = new Image();
             img.onload = () => {
               resolve({
                 type: 'image',
-                url: asset.url,
+                url: runtimeUrl,
                 name: asset.name || `素材-${Date.now()}`,
                 width: img.naturalWidth || undefined,
                 height: img.naturalHeight || undefined,
@@ -2349,15 +2351,15 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
             img.onerror = () => {
               resolve({
                 type: 'image',
-                url: asset.url,
+                url: runtimeUrl,
                 name: asset.name || `素材-${Date.now()}`,
               });
             };
-            img.src = asset.url;
+            img.src = runtimeUrl;
           } catch {
             resolve({
               type: 'image',
-              url: asset.url,
+              url: runtimeUrl,
               name: asset.name || `素材-${Date.now()}`,
             });
           }

@@ -6,6 +6,10 @@
 
 import { memo, useCallback } from 'react';
 import {
+  getAssetRuntimeUrl,
+  isDesktopAssetUrl,
+} from '../../utils/desktop-asset-url';
+import {
   Image as ImageIcon,
   Video as VideoIcon,
   Music,
@@ -28,6 +32,10 @@ import {
   type ViewMode,
 } from '../../types/asset.types';
 import './AssetItem.scss';
+
+function getDisplayUrl(asset: Asset): string {
+  return getAssetRuntimeUrl(asset);
+}
 
 export interface AssetItemProps {
   asset: Asset;
@@ -58,18 +66,22 @@ export const AssetItem = memo<AssetItemProps>(
     onToggleFavorite,
   }) => {
     // 获取实际文件大小（支持从缓存获取）
-    const displaySize = useAssetSize(asset.id, asset.url, asset.size);
+    const displayUrl = getDisplayUrl(asset);
+    const displaySize = useAssetSize(asset.id, displayUrl, asset.size);
 
     // 根据视图模式选择预览图尺寸
     // 网格视图（120-180px）使用大尺寸预览图，紧凑/列表视图（60-80px）使用小尺寸预览图
     const thumbnailSize = viewMode === 'grid' ? 'large' : 'small';
     const thumbnailUrl = useThumbnailUrl(
-      asset.url,
+      displayUrl,
       asset.type === 'IMAGE' ? 'image' : undefined,
       thumbnailSize
     );
     const { isCached, cacheWarning: detectedCacheWarning } = useUnifiedCache(
-      asset.type === 'IMAGE' || asset.type === 'VIDEO' ? asset.url : undefined
+      (asset.type === 'IMAGE' || asset.type === 'VIDEO') &&
+        !isDesktopAssetUrl(displayUrl)
+        ? displayUrl
+        : undefined
     );
     const cacheWarning =
       (asset.type === 'IMAGE' || asset.type === 'VIDEO') && !isCached
@@ -184,14 +196,14 @@ export const AssetItem = memo<AssetItemProps>(
             )
           ) : asset.type === 'IMAGE' ? (
             <LazyImage
-              src={thumbnailUrl || asset.url}
+              src={thumbnailUrl || displayUrl}
               alt={asset.name}
               className="asset-item__image"
               rootMargin="100px"
             />
           ) : (
             <VideoPosterPreview
-              src={asset.url}
+              src={displayUrl}
               className="asset-item__video"
               alt={asset.name}
               poster={asset.thumbnail}

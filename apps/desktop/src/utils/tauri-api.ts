@@ -140,7 +140,15 @@ export async function removeLocalSetting(key: string): Promise<void> {
  * @param defaultName 默认文件名
  * @returns 用户选择的文件路径，如果取消则返回 null
  */
-export async function pickSaveLocation(defaultName: string): Promise<string | null> {
+export interface FileDialogFilter {
+  name: string;
+  extensions: string[];
+}
+
+export async function pickSaveLocation(
+  defaultName: string,
+  _filters?: FileDialogFilter[]
+): Promise<string | null> {
   return invoke<string | null>('pick_save_location', {
     defaultName,
   });

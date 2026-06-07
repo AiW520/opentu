@@ -21,6 +21,7 @@ import { MediaLibraryModal } from '../../media-library/MediaLibraryModal';
 import type { Asset } from '../../../types/asset.types';
 import { SelectionMode, AssetType, AssetSource } from '../../../types/asset.types';
 import { useAssets } from '../../../contexts/AssetContext';
+import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
 import './ReferenceImageUpload.scss';
 
 const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024;
@@ -128,7 +129,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
     }
 
-    const response = await fetch(asset.url);
+    const response = await fetch(getAssetRuntimeUrl(asset));
     let blob = await response.blob();
 
     if (blob.size > MAX_IMAGE_SIZE_BYTES) {

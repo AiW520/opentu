@@ -3,6 +3,7 @@ import { AudioNodeContent } from '../audio-node-element/AudioNodeContent';
 import type { Asset } from '../../types/asset.types';
 import type { PlaitAudioNode } from '../../types/audio-node.types';
 import type { CanvasAudioPlaybackSource } from '../../services/canvas-audio-playback-service';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 
 interface MarkdownAudioAssetCardProps {
   asset: Asset;
@@ -10,24 +11,25 @@ interface MarkdownAudioAssetCardProps {
 }
 
 export const MarkdownAudioAssetCard: React.FC<MarkdownAudioAssetCardProps> = ({ asset, style }) => {
+  const runtimeUrl = getAssetRuntimeUrl(asset);
   const element = useMemo<PlaitAudioNode>(() => ({
     id: `markdown-audio-${asset.id}`,
     type: 'audio',
     points: [[0, 0], [340, 128]],
     children: [],
-    audioUrl: asset.url,
+    audioUrl: runtimeUrl,
     title: asset.name,
     previewImageUrl: asset.thumbnail,
     prompt: asset.prompt,
     createdAt: asset.createdAt,
-  }), [asset]);
+  }), [asset, runtimeUrl]);
 
   const queue = useMemo<CanvasAudioPlaybackSource[]>(() => [{
     elementId: element.id,
-    audioUrl: asset.url,
+    audioUrl: runtimeUrl,
     title: asset.name,
     previewImageUrl: asset.thumbnail,
-  }], [asset.name, asset.thumbnail, asset.url, element.id]);
+  }], [asset.name, asset.thumbnail, element.id, runtimeUrl]);
 
   return (
     <div className="collimind-markdown-audio-card" style={style}>

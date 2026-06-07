@@ -39,6 +39,7 @@ import { MediaLibraryModal } from '../media-library/MediaLibraryModal';
 import { ImageUploadIcon, MediaLibraryIcon } from '../icons';
 import { HoverTip } from '../shared';
 import { useChatDrawerGenerationControls } from './useChatDrawerGenerationControls';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 import '../ai-input-bar/ai-input-bar.scss';
 
 interface EnhancedChatInputProps {
@@ -186,9 +187,10 @@ export const EnhancedChatInput = forwardRef<
 
     const handleMediaLibrarySelect = useCallback(
       (asset: Asset) => {
+        const runtimeUrl = getAssetRuntimeUrl(asset);
         const selectedAssetContent: SelectedContentItem = {
           type: 'image',
-          url: asset.url,
+          url: runtimeUrl,
           name: asset.name || `素材-${Date.now()}`,
         };
 
@@ -205,7 +207,7 @@ export const EnhancedChatInput = forwardRef<
         try {
           const newContents = assets.map((asset) => ({
             type: 'image' as const,
-            url: asset.url,
+            url: getAssetRuntimeUrl(asset),
             name: asset.name || `素材-${Date.now()}`,
           }));
           appendUploadedContent(newContents);

@@ -1,5 +1,5 @@
-mod database;
 mod commands;
+mod database;
 
 use database::Database;
 use std::sync::Mutex;
@@ -12,14 +12,15 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("opentu-asset", |ctx, request| {
+            commands::media::handle_opentu_asset_protocol(ctx.app_handle(), request)
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let db = Database::new(app.handle())?;
-            app.manage(AppState {
-                db: Mutex::new(db),
-            });
+            app.manage(AppState { db: Mutex::new(db) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,8 +36,11 @@ pub fn run() {
             commands::media::set_media_root_path,
             commands::media::reset_media_root_path,
             commands::media::pick_media_folder,
+            commands::media::pick_media_files,
             commands::media::pick_save_location,
+            commands::media::get_default_save_path,
             commands::media::get_cached_media_file,
+            commands::media::import_local_asset,
             commands::export::show_save_dialog,
             commands::file_manager::move_file_to_media,
             commands::file_manager::copy_file_to_media,

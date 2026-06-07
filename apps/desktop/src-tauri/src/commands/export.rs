@@ -1,4 +1,5 @@
 use crate::AppState;
+use std::path::{Path, PathBuf};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
@@ -8,11 +9,14 @@ pub async fn show_save_dialog(
     state: State<'_, AppState>,
     default_name: Option<String>,
 ) -> Result<Option<String>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let default_path = db
-        .data_dir
-        .join("exports")
-        .join(default_name.unwrap_or_else(|| "export".to_string()));
+    let default_name = sanitize_file_name(default_name.as_deref().unwrap_or("export"))?;
+    let media_root = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.media_root.clone()
+    };
+    let default_dir = media_root.join(get_export_subdir(&default_name));
+    std::fs::create_dir_all(&default_dir).map_err(|e| e.to_string())?;
+    let default_path = default_dir.join(default_name);
 
     let file_path = app
         .dialog()
@@ -25,4 +29,28 @@ pub async fn show_save_dialog(
         .blocking_save_file();
 
     Ok(file_path.map(|p| p.to_string()))
+}
+
+fn sanitize_file_name(file_name: &str) -> Result<String, String> {
+    Path::new(file_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| "Invalid file name".to_string())
+}
+
+fn get_export_subdir(file_name: &str) -> PathBuf {
+    match Path::new(file_name)
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "svg") => PathBuf::from("图片"),
+        Some("mp4" | "webm" | "mov" | "m4v") => PathBuf::from("视频"),
+        Some("mp3" | "wav" | "ogg" | "m4a" | "aac" | "flac") => PathBuf::from("音频"),
+        Some("ppt" | "pptx") => PathBuf::from("PPT"),
+        Some("txt" | "md" | "json") => PathBuf::from("文本"),
+        Some("zip") => PathBuf::from("压缩包"),
+        _ => PathBuf::from("文本"),
+    }
 }

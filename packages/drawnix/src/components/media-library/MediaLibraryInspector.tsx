@@ -13,7 +13,6 @@ import {
   Copy,
   UserRound,
 } from 'lucide-react';
-import { isDataURL, normalizeImageDataUrl } from '@aitu/utils';
 import { copyToClipboard } from '../../utils/runtime-helpers';
 import { formatDate, formatFileSize } from '../../utils/asset-utils';
 import { useAssetSize } from '../../hooks/useAssetSize';
@@ -25,7 +24,37 @@ import { VideoPosterPreview } from '../shared/VideoPosterPreview';
 import { HoverTip } from '../shared/hover';
 import type { MediaLibraryInspectorProps } from '../../types/asset.types';
 import { AssetCategory, AssetType } from '../../types/asset.types';
+import {
+  convertLocalFilePathToAssetUrl,
+  isDesktopAssetUrl,
+} from '../../utils/desktop-asset-url';
 import './MediaLibraryInspector.scss';
+
+function isDataURL(value: string): boolean {
+  return value.trim().startsWith('data:');
+}
+
+function normalizeImageDataUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+  if (
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../')
+  ) {
+    return trimmed;
+  }
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) && trimmed.length >= 32) {
+    return `data:image/png;base64,${trimmed}`;
+  }
+  return trimmed;
+}
 
 /**
  * 获取预览图 URL（通过添加查询参数）
@@ -38,7 +67,8 @@ function getThumbnailUrl(originalUrl: string, size: 'small' | 'large' = 'small')
     normalizedUrl.startsWith('http://') ||
     normalizedUrl.startsWith('https://') ||
     normalizedUrl.startsWith('blob:') ||
-    isDataURL(normalizedUrl)
+    isDataURL(normalizedUrl) ||
+    isDesktopAssetUrl(normalizedUrl)
   ) {
     return normalizedUrl;
   }
@@ -330,8 +360,11 @@ export function MediaLibraryInspector({
     );
   }
 
+  const displayAssetUrl = asset.filePath
+    ? convertLocalFilePathToAssetUrl(asset.filePath)
+    : asset.url;
   const normalizedAssetUrl =
-    asset.type === 'IMAGE' ? normalizeImageDataUrl(asset.url) : asset.url;
+    asset.type === 'IMAGE' ? normalizeImageDataUrl(displayAssetUrl) : displayAssetUrl;
   const isSubjectAsset = asset.category === AssetCategory.CHARACTER;
   const showSubjectAction = asset.type === AssetType.IMAGE && !!onMarkAsSubject;
 

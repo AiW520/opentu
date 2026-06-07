@@ -68,6 +68,7 @@ import {
   useSetPointer,
 } from '../../hooks/use-drawnix';
 import { addImage } from '../../utils/image';
+import { getAssetRuntimeUrl } from '../../utils/desktop-asset-url';
 import { useI18n, Translations } from '../../i18n';
 import { ToolbarSectionProps } from './toolbar.types';
 import { useToolbarConfig } from '../../hooks/use-toolbar-config';
@@ -291,12 +292,13 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
   const handleInsertAsset = useCallback(
     async (asset: Asset) => {
       try {
+        const runtimeUrl = getAssetRuntimeUrl(asset);
         if (asset.type === AssetType.IMAGE) {
-          await insertImageFromUrl(board, asset.url);
+          await insertImageFromUrl(board, runtimeUrl);
         } else if (asset.type === AssetType.VIDEO) {
-          await insertVideoFromUrl(board, asset.url);
+          await insertVideoFromUrl(board, runtimeUrl);
         } else if (asset.type === AssetType.AUDIO) {
-          await insertAudioFromUrl(board, asset.url, {
+          await insertAudioFromUrl(board, runtimeUrl, {
             title: asset.name,
             duration: asset.duration,
             previewImageUrl: asset.thumbnail,
@@ -329,17 +331,18 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
 
       const insertionResult = await executeCanvasInsertion({
         items: assets.map((asset) => {
+          const runtimeUrl = getAssetRuntimeUrl(asset);
           if (asset.type === AssetType.IMAGE) {
-            return { type: 'image' as const, content: asset.url };
+            return { type: 'image' as const, content: runtimeUrl };
           }
 
           if (asset.type === AssetType.VIDEO) {
-            return { type: 'video' as const, content: asset.url };
+            return { type: 'video' as const, content: runtimeUrl };
           }
 
           return {
             type: 'audio' as const,
-            content: asset.url,
+            content: runtimeUrl,
             metadata: {
               title: asset.name,
               duration: asset.duration,
