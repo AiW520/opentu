@@ -1345,21 +1345,21 @@ class UnifiedCacheService {
       // 从 URL 提取文件名
       const fileName = this.getFileNameFromUrl(url);
       
-      // 将 blob 转换为 base64 或 arrayBuffer
+      // 将 blob 转换为 arrayBuffer
       const arrayBuffer = await blob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
       
       // 调用 Tauri 命令保存文件
-      await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
+      const result = await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
         fileName,
-        buffer: Array.from(uint8Array), // 转换为普通数组以便传递给 Rust
+        buffer: Array.from(uint8Array),
         fileType: type,
       });
 
-      console.log('[UnifiedCache] Successfully saved to Tauri file system:', fileName);
+      console.log('[UnifiedCache] Saved to Tauri file system:', fileName, result);
     } catch (error) {
       console.error('[UnifiedCache] Failed to save to Tauri file system:', error);
-      throw error;
+      // 不要抛出错误，继续执行其他操作
     }
   }
 

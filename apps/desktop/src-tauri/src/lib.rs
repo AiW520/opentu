@@ -38,6 +38,11 @@ pub fn run() {
             commands::media::pick_save_location,
             commands::media::get_cached_media_file,
             commands::export::show_save_dialog,
+            commands::file_manager::move_file_to_media,
+            commands::file_manager::copy_file_to_media,
+            commands::file_manager::delete_media_file,
+            commands::file_manager::verify_file_accessible,
+            commands::file_manager::list_media_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
