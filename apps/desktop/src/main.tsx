@@ -1,5 +1,6 @@
 import '../web/src/utils/permissions-policy-fix';
 import { isTauriEnvironment, getLocalSetting, setLocalSetting } from './utils/tauri-api';
+import { initializeVirtualUrlInterceptor } from './utils/virtual-url-interceptor';
 
 function updateBootProgress(progress: number) {
   const fill = document.getElementById('boot-progress-fill');
@@ -90,6 +91,12 @@ async function bootstrap() {
 
   import('../web/src/app/bootstrap').then(() => {
     updateBootProgress(100);
+    
+    // 初始化虚拟 URL 拦截器（仅在桌面环境中）
+    if (isTauriEnvironment()) {
+      initializeVirtualUrlInterceptor();
+    }
+    
     if (!isFirstRun) {
       setTimeout(hideBootScreen, 200);
     }

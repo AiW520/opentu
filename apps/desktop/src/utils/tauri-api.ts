@@ -82,6 +82,25 @@ export async function getMediaDir(): Promise<string> {
   return invoke<string>('get_media_dir');
 }
 
+/** 获取缓存媒体文件数据（用于桌面应用中加载虚拟URL） */
+export async function getCachedMediaFile(fileName: string, fileType?: string): Promise<Uint8Array | null> {
+  try {
+    const result = await invoke<string>('get_cached_media_file', {
+      fileName,
+      fileType: fileType || null,
+    });
+    // 解析 Base64 编码的结果
+    const binaryString = atob(result);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 // ===== 存储统计 =====
 
 export interface StorageStats {

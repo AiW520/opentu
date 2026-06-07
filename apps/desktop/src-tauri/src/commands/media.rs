@@ -98,6 +98,28 @@ pub async fn pick_media_folder(
     Ok(folder_path.map(|p| p.to_string()))
 }
 
+#[tauri::command]
+pub fn get_cached_media_file(
+    file_name: String,
+    file_type: Option<String>,
+) -> Result<String, String> {
+    use std::path::Path;
+    
+    let subdir = get_media_subdir(file_type.as_deref().unwrap_or("image"));
+    
+    let cache_dir = dirs::cache_dir()
+        .ok_or_else(|| "无法获取缓存目录".to_string())?;
+    
+    let file_path = cache_dir.join("drawnix-images").join(subdir).join(&file_name);
+    
+    if file_path.exists() {
+        let data = fs::read(&file_path).map_err(|e| e.to_string())?;
+        Ok(base64::encode(&data))
+    } else {
+        Err(format!("文件不存在: {}", file_path.to_string_lossy()))
+    }
+}
+
 /// 根据文件类型获取对应的子目录名
 fn get_media_subdir(file_type: &str) -> &str {
     match file_type {
