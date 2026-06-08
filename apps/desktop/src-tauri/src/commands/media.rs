@@ -250,14 +250,21 @@ pub fn import_local_asset(
         std::process::id()
     );
     let temp_path = media_dir.join(temp_name);
-    let content_hash = copy_and_hash(source, &temp_path)?;
+    let content_hash = match copy_and_hash(source, &temp_path) {
+        Ok(hash) => hash,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+    };
     let file_name = format!("content-{}.{}", content_hash, extension);
     let final_path = media_dir.join(sanitize_file_name(&file_name)?);
 
     if final_path.exists() {
         let _ = fs::remove_file(&temp_path);
-    } else {
-        fs::rename(&temp_path, &final_path).map_err(|e| format!("保存素材文件失败: {}", e))?;
+    } else if let Err(error) = fs::rename(&temp_path, &final_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("保存素材文件失败: {}", error));
     }
 
     Ok(AssetImportResult {
@@ -494,7 +501,8 @@ fn serve_opentu_asset(
             });
     }
 
-    if request.method() != tauri::http::Method::GET && request.method() != tauri::http::Method::HEAD {
+    if request.method() != tauri::http::Method::GET && request.method() != tauri::http::Method::HEAD
+    {
         return Err((
             tauri::http::StatusCode::METHOD_NOT_ALLOWED,
             "Unsupported asset request method".to_string(),
@@ -532,7 +540,7 @@ fn serve_opentu_asset(
                 tauri::http::StatusCode::INTERNAL_SERVER_ERROR,
                 e.to_string(),
             )
-    })?
+        })?
         .len();
     let mime_type = detect_mime_type(&requested_path);
 
@@ -788,7 +796,7 @@ fn parse_single_range(
             )
         })?;
         let end = if end_text.is_empty() {
-            (start + MAX_RANGE_BYTES - 1).min(file_size - 1)
+            start.saturating_add(MAX_RANGE_BYTES - 1).min(file_size - 1)
         } else {
             end_text.parse::<u64>().map_err(|_| {
                 (
@@ -807,7 +815,7 @@ fn parse_single_range(
         ));
     }
     end = end.min(file_size - 1);
-    end = end.min(start + MAX_RANGE_BYTES - 1);
+    end = end.min(start.saturating_add(MAX_RANGE_BYTES - 1));
     if end < start {
         return Err((
             tauri::http::StatusCode::RANGE_NOT_SATISFIABLE,
@@ -837,7 +845,10 @@ fn asset_response_builder() -> tauri::http::response::Builder {
         .header("Access-Control-Allow-Origin", "*")
         .header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
         .header("Access-Control-Allow-Headers", "Range, Content-Type")
-        .header("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
+        .header(
+            "Access-Control-Expose-Headers",
+            "Content-Length, Content-Range, Accept-Ranges",
+        )
         .header("Cache-Control", "no-store")
 }
 

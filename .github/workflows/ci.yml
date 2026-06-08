@@ -28,14 +28,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: nrwl/nx-set-shas@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Desktop Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Desktop Rust Tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib
 
       # 安装 Playwright 浏览器和依赖
       - name: Install Playwright
         run: npx playwright install --with-deps chromium
 
       # lint、test、build
-      - run: npx nx affected -t test build --base=origin/develop --verbose
-      - run: npx nx affected -t lint --exclude=drawnix --base=origin/develop --verbose
+      - run: npx nx affected -t test build --base="$NX_BASE" --head="$NX_HEAD" --verbose
+      - run: npx nx affected -t lint --exclude=drawnix --base="$NX_BASE" --head="$NX_HEAD" --verbose
 
       # PR 时运行冒烟测试（快速，约2分钟）
       - name: Run Smoke Tests

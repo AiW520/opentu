@@ -37,6 +37,24 @@ function getDisplayUrl(asset: Asset): string {
   return getAssetRuntimeUrl(asset);
 }
 
+function getAssetDisplayKey(asset: Asset): string {
+  return [
+    asset.id,
+    asset.type,
+    asset.name,
+    asset.url,
+    asset.filePath || '',
+    asset.thumbnail || '',
+    asset.size ?? '',
+    asset.mimeType,
+    asset.category || '',
+    asset.contentHash || '',
+    asset.characterMeta?.name || '',
+    asset.cacheWarning?.reasonCode || '',
+    asset.cacheWarning?.message || '',
+  ].join('|');
+}
+
 export interface AssetItemProps {
   asset: Asset;
   viewMode: ViewMode;
@@ -411,9 +429,7 @@ export const AssetItem = memo<AssetItemProps>(
   (prevProps, nextProps) => {
     // 自定义比较函数：只有关键属性变化时才重新渲染
     return (
-      prevProps.asset.id === nextProps.asset.id &&
-      prevProps.asset.name === nextProps.asset.name && // 检查名称变化（重命名后更新）
-      prevProps.asset.cacheWarning === nextProps.asset.cacheWarning &&
+      getAssetDisplayKey(prevProps.asset) === getAssetDisplayKey(nextProps.asset) &&
       prevProps.viewMode === nextProps.viewMode &&
       prevProps.isSelected === nextProps.isSelected &&
       prevProps.isInSelectionMode === nextProps.isInSelectionMode &&
