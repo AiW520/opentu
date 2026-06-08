@@ -702,6 +702,14 @@ export const SettingsDialog = ({
     new Set()
   );
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
+  const [desktopMediaPath, setDesktopMediaPath] = useState('');
+  const [desktopInputPath, setDesktopInputPath] = useState('');
+  const [desktopStorageLoading, setDesktopStorageLoading] = useState(true);
+  const [desktopStorageError, setDesktopStorageError] = useState('');
+  const [desktopStorageMsg, setDesktopStorageMsg] = useState('');
+  const desktopStorageMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   const toggleGroupCollapse = (type: ModelType) => {
     setCollapsedGroups((prev) => {
@@ -997,6 +1005,86 @@ export const SettingsDialog = ({
   useEffect(() => {
     setModelSearchQuery('');
   }, [selectedProfileId, activeView]);
+
+  const loadDesktopMediaPath = useCallback(async () => {
+    if (!isDesktopTauri) return;
+    try {
+      const path = await tauriInvoke<string>('get_media_root_path');
+      setDesktopMediaPath(path);
+      setDesktopInputPath(path);
+      setDesktopStorageLoading(false);
+    } catch (err) {
+      console.error('[StorageSettings] Failed to load:', err);
+      setDesktopStorageLoading(false);
+    }
+  }, []);
+
+  const handleDesktopBrowse = useCallback(async () => {
+    try {
+      const selected = await tauriInvoke<string | null>('pick_media_folder');
+      if (selected) {
+        setDesktopInputPath(selected);
+        setDesktopStorageError('');
+      }
+    } catch (err) {
+      setDesktopStorageError('无法打开文件夹选择器');
+    }
+  }, []);
+
+  const showDesktopStorageMsg = useCallback((message: string) => {
+    if (desktopStorageMsgTimerRef.current) {
+      clearTimeout(desktopStorageMsgTimerRef.current);
+    }
+
+    setDesktopStorageMsg(message);
+    desktopStorageMsgTimerRef.current = setTimeout(() => {
+      setDesktopStorageMsg('');
+      desktopStorageMsgTimerRef.current = null;
+    }, 3000);
+  }, []);
+
+  const handleDesktopSave = useCallback(async () => {
+    if (!desktopInputPath.trim()) {
+      setDesktopStorageError('请输入有效的文件夹路径');
+      return;
+    }
+    try {
+      const saved = await tauriInvoke<string>('set_media_root_path', {
+        path: desktopInputPath.trim(),
+      });
+      setDesktopMediaPath(saved);
+      setDesktopInputPath(saved);
+      setDesktopStorageError('');
+      showDesktopStorageMsg('存储路径已更新');
+    } catch (err) {
+      setDesktopStorageError('无法设置存储路径，请检查路径是否有效');
+    }
+  }, [desktopInputPath, showDesktopStorageMsg]);
+
+  const handleDesktopReset = useCallback(async () => {
+    try {
+      const defaultPath = await tauriInvoke<string>('reset_media_root_path');
+      setDesktopMediaPath(defaultPath);
+      setDesktopInputPath(defaultPath);
+      setDesktopStorageError('');
+      showDesktopStorageMsg('已恢复默认路径');
+    } catch (err) {
+      setDesktopStorageError('无法恢复默认路径');
+    }
+  }, [showDesktopStorageMsg]);
+
+  useEffect(() => {
+    if (!isDesktopTauri) return;
+    loadDesktopMediaPath();
+  }, [loadDesktopMediaPath]);
+
+  useEffect(() => {
+    return () => {
+      if (desktopStorageMsgTimerRef.current) {
+        clearTimeout(desktopStorageMsgTimerRef.current);
+      }
+    };
+  }, []);
 
   const updateProfile = (
     profileId: string,
@@ -3022,72 +3110,6 @@ export const SettingsDialog = ({
   };
 
   const renderStorageSettings = () => {
-    const [desktopMediaPath, setDesktopMediaPath] = useState('');
-    const [desktopInputPath, setDesktopInputPath] = useState('');
-    const [desktopStorageLoading, setDesktopStorageLoading] = useState(true);
-    const [desktopStorageError, setDesktopStorageError] = useState('');
-    const [desktopStorageMsg, setDesktopStorageMsg] = useState('');
-
-    const loadDesktopMediaPath = useCallback(async () => {
-      if (!isDesktopTauri) return;
-      try {
-        const path = await tauriInvoke<string>('get_media_root_path');
-        setDesktopMediaPath(path);
-        setDesktopInputPath(path);
-        setDesktopStorageLoading(false);
-      } catch (err) {
-        console.error('[StorageSettings] Failed to load:', err);
-        setDesktopStorageLoading(false);
-      }
-    }, []);
-
-    const handleDesktopBrowse = useCallback(async () => {
-      try {
-        const selected = await tauriInvoke<string | null>('pick_media_folder');
-        if (selected) {
-          setDesktopInputPath(selected);
-          setDesktopStorageError('');
-        }
-      } catch (err) {
-        setDesktopStorageError('无法打开文件夹选择器');
-      }
-    }, []);
-
-    const handleDesktopSave = useCallback(async () => {
-      if (!desktopInputPath.trim()) {
-        setDesktopStorageError('请输入有效的文件夹路径');
-        return;
-      }
-      try {
-        const saved = await tauriInvoke<string>('set_media_root_path', { path: desktopInputPath.trim() });
-        setDesktopMediaPath(saved);
-        setDesktopInputPath(saved);
-        setDesktopStorageError('');
-        setDesktopStorageMsg('存储路径已更新');
-        setTimeout(() => setDesktopStorageMsg(''), 3000);
-      } catch (err) {
-        setDesktopStorageError('无法设置存储路径，请检查路径是否有效');
-      }
-    }, [desktopInputPath]);
-
-    const handleDesktopReset = useCallback(async () => {
-      try {
-        const defaultPath = await tauriInvoke<string>('reset_media_root_path');
-        setDesktopMediaPath(defaultPath);
-        setDesktopInputPath(defaultPath);
-        setDesktopStorageError('');
-        setDesktopStorageMsg('已恢复默认路径');
-        setTimeout(() => setDesktopStorageMsg(''), 3000);
-      } catch (err) {
-        setDesktopStorageError('无法恢复默认路径');
-      }
-    }, []);
-
-    useEffect(() => {
-      if (!isDesktopTauri) return;
-      loadDesktopMediaPath();
-    }, [loadDesktopMediaPath]);
-
     return (
       <div className="settings-dialog__workspace settings-dialog__workspace--single">
         <div className="settings-dialog__content-panel settings-dialog__content-panel--canvas">
@@ -3116,6 +3138,11 @@ export const SettingsDialog = ({
                   <label className="settings-dialog__label settings-dialog__label--stacked">
                     当前存储路径
                   </label>
+                  {desktopMediaPath ? (
+                    <span className="settings-dialog__field-hint" style={{ marginBottom: 8 }}>
+                      当前生效：{desktopMediaPath}
+                    </span>
+                  ) : null}
                   <div className="settings-dialog__storage-path-row" style={{ display: 'flex', gap: 8 }}>
                     <input
                       type="text"

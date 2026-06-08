@@ -164,6 +164,51 @@ pub async fn pick_save_location(
 }
 
 #[tauri::command]
+pub fn write_file_to_path(save_path: String, buffer: Vec<u8>) -> Result<(), String> {
+    let path = PathBuf::from(save_path);
+    validate_save_path(&path)?;
+    fs::write(&path, buffer).map_err(|e| format!("无法写入文件: {}", e))
+}
+
+#[tauri::command]
+pub async fn download_url_to_path(url: String, save_path: String) -> Result<(), String> {
+    let path = PathBuf::from(save_path);
+    validate_save_path(&path)?;
+    let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("无效下载地址: {}", e))?;
+    if !matches!(parsed_url.scheme(), "http" | "https") {
+        return Err("仅支持下载 HTTP/HTTPS 资源".to_string());
+    }
+
+    let mut response = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("无法初始化下载器: {}", e))?
+        .get(parsed_url)
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Opentu Desktop",
+        )
+        .send()
+        .await
+        .map_err(|e| format!("下载失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("下载失败: HTTP {}", response.status()));
+    }
+
+    let mut file = File::create(&path).map_err(|e| format!("无法写入文件: {}", e))?;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("读取下载内容失败: {}", e))?
+    {
+        file.write_all(&chunk)
+            .map_err(|e| format!("写入下载内容失败: {}", e))?;
+    }
+    file.flush().map_err(|e| format!("保存文件失败: {}", e))
+}
+
+#[tauri::command]
 pub fn get_default_save_path(
     state: State<AppState>,
     file_name: String,
@@ -312,6 +357,21 @@ fn validate_source_file(source_path: &str) -> Result<&Path, String> {
         return Err("源路径不是文件".to_string());
     }
     Ok(source_path)
+}
+
+fn validate_save_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("保存路径不能为空".to_string());
+    }
+    if path.exists() && path.is_dir() {
+        return Err("保存路径不能是文件夹".to_string());
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| format!("无法创建保存目录: {}", e))?;
+        }
+    }
+    Ok(())
 }
 
 fn copy_and_hash(source: &Path, target: &Path) -> Result<String, String> {

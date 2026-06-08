@@ -32,11 +32,13 @@ async function bootstrap() {
 
   // 初始化保存位置函数（仅在桌面环境中）
   if (isTauriEnvironment()) {
-    const { writeFile } = await import('@tauri-apps/plugin-fs');
     // 动态设置保存函数
     const { setSaveLocationFn } = await import('@drawnix/drawnix');
     setSaveLocationFn(async (path: string, data: Uint8Array) => {
-      await writeFile(path, data);
+      await (window as any).__TAURI_INTERNALS__.invoke('write_file_to_path', {
+        savePath: path,
+        buffer: Array.from(data),
+      });
     });
   }
 
