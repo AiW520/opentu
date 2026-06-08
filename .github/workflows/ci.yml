@@ -33,7 +33,13 @@ jobs:
       - name: Install Desktop Linux Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev imagemagick
+
+      - name: Fix Icon Format (RGBA)
+        run: |
+          convert apps/desktop/src-tauri/icons/32x32.png -background transparent -alpha on -define png:format=rgba apps/desktop/src-tauri/icons/32x32.png
+          convert apps/desktop/src-tauri/icons/128x128.png -background transparent -alpha on -define png:format=rgba apps/desktop/src-tauri/icons/128x128.png
+          convert apps/desktop/src-tauri/icons/128x128@2x.png -background transparent -alpha on -define png:format=rgba apps/desktop/src-tauri/icons/128x128@2x.png
 
       - name: Desktop Rust Tests
         working-directory: apps/desktop/src-tauri
