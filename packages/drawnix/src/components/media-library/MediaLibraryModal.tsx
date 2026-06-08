@@ -324,20 +324,26 @@ export function MediaLibraryModal({
 
       let importedCount = 0;
       let skippedCount = 0;
+      let failedCount = 0;
       for (const file of files) {
-        const type = getAssetTypeFromDesktopFile(file.fileType, file.mimeType);
-        if (!type) {
-          skippedCount++;
-          continue;
-        }
+        try {
+          const type = getAssetTypeFromDesktopFile(file.fileType, file.mimeType);
+          if (!type) {
+            skippedCount++;
+            continue;
+          }
 
-        await assetStorageService.addDesktopLocalAssetFromPath({
-          path: file.path,
-          type,
-          name: file.name,
-          mimeType: file.mimeType,
-        });
-        importedCount++;
+          await assetStorageService.addDesktopLocalAssetFromPath({
+            path: file.path,
+            type,
+            name: file.name,
+            mimeType: file.mimeType,
+          });
+          importedCount++;
+        } catch (error) {
+          failedCount++;
+          console.error('[MediaLibrary] Desktop native asset import failed:', file.path, error);
+        }
       }
 
       if (importedCount > 0) {
@@ -346,6 +352,9 @@ export function MediaLibraryModal({
       }
       if (skippedCount > 0) {
         MessagePlugin.warning(`已跳过 ${skippedCount} 个不支持的文件`);
+      }
+      if (failedCount > 0) {
+        MessagePlugin.error(`有 ${failedCount} 个文件上传失败，其余文件已处理`);
       }
     } catch (error) {
       console.error('[MediaLibrary] Desktop native upload error:', error);

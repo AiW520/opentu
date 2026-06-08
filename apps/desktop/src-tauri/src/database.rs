@@ -63,7 +63,15 @@ impl Database {
     }
 
     pub fn set_media_root(&mut self, path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        if path.as_os_str().is_empty() {
+            return Err("媒体目录路径不能为空".into());
+        }
+        if path.is_file() {
+            return Err("媒体目录不能指向文件".into());
+        }
+
         fs::create_dir_all(&path)?;
+        let path = path.canonicalize()?;
         self.media_root = path.clone();
 
         self.conn.execute(

@@ -458,6 +458,26 @@ class AssetStorageService {
       return desktopAsset;
     }
 
+    // Validate before hashing so invalid or over-quota files do not allocate
+    // another full-size ArrayBuffer.
+    const nameValidation = validateAssetName(data.name);
+    if (!nameValidation.valid) {
+      console.error('[AssetStorageService] Name validation failed:', nameValidation.error);
+      throw new ValidationError(nameValidation.error!);
+    }
+
+    const mimeValidation = validateMimeType(data.mimeType);
+    if (!mimeValidation.valid) {
+      console.error('[AssetStorageService] MIME type validation failed:', mimeValidation.error);
+      throw new ValidationError(mimeValidation.error!);
+    }
+
+    const canAdd = await canAddAssetBySize(data.blob.size);
+    if (!canAdd) {
+      console.error('[AssetStorageService] Quota exceeded');
+      throw new QuotaExceededError();
+    }
+
     // 计算内容哈希用于去重
     // console.log('[AssetStorageService] Computing content hash...');
     const contentHash = await this.calculateBlobChecksum(data.blob);
@@ -470,27 +490,6 @@ class AssetStorageService {
       return existingAsset;
     }
 
-    // 验证名称
-    const nameValidation = validateAssetName(data.name);
-    if (!nameValidation.valid) {
-      console.error('[AssetStorageService] Name validation failed:', nameValidation.error);
-      throw new ValidationError(nameValidation.error!);
-    }
-
-    // 验证MIME类型
-    const mimeValidation = validateMimeType(data.mimeType);
-    if (!mimeValidation.valid) {
-      console.error('[AssetStorageService] MIME type validation failed:', mimeValidation.error);
-      throw new ValidationError(mimeValidation.error!);
-    }
-
-    // 检查存储空间
-    // console.log('[AssetStorageService] Checking storage quota...');
-    const canAdd = await canAddAssetBySize(data.blob.size);
-    if (!canAdd) {
-      console.error('[AssetStorageService] Quota exceeded');
-      throw new QuotaExceededError();
-    }
     // console.log('[AssetStorageService] Storage quota check passed');
 
     try {

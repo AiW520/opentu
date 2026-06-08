@@ -1364,6 +1364,19 @@ $drawer-input-max-height: 280px;
       box-shadow: 0 10px 28px rgba(245, 158, 11, 0.12);
     }
 
+    input,
+    textarea {
+      color: #1f2933;
+      -webkit-text-fill-color: #1f2933;
+      caret-color: var(--td-brand-color, #f39c12);
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: #8b95a1;
+      -webkit-text-fill-color: #8b95a1;
+    }
+
     .ai-input-composer-shell__input-area {
       gap: 8px;
       margin-bottom: 8px;
@@ -1414,6 +1427,7 @@ $drawer-input-max-height: 280px;
     line-height: 1.5;
     font-family: inherit;
     color: var(--td-text-color-primary);
+    -webkit-text-fill-color: #1f2933;
     outline: none;
     caret-color: var(--td-brand-color);
 

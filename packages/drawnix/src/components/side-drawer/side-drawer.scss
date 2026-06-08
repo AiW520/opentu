@@ -202,6 +202,23 @@ $drawer-width-wide: min(1024px, 50vw);
     }
   }
 
+  input,
+  textarea,
+  .t-input__inner,
+  .t-textarea__inner {
+    color: #1f2933;
+    -webkit-text-fill-color: #1f2933;
+    caret-color: var(--td-brand-color, #f39c12);
+  }
+
+  input::placeholder,
+  textarea::placeholder,
+  .t-input__inner::placeholder,
+  .t-textarea__inner::placeholder {
+    color: #8b95a1;
+    -webkit-text-fill-color: #8b95a1;
+  }
+
   // ========================================
   // Content
   // ========================================
