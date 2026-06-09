@@ -40,17 +40,19 @@
 
 桌面应用支持 Windows、macOS 和 Linux 系统。
 
-**v1.0.3 版本下载：**
+macOS / Linux 可在终端直接安装：
 
-| 平台 | 架构 | 下载链接 |
-|------|------|---------|
-| Windows | x64 | [Opentu-Setup-v1.0.3.exe](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-Setup-v1.0.3.exe) |
-| macOS | ARM64 | [Opentu-macos-aarch64-v1.0.3.dmg](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-macos-aarch64-v1.0.3.dmg) |
-| macOS | x64 | [Opentu-macos-x86_64-v1.0.3.dmg](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-macos-x86_64-v1.0.3.dmg) |
-| Linux | AppImage | [Opentu-linux-x86_64-v1.0.3.AppImage](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-linux-x86_64-v1.0.3.AppImage) |
-| Linux | deb | [Opentu-linux-amd64-v1.0.3.deb](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-linux-amd64-v1.0.3.deb) |
+```bash
+curl -fsSL https://raw.githubusercontent.com/AiW520/opentu/main/scripts/install_opentu.sh | bash
+```
 
-**访问所有版本：** [GitHub Releases](https://github.com/AiW520/opentu/releases)
+Linux 默认安装 AppImage。如需只下载 deb/rpm 安装包：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AiW520/opentu/main/scripts/install_opentu.sh | OPENTU_FORMAT=deb bash
+```
+
+Windows 用户可在 [GitHub Releases](https://github.com/AiW520/opentu/releases) 下载 `.msi` 或 `.exe` 安装包。
 
 ### 安装路径设置
 
