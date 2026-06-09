@@ -33,6 +33,44 @@ vi.mock('../../utils/settings-manager', () => ({
     waitForInitialization: waitForInitializationMock,
   },
   hasInvocationRouteCredentials: hasInvocationRouteCredentialsMock,
+  createModelRef: (profileId?: string | null, modelId?: string | null) =>
+    profileId || modelId
+      ? {
+          profileId: profileId || null,
+          modelId: modelId || null,
+        }
+      : null,
+  resolveInvocationRoute: vi.fn((operation: string, routeModel?: any) => ({
+    routeType: operation,
+    modelId:
+      typeof routeModel === 'string'
+        ? routeModel
+        : routeModel?.modelId || 'gpt-image-2',
+    profileId:
+      typeof routeModel === 'object' ? routeModel?.profileId || null : null,
+    profileName: null,
+    providerType: null,
+    baseUrl: 'https://api.example.com/v1',
+    apiKey: 'test-key',
+    source: 'legacy',
+  })),
+  geminiSettings: {
+    get: vi.fn(() => ({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.example.com/v1',
+      imageModelName: 'gpt-image-2',
+    })),
+  },
+  providerProfilesSettings: {
+    get: vi.fn(() => []),
+  },
+  providerCatalogsSettings: {
+    get: vi.fn(() => []),
+  },
+  providerPricingCacheSettings: {
+    get: vi.fn(() => []),
+    set: vi.fn(),
+  },
 }));
 
 vi.mock('../task-queue-service', () => ({
@@ -113,6 +151,10 @@ describe('image-generation-service', () => {
           quality: 'high',
           n: 2,
         },
+      }),
+      expect.objectContaining({
+        operation: 'image',
+        modelId: 'gpt-image-2',
       })
     );
 
