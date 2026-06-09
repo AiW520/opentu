@@ -96,13 +96,41 @@ asset_urls() {
   local file="$1"
   if [[ "$TAG" == "latest" ]]; then
     printf 'https://github.com/%s/releases/latest/download/%s\n' "$REPO" "$file"
+    release_asset_urls "$file"
+    release_tag_asset_urls "$file"
     resolve_latest_tag
-    if [[ -n "$RESOLVED_TAG" ]]; then
+    if [[ -n "$RESOLVED_TAG" && "$RESOLVED_TAG" == v[0-9]* ]]; then
       printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$RESOLVED_TAG" "$file"
     fi
   else
     printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$TAG" "$file"
   fi
+}
+
+release_asset_urls() {
+  local file="$1"
+  local api_url="https://api.github.com/repos/${REPO}/releases?per_page=30"
+
+  command -v curl >/dev/null 2>&1 || return 0
+
+  { curl -fsSL \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'User-Agent: opentu-install-script' \
+    "$api_url" 2>/dev/null || true; } |
+    tr ',' '\n' |
+    sed -n 's/^.*"browser_download_url"[[:space:]]*:[[:space:]]*"\(https:\/\/github\.com\/[^"]*\/'"$file"'\)".*$/\1/p'
+}
+
+release_tag_asset_urls() {
+  local file="$1"
+
+  command -v git >/dev/null 2>&1 || return 0
+
+  git ls-remote --tags --refs "https://github.com/${REPO}.git" 'refs/tags/v*' 2>/dev/null |
+    sed 's#.*refs/tags/v##' |
+    awk -F. 'NF >= 3 { print $1 "." $2 "." $3 }' |
+    sort -t. -k1,1nr -k2,2nr -k3,3nr |
+    sed "s#^#https://github.com/${REPO}/releases/download/v#; s#\$#/${file}#"
 }
 
 download_to_file() {
