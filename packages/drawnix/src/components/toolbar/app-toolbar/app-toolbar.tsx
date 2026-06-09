@@ -24,6 +24,7 @@ import { Z_INDEX } from '../../../constants/z-index';
 import { ToolbarSectionProps } from '../toolbar.types';
 import { useToolbarConfig } from '../../../hooks/use-toolbar-config';
 import { ToolbarContextMenu } from '../toolbar-context-menu';
+import { OPENTU_GITHUB_URL, openExternalUrl } from '../../../utils/external-url';
 
 export interface AppToolbarProps extends ToolbarSectionProps {
   onOpenBackupRestore?: () => void;
@@ -173,7 +174,7 @@ export const AppToolbar: React.FC<AppToolbarProps> = ({
           aria-label={t('menu.github')}
           data-track="toolbar_click_github"
           onPointerUp={() => {
-            window.open('https://github.com/ljquan/aitu', '_blank');
+            void openExternalUrl(OPENTU_GITHUB_URL);
           }}
         />
       </div>

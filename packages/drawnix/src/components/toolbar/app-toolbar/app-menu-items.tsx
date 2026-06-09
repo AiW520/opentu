@@ -35,6 +35,7 @@ import Menu from '../../menu/menu';
 import { useContext, useState, useCallback } from 'react';
 import { MenuContentPropsContext } from '../../menu/common';
 import { EVENT } from '../../../constants';
+import { OPENTU_GITHUB_URL, openExternalUrl } from '../../../utils/external-url';
 
 export const SaveToFile = () => {
   const board = useBoard();
@@ -251,7 +252,7 @@ export const GitHubLink = () => {
       icon={<GithubIcon />}
       data-track="toolbar_click_menu_github"
       onSelect={() => {
-        window.open('https://github.com/ljquan/aitu', '_blank');
+        void openExternalUrl(OPENTU_GITHUB_URL);
       }}
       aria-label={t('menu.github')}
     >
