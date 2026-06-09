@@ -2,7 +2,7 @@ import type { ImageProps } from '@plait/common';
 import { RectangleClient } from '@plait/core';
 import { Loading, MessagePlugin } from 'tdesign-react';
 import classNames from 'classnames';
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Video } from './video';
 import { generateImage } from '../../mcp/tools/image-generation';
 import { getImageRegion } from '../../services/ppt';
@@ -22,6 +22,8 @@ import {
   isOrdinary3DTransformImage,
   sanitizeImage3DTransform,
 } from '../../utils/image-3d-transform';
+import { unifiedCacheService } from '../../services/unified-cache-service';
+import { isVirtualMediaUrl } from '../../utils/virtual-media-url';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -34,6 +36,62 @@ const image3DForeignObjectVisibilityRefs = new WeakMap<
   SVGForeignObjectElement,
   { count: number; previousVisibility: string; previousPointerEvents: string }
 >();
+
+function useRenderableImageUrl(url: string): string {
+  const [renderUrl, setRenderUrl] = useState(url);
+  const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+
+    setRenderUrl(url);
+
+    if (!isVirtualMediaUrl(url)) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    unifiedCacheService
+      .getCachedBlob(url)
+      .then((blob) => {
+        if (cancelled || !blob || blob.size <= 0) {
+          return;
+        }
+
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrlRef.current = objectUrl;
+        setRenderUrl(objectUrl);
+      })
+      .catch((error) => {
+        console.warn(
+          '[ImageComponent] Failed to resolve virtual image URL:',
+          url,
+          error
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  return renderUrl;
+}
 
 interface Image3DOverlayRef {
   group: SVGGElement;
@@ -153,6 +211,7 @@ export const Image: React.FC<ImageProps> = (props: ImageProps) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const svgOverlayRef = useRef<Image3DOverlayRef | null>(null);
   const pptImageGenerationLockRef = useRef(false);
+  const renderableImageUrl = useRenderableImageUrl(props.imageItem.url);
 
   const clearSWRecovery = useCallback(() => {
     cleanupSWRecoveryRef.current?.();
@@ -540,7 +599,7 @@ export const Image: React.FC<ImageProps> = (props: ImageProps) => {
 
   // 否则使用原来的图片渲染
   const imgProps = {
-    src: props.imageItem.url,
+    src: renderableImageUrl,
     draggable: false,
     ...(shouldContainFrameImage
       ? {

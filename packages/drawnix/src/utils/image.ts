@@ -3,9 +3,12 @@ import { base64ToBlob, download } from '@aitu/utils';
 import { boardToImage } from './common';
 import { fileOpen, isFileSystemAbortError } from '../data/filesystem';
 import { IMAGE_MIME_TYPES } from '../constants';
-import { insertImage } from '../data/image';
+import { insertImage, insertImageFromUrl } from '../data/image';
 import { MessagePlugin } from './message-plugin';
 import { getImageNaturalSize } from './image-natural-size';
+import { assetStorageService } from '../services/asset-storage-service';
+import { AssetType } from '../types/asset.types';
+import { isTauriEnvironment } from './desktop-asset-url';
 
 export { getImageNaturalSize } from './image-natural-size';
 
@@ -88,17 +91,37 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
 
 export const addImage = async (board: PlaitBoard) => {
   try {
+    if (isTauriEnvironment()) {
+      await assetStorageService.initialize();
+      const imageFiles = await assetStorageService.pickDesktopImageFiles();
+      if (imageFiles.length === 0) {
+        return;
+      }
+
+      for (const imageFile of imageFiles) {
+        const asset = await assetStorageService.addDesktopLocalAssetFromPath({
+          path: imageFile.path,
+          type: AssetType.IMAGE,
+          name: imageFile.name,
+          mimeType: imageFile.mimeType,
+        });
+        await insertImageFromUrl(board, asset.url);
+      }
+      return;
+    }
+
     const imageFile = await fileOpen({
       description: 'Image',
       extensions: Object.keys(
         IMAGE_MIME_TYPES
       ) as (keyof typeof IMAGE_MIME_TYPES)[],
     });
-    insertImage(board, imageFile);
+    await insertImage(board, imageFile);
   } catch (error) {
     if (isFileSystemAbortError(error)) {
       return;
     }
-    throw error;
+    console.error('[addImage] Failed to import image:', error);
+    MessagePlugin.error('导入图片失败，请确认图片格式受支持');
   }
 };
