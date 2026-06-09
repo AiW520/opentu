@@ -37,6 +37,7 @@ pub fn run() {
             commands::media::reset_media_root_path,
             commands::media::pick_media_folder,
             commands::media::pick_media_files,
+            commands::media::pick_image_files,
             commands::media::pick_save_location,
             commands::media::get_default_save_path,
             commands::media::get_cached_media_file,

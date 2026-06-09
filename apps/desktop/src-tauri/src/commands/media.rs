@@ -148,6 +148,55 @@ pub async fn pick_media_files(app: tauri::AppHandle) -> Result<Vec<PickedMediaFi
 }
 
 #[tauri::command]
+pub async fn pick_image_files(app: tauri::AppHandle) -> Result<Vec<PickedMediaFile>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let files = app
+        .dialog()
+        .file()
+        .add_filter(
+            "图片",
+            &[
+                "png", "jpg", "jpeg", "jfif", "gif", "webp", "svg", "bmp", "ico", "avif",
+            ],
+        )
+        .blocking_pick_files();
+
+    let Some(files) = files else {
+        return Ok(Vec::new());
+    };
+
+    let mut result = Vec::new();
+    for file_path in files {
+        let path = file_path
+            .into_path()
+            .map_err(|e| format!("无法解析本地图片路径: {}", e))?;
+        if !path.is_file() {
+            continue;
+        }
+        let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "image".to_string());
+        let mime_type = detect_mime_type(&path);
+        let file_type = infer_file_type(&mime_type, &path);
+        if file_type != "image" {
+            continue;
+        }
+        result.push(PickedMediaFile {
+            path: path.to_string_lossy().to_string(),
+            name: file_name,
+            mime_type,
+            file_type,
+            size: metadata.len(),
+        });
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
 pub async fn pick_save_location(
     app: tauri::AppHandle,
     default_name: String,
@@ -373,6 +422,10 @@ fn extension_from_mime(mime_type: &str, file_type: &str) -> &'static str {
         "image/gif" => "gif",
         "image/webp" => "webp",
         "image/svg+xml" => "svg",
+        "image/bmp" => "bmp",
+        "image/x-icon" => "ico",
+        "image/avif" => "avif",
+        "image/jfif" => "jfif",
         "video/mp4" => "mp4",
         "video/webm" => "webm",
         "video/quicktime" => "mov",
@@ -402,6 +455,10 @@ fn detect_mime_type(path: &Path) -> String {
         "gif" => "image/gif",
         "webp" => "image/webp",
         "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "avif" => "image/avif",
+        "jfif" => "image/jfif",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
         "mov" => "video/quicktime",
