@@ -209,6 +209,139 @@ pub async fn download_url_to_path(url: String, save_path: String) -> Result<(), 
 }
 
 #[tauri::command]
+pub async fn download_url_to_media_file(
+    state: State<'_, AppState>,
+    url: String,
+    file_type: String,
+    fallback_extension: Option<String>,
+) -> Result<AssetImportResult, String> {
+    let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("无效下载地址: {}", e))?;
+    if !matches!(parsed_url.scheme(), "http" | "https") {
+        return Err("仅支持下载 HTTP/HTTPS 资源".to_string());
+    }
+
+    let normalized_file_type = normalize_media_type(&file_type);
+    let media_root = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.media_root.clone()
+    };
+    let media_dir = media_root.join(get_media_subdir(&normalized_file_type));
+    fs::create_dir_all(&media_dir).map_err(|e| format!("无法创建媒体目录: {}", e))?;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("无法初始化下载器: {}", e))?;
+    let mut response = client
+        .get(parsed_url.clone())
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Opentu Desktop",
+        )
+        .send()
+        .await
+        .map_err(|e| format!("下载失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("下载失败: HTTP {}", response.status()));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or(value).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            fallback_extension
+                .as_deref()
+                .map(detect_mime_type_from_extension)
+                .unwrap_or_else(|| "application/octet-stream".to_string())
+        });
+    let extension = resolve_download_extension(
+        &parsed_url,
+        &content_type,
+        &normalized_file_type,
+        fallback_extension.as_deref(),
+    );
+
+    let temp_name = format!(
+        ".opentu-download-{}-{}.tmp",
+        chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
+        std::process::id()
+    );
+    let temp_path = media_dir.join(temp_name);
+    let mut temp_file = File::create(&temp_path).map_err(|e| format!("无法创建下载文件: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut size = 0_u64;
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("读取下载内容失败: {}", e))?
+    {
+        hasher.update(&chunk);
+        size += chunk.len() as u64;
+        temp_file
+            .write_all(&chunk)
+            .map_err(|e| format!("写入下载内容失败: {}", e))?;
+    }
+    temp_file
+        .flush()
+        .map_err(|e| format!("保存下载文件失败: {}", e))?;
+
+    if size == 0 {
+        let _ = fs::remove_file(&temp_path);
+        return Err("下载内容为空".to_string());
+    }
+
+    let content_hash = bytes_to_hex(&hasher.finalize());
+    let file_name = format!("content-{}.{}", content_hash, extension);
+    let final_path = media_dir.join(sanitize_file_name(&file_name)?);
+
+    if final_path.exists() {
+        let _ = fs::remove_file(&temp_path);
+    } else if let Err(error) = fs::rename(&temp_path, &final_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("保存媒体文件失败: {}", error));
+    }
+
+    Ok(AssetImportResult {
+        content_hash,
+        file_name: file_name.clone(),
+        original_name: file_name,
+        local_path: final_path.to_string_lossy().to_string(),
+        file_type: normalized_file_type,
+        mime_type: content_type,
+        size,
+        created_at: chrono::Utc::now().timestamp_millis(),
+    })
+}
+
+#[tauri::command]
+pub fn copy_media_file_to_path(
+    state: State<'_, AppState>,
+    source: String,
+    save_path: String,
+) -> Result<(), String> {
+    let target_path = PathBuf::from(save_path);
+    validate_save_path(&target_path)?;
+
+    let media_root = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.media_root.clone()
+    };
+    let media_root = media_root
+        .canonicalize()
+        .map_err(|e| format!("媒体目录不可访问: {}", e))?;
+    let source_path = resolve_media_source_path(&source, &media_root)?;
+
+    copy_file_streaming(&source_path, &target_path).map_err(|e| format!("复制媒体文件失败: {}", e))
+}
+
+#[tauri::command]
 pub fn get_default_save_path(
     state: State<AppState>,
     file_name: String,
@@ -374,6 +507,126 @@ fn validate_save_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn copy_file_streaming(source: &Path, target: &Path) -> Result<(), String> {
+    let canonical_source = source
+        .canonicalize()
+        .map_err(|e| format!("源媒体文件不可访问: {}", e))?;
+    if let Ok(canonical_target) = target.canonicalize() {
+        if canonical_source == canonical_target {
+            return Ok(());
+        }
+    }
+
+    let mut source_file =
+        File::open(&canonical_source).map_err(|e| format!("无法打开源文件: {}", e))?;
+    let mut target_file = File::create(target).map_err(|e| format!("无法创建目标文件: {}", e))?;
+    let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
+
+    loop {
+        let bytes_read = source_file
+            .read(&mut buffer)
+            .map_err(|e| format!("读取源文件失败: {}", e))?;
+        if bytes_read == 0 {
+            break;
+        }
+        target_file
+            .write_all(&buffer[..bytes_read])
+            .map_err(|e| format!("写入目标文件失败: {}", e))?;
+    }
+
+    target_file
+        .flush()
+        .map_err(|e| format!("刷新目标文件失败: {}", e))
+}
+
+fn resolve_media_source_path(source: &str, media_root: &Path) -> Result<PathBuf, String> {
+    if source.trim().is_empty() {
+        return Err("源媒体路径不能为空".to_string());
+    }
+
+    if source.starts_with("http://opentu-asset.localhost")
+        || source.starts_with("https://opentu-asset.localhost")
+        || source.starts_with("opentu-asset://")
+    {
+        let uri = source
+            .parse::<tauri::http::Uri>()
+            .map_err(|e| format!("源媒体 URL 无效: {}", e))?;
+        return resolve_asset_request_path(&uri, media_root).map_err(|(_, message)| message);
+    }
+
+    if let Some(virtual_path) = virtual_media_path_from_source(source) {
+        let file_name = file_name_from_media_url(&virtual_path)?;
+        let file_type = infer_file_type_from_media_url(&virtual_path);
+        let path = resolve_media_file_path(media_root, &file_name, Some(&file_type))?;
+        return ensure_media_source_allowed(path, media_root);
+    }
+
+    ensure_media_source_allowed(PathBuf::from(source), media_root)
+}
+
+fn virtual_media_path_from_source(source: &str) -> Option<String> {
+    let source = source.trim();
+    if is_virtual_media_path(source) {
+        return Some(source.to_string());
+    }
+
+    let parsed = reqwest::Url::parse(source).ok()?;
+    let path = parsed.path();
+    if is_virtual_media_path(path) {
+        return Some(path.to_string());
+    }
+
+    None
+}
+
+fn is_virtual_media_path(path: &str) -> bool {
+    path.starts_with("/__aitu_cache__/")
+        || path.starts_with("/__aitu_generated__/")
+        || path.starts_with("/asset-library/")
+}
+
+fn ensure_media_source_allowed(path: PathBuf, media_root: &Path) -> Result<PathBuf, String> {
+    let path = path
+        .canonicalize()
+        .map_err(|e| format!("源媒体文件不可访问: {}", e))?;
+
+    if !path.starts_with(media_root) || !path.is_file() {
+        return Err("不允许访问该媒体文件".to_string());
+    }
+
+    Ok(path)
+}
+
+fn file_name_from_media_url(url: &str) -> Result<String, String> {
+    let clean = url
+        .split('?')
+        .next()
+        .unwrap_or(url)
+        .split('#')
+        .next()
+        .unwrap_or(url);
+    clean
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.to_string())
+        .ok_or_else(|| "无法识别媒体文件名".to_string())
+}
+
+fn infer_file_type_from_media_url(url: &str) -> String {
+    let normalized = url.to_ascii_lowercase();
+    if normalized.contains("/video/") {
+        return "video".to_string();
+    }
+    if normalized.contains("/audio/") || normalized.starts_with("/__aitu_generated__/audio/") {
+        return "audio".to_string();
+    }
+    if normalized.ends_with(".zip") {
+        return "archive".to_string();
+    }
+    "image".to_string()
+}
+
 fn copy_and_hash(source: &Path, target: &Path) -> Result<String, String> {
     let mut source_file = File::open(source).map_err(|e| format!("无法打开源文件: {}", e))?;
     let mut target_file = File::create(target).map_err(|e| format!("无法创建目标文件: {}", e))?;
@@ -448,6 +701,61 @@ fn extension_from_mime(mime_type: &str, file_type: &str) -> &'static str {
         _ if file_type == "audio" => "mp3",
         _ => "png",
     }
+}
+
+fn resolve_download_extension(
+    url: &reqwest::Url,
+    mime_type: &str,
+    file_type: &str,
+    fallback_extension: Option<&str>,
+) -> String {
+    extension_from_url_path(url.path())
+        .or_else(|| fallback_extension.and_then(sanitize_extension))
+        .unwrap_or_else(|| extension_from_mime(mime_type, file_type).to_string())
+}
+
+fn extension_from_url_path(path: &str) -> Option<String> {
+    Path::new(path)
+        .extension()
+        .and_then(|value| sanitize_extension(&value.to_string_lossy()))
+}
+
+fn sanitize_extension(extension: &str) -> Option<String> {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if extension.is_empty()
+        || extension.len() > 12
+        || !extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    Some(extension)
+}
+
+fn detect_mime_type_from_extension(extension: &str) -> String {
+    let extension = sanitize_extension(extension).unwrap_or_default();
+    match extension.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "m4v" => "video/x-m4v",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 fn detect_mime_type(path: &Path) -> String {
@@ -957,6 +1265,42 @@ pub struct AssetImportResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_relative_virtual_media_path() {
+        assert_eq!(
+            virtual_media_path_from_source("/__aitu_cache__/image/content-demo.png"),
+            Some("/__aitu_cache__/image/content-demo.png".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_virtual_media_path_from_absolute_url() {
+        assert_eq!(
+            virtual_media_path_from_source(
+                "http://localhost:7200/__aitu_cache__/image/content-demo.png?thumbnail=1"
+            ),
+            Some("/__aitu_cache__/image/content-demo.png".to_string())
+        );
+    }
+
+    #[test]
+    fn copy_file_streaming_keeps_same_file_unchanged() {
+        let path = std::env::temp_dir().join(format!(
+            "opentu-copy-same-{}-{}.txt",
+            std::process::id(),
+            chrono::Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
+        ));
+
+        std::fs::write(&path, b"unchanged").unwrap();
+        copy_file_streaming(&path, &path).unwrap();
+        let content = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(content, b"unchanged");
+    }
 
     #[test]
     fn decodes_tauri_windows_http_asset_url() {

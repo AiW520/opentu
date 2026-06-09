@@ -40,6 +40,8 @@ pub fn run() {
             commands::media::pick_save_location,
             commands::media::write_file_to_path,
             commands::media::download_url_to_path,
+            commands::media::download_url_to_media_file,
+            commands::media::copy_media_file_to_path,
             commands::media::get_default_save_path,
             commands::media::get_cached_media_file,
             commands::media::import_local_asset,

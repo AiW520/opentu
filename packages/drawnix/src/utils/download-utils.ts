@@ -20,6 +20,8 @@ import { AssetType } from '../types/asset.types';
 import type { Task } from '../types/task.types';
 import { TaskType } from '../types/task.types';
 import { applyAudioMetadataToBlob, type AudioDownloadMetadata } from './audio-id3';
+import { isDesktopAssetUrl } from './desktop-asset-url';
+import { isVirtualMediaUrl } from './virtual-media-url';
 
 export interface SmartDownloadResult {
   openedCount: number;
@@ -220,6 +222,20 @@ async function downloadUrlToDesktopPath(
   });
 }
 
+function isDesktopLocalMediaUrl(url: string): boolean {
+  return isDesktopAssetUrl(url) || isVirtualMediaUrl(url);
+}
+
+async function copyMediaUrlToDesktopPath(
+  url: string,
+  path: string
+): Promise<void> {
+  await tauriInvoke<void>('copy_media_file_to_path', {
+    source: url,
+    savePath: path,
+  });
+}
+
 async function writeBlobToDesktopPath(path: string, blob: Blob): Promise<void> {
   const arrayBuffer = await blob.arrayBuffer();
   await tauriInvoke<void>('write_file_to_path', {
@@ -236,6 +252,21 @@ async function saveUrlToDesktopPath(
     audioMetadata?: AudioDownloadMetadata;
   }
 ): Promise<void> {
+  if (
+    isDesktopLocalMediaUrl(url) &&
+    (options.type !== 'audio' || !options.audioMetadata)
+  ) {
+    try {
+      await copyMediaUrlToDesktopPath(url, path);
+      return;
+    } catch (error) {
+      console.warn(
+        '[download-utils] Desktop local media copy failed, falling back:',
+        error
+      );
+    }
+  }
+
   if (options.type !== 'audio' && isHttpUrl(url)) {
     try {
       await downloadUrlToDesktopPath(url, path);
@@ -248,21 +279,50 @@ async function saveUrlToDesktopPath(
     }
   }
 
-  const response = await fetch(url, { referrerPolicy: 'no-referrer' });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status}`);
+  try {
+    const response = await fetch(url, { referrerPolicy: 'no-referrer' });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: ${response.status}`);
+    }
+    const sourceBlob = await response.blob();
+    const blob =
+      options.type === 'audio'
+        ? await applyAudioMetadataToBlob(sourceBlob, options.audioMetadata, url)
+        : sourceBlob;
+    await writeBlobToDesktopPath(path, blob);
+  } catch (error) {
+    if (isDesktopLocalMediaUrl(url)) {
+      await copyMediaUrlToDesktopPath(url, path);
+      return;
+    }
+    throw error;
   }
-  const sourceBlob = await response.blob();
-  const blob =
-    options.type === 'audio'
-      ? await applyAudioMetadataToBlob(sourceBlob, options.audioMetadata, url)
-      : sourceBlob;
-  await writeBlobToDesktopPath(path, blob);
 }
 
 /**
  * 设置自定义保存函数（桌面环境调用）
  */
+async function getSourceBlobForDownload(url: string): Promise<Blob> {
+  try {
+    const response = await fetch(url, { referrerPolicy: 'no-referrer' });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: ${response.status}`);
+    }
+    return await response.blob();
+  } catch (error) {
+    if (isDesktopLocalMediaUrl(url)) {
+      const { unifiedCacheService } = await import(
+        '../services/unified-cache-service'
+      );
+      const cachedBlob = await unifiedCacheService.getCachedBlob(url);
+      if (cachedBlob) {
+        return cachedBlob;
+      }
+    }
+    throw error;
+  }
+}
+
 export function setSaveLocationFn(fn: SaveToLocationFn): void {
   saveToCustomLocation = fn;
 }
@@ -517,12 +577,7 @@ export async function downloadAsZip(
       try {
         const assetUrl =
           item.type === 'image' ? normalizeImageDataUrl(item.url) : item.url;
-        const response = await fetch(assetUrl, { referrerPolicy: 'no-referrer' });
-        if (!response.ok) {
-          console.warn(`Failed to fetch ${assetUrl}: ${response.status}`);
-          return;
-        }
-        const sourceBlob = await response.blob();
+        const sourceBlob = await getSourceBlobForDownload(assetUrl);
         const blob =
           item.type === 'audio'
             ? await applyAudioMetadataToBlob(
@@ -610,13 +665,7 @@ export async function smartDownload(
           return;
         }
 
-        const response = await fetch(assetUrl, {
-          referrerPolicy: 'no-referrer',
-        });
-        if (!response.ok) {
-          throw new Error(`Failed to fetch ${assetUrl}: ${response.status}`);
-        }
-        const sourceBlob = await response.blob();
+        const sourceBlob = await getSourceBlobForDownload(assetUrl);
         const blob =
           item.type === 'audio'
             ? await applyAudioMetadataToBlob(

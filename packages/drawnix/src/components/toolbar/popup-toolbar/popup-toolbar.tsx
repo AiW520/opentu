@@ -1768,8 +1768,16 @@ export const PopupToolbar = () => {
                     const { downloadFromBlob } = await import('@aitu/utils');
 
                     const processedItems: BatchDownloadItem[] = [];
+                    const isDesktopDownload =
+                      typeof window !== 'undefined' &&
+                      Boolean((window as any).__TAURI_INTERNALS__);
 
                     for (const item of downloadItems) {
+                      if (isDesktopDownload) {
+                        processedItems.push(item);
+                        continue;
+                      }
+
                       if (item.url.startsWith('blob:')) {
                         // 从 URL fragment 提取 taskId (格式: blob:http://...#merged-video-{timestamp})
                         const hashIndex = item.url.indexOf('#');

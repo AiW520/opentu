@@ -21,6 +21,10 @@ import {
   isVirtualMediaUrl,
 } from '../../utils/virtual-media-url';
 import {
+  convertLocalFilePathToAssetUrl,
+  isTauriEnvironment,
+} from '../../utils/desktop-asset-url';
+import {
   downloadVideoContentToLocalUrl,
   extractInlineVideoUrl,
   resolveVideoPollPath,
@@ -29,6 +33,17 @@ import {
 
 /** 参考图转 base64 时最大体积（1MB），避免请求体过大 */
 export const MAX_REFERENCE_IMAGE_BYTES = 1 * 1024 * 1024;
+
+interface DesktopMediaFileResult {
+  contentHash: string;
+  fileName: string;
+  originalName: string;
+  localPath: string;
+  fileType: string;
+  mimeType: string;
+  size: number;
+  createdAt: number;
+}
 
 /** 将 Blob 压缩到 1MB 以内再转 base64（仅图片类型） */
 export async function blobToBase64Under1MB(blob: Blob): Promise<string> {
@@ -276,6 +291,55 @@ export async function generateAsyncImage(
  * - 远程音频 URL：主动缓存到本地稳定路径，避免签名链接过期后无法播放
  * - 其他 http/https：保留原始远程 URL，交给既有 SW 请求拦截链路处理，避免把远程素材误判成本地素材
  */
+function invokeTauriCommand<T>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  return (window as any).__TAURI_INTERNALS__.invoke(command, args);
+}
+
+async function cacheRemoteUrlToDesktopMedia(
+  url: string,
+  mediaType: 'image' | 'video' | 'audio',
+  format: string
+): Promise<string | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+
+  const result = await invokeTauriCommand<DesktopMediaFileResult>(
+    'download_url_to_media_file',
+    {
+      url,
+      fileType: mediaType,
+      fallbackExtension: format,
+    }
+  );
+
+  return convertLocalFilePathToAssetUrl(result.localPath);
+}
+
+function getFileNameFromVirtualUrl(url: string): string {
+  const cleanUrl = url.split('?')[0].split('#')[0];
+  return cleanUrl.split('/').pop() || `content-${Date.now()}`;
+}
+
+async function getDesktopCachedMediaAssetUrl(
+  url: string,
+  mediaType: 'image' | 'video' | 'audio'
+): Promise<string | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+
+  const filePath = await invokeTauriCommand<string | null>('get_file_path', {
+    fileName: getFileNameFromVirtualUrl(url),
+    fileType: mediaType,
+  });
+
+  return filePath ? convertLocalFilePathToAssetUrl(filePath) : null;
+}
+
 export async function cacheRemoteUrl(
   remoteUrl: string,
   taskId: string,
@@ -300,6 +364,24 @@ export async function cacheRemoteUrl(
     normalizedUrl.startsWith('http://') ||
     normalizedUrl.startsWith('https://')
   ) {
+    if (isTauriEnvironment()) {
+      try {
+        const desktopUrl = await cacheRemoteUrlToDesktopMedia(
+          normalizedUrl,
+          mediaType,
+          format
+        );
+        if (desktopUrl) {
+          return desktopUrl;
+        }
+      } catch (error) {
+        console.warn(
+          '[cacheRemoteUrl] Desktop media save failed, falling back:',
+          error
+        );
+      }
+    }
+
     if (mediaType !== 'audio' && !options?.forceRemoteCache) {
       return normalizedUrl;
     }
@@ -375,6 +457,13 @@ export async function cacheRemoteUrl(
             }`;
 
       if (await unifiedCacheService.isCached(contentAddressedUrl)) {
+        const desktopUrl = await getDesktopCachedMediaAssetUrl(
+          contentAddressedUrl,
+          mediaType
+        );
+        if (desktopUrl) {
+          return desktopUrl;
+        }
         return contentAddressedUrl;
       }
 
@@ -388,6 +477,13 @@ export async function cacheRemoteUrl(
           ...options?.extraMetadata,
         }
       );
+      const desktopUrl = await getDesktopCachedMediaAssetUrl(
+        contentAddressedUrl,
+        mediaType
+      );
+      if (desktopUrl) {
+        return desktopUrl;
+      }
       return (await unifiedCacheService.isCached(contentAddressedUrl))
         ? contentAddressedUrl
         : normalizedUrl;
