@@ -28,7 +28,10 @@ import {
 } from './media-executor/task-storage-writer';
 import { taskStorageReader } from './task-storage-reader';
 import { executorFactory, waitForTaskCompletion } from './media-executor';
-import { hasInvocationRouteCredentials } from '../utils/settings-manager';
+import {
+  hasInvocationRouteCredentials,
+  settingsManager,
+} from '../utils/settings-manager';
 import { DEFAULT_AUDIO_MODEL_ID } from '../constants/model-config';
 import { analytics } from '../utils/posthog-analytics';
 import {
@@ -627,6 +630,7 @@ class TaskQueueService {
           : task.type === TaskType.CHAT
           ? 'text'
           : 'image';
+      await settingsManager.waitForInitialization();
       if (
         !hasInvocationRouteCredentials(
           routeType,

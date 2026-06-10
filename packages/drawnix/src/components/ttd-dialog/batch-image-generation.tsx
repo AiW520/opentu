@@ -2218,7 +2218,7 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
     ]
   );
 
-  // 提交到任务队列 - 只提交选中的行
+  // 提交到任务队列：有勾选则提交勾选行，未勾选则提交所有有提示词的行。
   const submitToQueue = useCallback(async () => {
     if (submitLockRef.current || isSubmitting) {
       return;
@@ -2226,22 +2226,16 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
     submitLockRef.current = true;
     setIsSubmitting(true);
 
-    // 获取选中的行索引（从 checkbox 选中状态获取）
-    const selectedRowIndices = [...selectedRows].sort((a, b) => a - b);
+    const selectedRowIndices =
+      selectedRows.size > 0
+        ? [...selectedRows].sort((a, b) => a - b)
+        : tasks
+            .map((task, index) =>
+              task.prompt && task.prompt.trim() !== '' ? index : -1
+            )
+            .filter((index) => index >= 0);
 
-    // 如果没有选中行，提示用户
-    if (selectedRowIndices.length === 0) {
-      MessagePlugin.warning(
-        language === 'zh'
-          ? '请先勾选要生成的行'
-          : 'Please check rows to generate'
-      );
-      submitLockRef.current = false;
-      setIsSubmitting(false);
-      return;
-    }
-
-    // 获取选中行中有提示词的任务
+    // 获取目标行中有提示词的任务
     const validTasks = selectedRowIndices
       .map((idx) => ({ task: tasks[idx], rowIndex: idx }))
       .filter(({ task }) => task && task.prompt && task.prompt.trim() !== '');
@@ -2249,8 +2243,8 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
     if (validTasks.length === 0) {
       MessagePlugin.warning(
         language === 'zh'
-          ? '选中的行没有填写提示词'
-          : 'Selected rows have no prompts'
+          ? '没有可生成的提示词'
+          : 'No prompts to generate'
       );
       submitLockRef.current = false;
       setIsSubmitting(false);

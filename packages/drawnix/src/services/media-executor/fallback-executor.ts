@@ -113,6 +113,27 @@ function extractUrlsFromUploadedImages(
   return urls.length > 0 ? urls : undefined;
 }
 
+function normalizeReferenceImageUrls(
+  referenceImages: unknown,
+  uploadedImages: unknown
+): string[] | undefined {
+  const urls = new Set<string>();
+  const addUrl = (url: unknown) => {
+    if (typeof url !== 'string') return;
+    const trimmed = url.trim();
+    if (trimmed) {
+      urls.add(trimmed);
+    }
+  };
+
+  if (Array.isArray(referenceImages)) {
+    referenceImages.forEach(addUrl);
+  }
+  extractUrlsFromUploadedImages(uploadedImages)?.forEach(addUrl);
+
+  return urls.size > 0 ? Array.from(urls) : undefined;
+}
+
 function getStringParam(
   params: ImageGenerationParams,
   keys: string[]
@@ -189,10 +210,10 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       quality,
       count = 1,
     } = params;
-    const referenceImages =
-      (params.referenceImages && params.referenceImages.length > 0
-        ? params.referenceImages
-        : undefined) || extractUrlsFromUploadedImages(params.uploadedImages);
+    const referenceImages = normalizeReferenceImageUrls(
+      params.referenceImages,
+      params.uploadedImages
+    );
     const shouldUseEditSchema = isImageEditRequest(params, referenceImages);
     const invocationOptions = {
       preferredRequestSchema: shouldUseEditSchema
