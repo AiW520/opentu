@@ -100,6 +100,18 @@ export interface CanvasInsertionResultData {
   };
 }
 
+const CANVAS_INSERT_YIELD_EVERY = 4;
+
+function waitForNextFrame(): Promise<void> {
+  if (typeof window === 'undefined' || !window.requestAnimationFrame) {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 /**
  * 插入单个文本项到画布
  * - 有 title 时 → 直接以 Card 方式插入
@@ -477,6 +489,13 @@ export async function executeCanvasInsertion(params: CanvasInsertionParams): Pro
         elementId: inserted.elementId,
         size: inserted.size,
       });
+
+      if (
+        index < items.length - 1 &&
+        (index + 1) % CANVAS_INSERT_YIELD_EVERY === 0
+      ) {
+        await waitForNextFrame();
+      }
     }
 
     if (insertedItems.length > 0) {

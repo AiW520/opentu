@@ -26,13 +26,13 @@ jobs:
           ### macOS / Linux 一键安装
 
           \`\`\`bash
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/scripts/install_opentu.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | bash
           \`\`\`
 
           或指定版本：
 
           \`\`\`bash
-          OPENTU_TAG=${{ github.ref_name }} curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/scripts/install_opentu.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | OPENTU_TAG=${{ github.ref_name }} bash
           \`\`\`
 
           ### Windows

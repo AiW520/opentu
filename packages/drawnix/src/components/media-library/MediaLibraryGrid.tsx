@@ -81,9 +81,8 @@ import {
   isCacheUrl,
   countElementsByAssetUrls,
 } from '../../utils/asset-cleanup';
-import { insertImageFromUrl } from '../../data/image';
-import { insertVideoFromUrl } from '../../data/video';
 import { insertAudioFromUrl } from '../../data/audio';
+import { quickInsertCanvasMedia } from '../../services/canvas-operations/media-quick-insert';
 import { useGitHubSync } from '../../contexts/GitHubSyncContext';
 import { useAudioPlaylists } from '../../contexts/AudioPlaylistContext';
 import { mediaSyncService } from '../../services/github-sync/media-sync-service';
@@ -1272,7 +1271,7 @@ export function MediaLibraryGrid({
         try {
           const asset = filteredResult.assets.find((a) => a.id === item.id);
           if (item.type === 'video') {
-            await insertVideoFromUrl(board, item.url);
+            await quickInsertCanvasMedia('video', item.url);
           } else if (item.type === 'audio') {
             await insertAudioFromUrl(board, item.url, {
               title: asset?.name || item.title,
@@ -1284,7 +1283,7 @@ export function MediaLibraryGrid({
               providerTaskId: asset?.providerTaskId,
             });
           } else {
-            await insertImageFromUrl(board, normalizeImageDataUrl(item.url));
+            await quickInsertCanvasMedia('image', normalizeImageDataUrl(item.url));
           }
           // 插入成功后关闭预览
           setPreviewVisible(false);
@@ -1328,7 +1327,7 @@ export function MediaLibraryGrid({
         });
 
         // 插入到画布
-        await insertImageFromUrl(board, stableUrl);
+        await quickInsertCanvasMedia('image', stableUrl);
 
         // 关闭编辑器
         setImageEditorVisible(false);

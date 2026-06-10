@@ -17,6 +17,8 @@ const CACHE_TTL = 5 * 60 * 1000;
 // 缓存上限
 const MAX_CACHE_SIZE = 500;
 const MAX_THUMBNAIL_SOURCE_BYTES = 20 * 1024 * 1024;
+const THUMBNAIL_CHECK_BATCH_SIZE = 2;
+const THUMBNAIL_IDLE_TIMEOUT_MS = 2500;
 
 // 待检查队列和处理状态
 const pendingChecks = new Set<string>();
@@ -25,6 +27,25 @@ let isProcessingQueue = false;
 // 缓存的 Cache 对象引用，避免重复调用 caches.open
 let thumbCachePromise: Promise<Cache> | null = null;
 let imageCachePromise: Promise<Cache> | null = null;
+
+function waitForThumbnailIdle(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const requestIdle = (window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    }).requestIdleCallback;
+
+    if (requestIdle) {
+      requestIdle(() => resolve(), { timeout: THUMBNAIL_IDLE_TIMEOUT_MS });
+      return;
+    }
+
+    window.setTimeout(resolve, 16);
+  });
+}
 
 function normalizeImageDataUrl(value: string): string {
   const trimmed = value.trim();
@@ -208,10 +229,10 @@ async function processCheckQueue(): Promise<void> {
     }
 
     // 每次处理最多 5 个
-    const batchSize = 5;
+    const batchSize = THUMBNAIL_CHECK_BATCH_SIZE;
     const batch = Array.from(pendingChecks).slice(0, batchSize);
     
-    for (const item of batch) {
+    for (const [index, item] of batch.entries()) {
       pendingChecks.delete(item);
       const [originalUrl, type, size = 'small'] = item.split('|');
       
@@ -226,15 +247,15 @@ async function processCheckQueue(): Promise<void> {
       } catch (error) {
         console.warn('Failed to ensure thumbnail:', originalUrl, error);
       }
+
+      if (index < batch.length - 1) {
+        await waitForThumbnailIdle();
+      }
     }
     
     // 如果队列还有项目，延迟继续处理
     if (pendingChecks.size > 0) {
-      if ('requestIdleCallback' in window) {
-        (window as Window).requestIdleCallback(processCheckQueue);
-      } else {
-        setTimeout(processCheckQueue, 100);
-      }
+      waitForThumbnailIdle().then(processCheckQueue);
     }
   } finally {
     isProcessingQueue = false;
@@ -348,7 +369,7 @@ function ensureThumbnail(
         } finally {
           isProcessingQueue = false;
           if (pendingChecks.size > 0) {
-            setTimeout(processCheckQueue, 0);
+            waitForThumbnailIdle().then(processCheckQueue);
           }
         }
       })();
@@ -356,11 +377,7 @@ function ensureThumbnail(
     }
 
     // 使用 requestIdleCallback 延迟处理队列
-    if ('requestIdleCallback' in window) {
-      (window as Window).requestIdleCallback(processCheckQueue, { timeout: 2000 });
-    } else {
-      setTimeout(processCheckQueue, 200);
-    }
+    waitForThumbnailIdle().then(processCheckQueue);
   }
 }
 
@@ -392,7 +409,7 @@ export function useThumbnailUrl(
 
     // 如果提供了类型，排队检查/生成预览图（非阻塞）
     if (type && !shouldBypassThumbnailForUrl(originalUrl, type)) {
-      ensureThumbnail(originalUrl, type, size, type === 'video');
+      ensureThumbnail(originalUrl, type, size);
     }
   }, [originalUrl, type, size]);
 

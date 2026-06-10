@@ -37,6 +37,8 @@ const LEGACY_DB_NAMES = {
 
 /** Service Worker 图片缓存名称 */
 const IMAGE_CACHE_NAME = 'drawnix-images';
+const DESKTOP_FILE_SAVE_IDLE_TIMEOUT_MS = 1500;
+const MAX_EAGER_THUMBNAIL_BYTES = 4 * 1024 * 1024;
 
 const VOLATILE_REMOTE_CACHE_QUERY_PARAMS = new Set([
   '_t',
@@ -117,6 +119,29 @@ export interface CacheMediaFromBlobOptions {
 }
 
 type CacheMediaMetadata = NonNullable<CacheMediaFromBlobOptions['metadata']>;
+
+function isTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__);
+}
+
+function waitForIdle(timeout = DESKTOP_FILE_SAVE_IDLE_TIMEOUT_MS): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const requestIdle = (window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    }).requestIdleCallback;
+
+    if (requestIdle) {
+      requestIdle(() => resolve(), { timeout });
+      return;
+    }
+
+    window.setTimeout(resolve, 0);
+  });
+}
 
 /** 缓存条目元数据 */
 export interface CachedMedia {
@@ -273,6 +298,7 @@ class UnifiedCacheService {
   private listeners: Set<() => void> = new Set();
   private quotaExceededListeners: Set<() => void> = new Set();
   private cachedUrls: Set<string> = new Set();
+  private desktopFileSaveQueue: Promise<void> = Promise.resolve();
 
   constructor() {
     if (typeof indexedDB !== 'undefined') {
@@ -1249,12 +1275,8 @@ class UnifiedCacheService {
         normalizedOptions?.contentHash || (await calculateBlobChecksum(blob));
 
       // ===== 桌面环境特殊处理：同时保存到文件系统 =====
-      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
-        try {
-          await this.saveToTauriFileSystem(cacheUrl, blob, type, contentHash);
-        } catch (error) {
-          console.warn('[UnifiedCache] Failed to save to Tauri file system:', error);
-        }
+      if (isTauriRuntime()) {
+        this.enqueueDesktopFileSave(cacheUrl, blob, type, contentHash);
       }
 
       // 1. 将 blob 放入 Cache API（通过创建 Response）
@@ -1273,11 +1295,7 @@ class UnifiedCacheService {
 
         // 异步生成预览图（不阻塞主流程）
         // 通过 swChannelClient 发送消息到 SW 生成缩略图
-        if (
-          typeof navigator !== 'undefined' &&
-          navigator.serviceWorker &&
-          swChannelClient.isInitialized()
-        ) {
+        if (this.shouldGenerateEagerThumbnail(blob, type)) {
           // 将 Blob 转换为 ArrayBuffer 以便传递
           blob
             .arrayBuffer()
@@ -1335,6 +1353,32 @@ class UnifiedCacheService {
   /**
    * 在桌面环境中保存到 Tauri 文件系统
    */
+  private enqueueDesktopFileSave(
+    url: string,
+    blob: Blob,
+    type: CacheMediaType,
+    contentHash: string
+  ): void {
+    this.desktopFileSaveQueue = this.desktopFileSaveQueue
+      .catch(() => undefined)
+      .then(() => waitForIdle())
+      .then(() => this.saveToTauriFileSystem(url, blob, type, contentHash))
+      .catch((error) => {
+        console.warn('[UnifiedCache] Failed to save to Tauri file system:', error);
+      });
+  }
+
+  private shouldGenerateEagerThumbnail(blob: Blob, type: CacheMediaType): boolean {
+    return (
+      type === 'image' &&
+      blob.size > 0 &&
+      blob.size <= MAX_EAGER_THUMBNAIL_BYTES &&
+      typeof navigator !== 'undefined' &&
+      Boolean(navigator.serviceWorker) &&
+      swChannelClient.isInitialized()
+    );
+  }
+
   private async saveToTauriFileSystem(
     url: string,
     blob: Blob,

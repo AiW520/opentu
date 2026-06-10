@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${OPENTU_REPO:-ljquan/opentu}"
+REPO="${OPENTU_REPO:-AiW520/opentu}"
 TAG="${OPENTU_TAG:-latest}"
 TMP_DIR="$(mktemp -d)"
 
