@@ -56,15 +56,15 @@ const TTDDialogComponent = ({
   const { appState, setAppState, openDialog, closeDialog } = useDrawnix();
   const { language } = useI18n();
   const board = useBoard();
-  const { type: deviceType, isMobile } = useDeviceType();
+  const { isMobile, isTablet } = useDeviceType();
   const dialogInitialDataByType = appState.dialogInitialDataByType;
   const imageDialogInitialData =
     dialogInitialDataByType?.[DialogType.aiImageGeneration] ?? null;
   const videoDialogInitialData =
     dialogInitialDataByType?.[DialogType.aiVideoGeneration] ?? null;
 
-  // 仅手机端隐藏批量出图；桌面窄窗口/平板保持与网页版一致。
-  const showBatchTab = deviceType !== 'mobile';
+  // 移动端和平板端不显示批量出图
+  const showBatchTab = !isMobile && !isTablet;
 
   // 使用ref来防止多次并发处理
   const isProcessingRef = useRef(false);
@@ -241,7 +241,7 @@ const TTDDialogComponent = ({
       }
     });
 
-  // 手机端自动切换回单图模式
+  // 移动端/平板端自动切换回单图模式
   useEffect(() => {
     if (!showBatchTab && imageGenerationMode === 'batch') {
       setImageGenerationMode('single');
