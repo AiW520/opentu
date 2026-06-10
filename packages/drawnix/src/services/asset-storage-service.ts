@@ -310,13 +310,6 @@ class AssetStorageService {
     return this.invokeDesktopCommand<DesktopPickedMediaFile[]>('pick_media_files');
   }
 
-  async pickDesktopImageFiles(): Promise<DesktopPickedMediaFile[]> {
-    if (!isTauriEnvironment()) {
-      return [];
-    }
-    return this.invokeDesktopCommand<DesktopPickedMediaFile[]>('pick_image_files');
-  }
-
   async addDesktopLocalAssetFromPath(input: {
     path: string;
     type?: AssetType;
