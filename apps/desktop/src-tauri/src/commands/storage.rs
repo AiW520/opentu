@@ -8,10 +8,7 @@ pub fn get_local(state: State<AppState>, key: String) -> Result<Option<String>, 
         .conn
         .prepare("SELECT value FROM settings WHERE key = ?1")
         .map_err(|e| e.to_string())?;
-    let result: Option<String> = stmt
-        .query_row([&key], |row| row.get(0))
-        .ok()
-        .flatten();
+    let result: Option<String> = stmt.query_row([&key], |row| row.get(0)).ok().flatten();
     Ok(result)
 }
 

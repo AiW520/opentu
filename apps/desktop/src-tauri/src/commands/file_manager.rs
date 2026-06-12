@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 
 use crate::database::Database;
+use crate::path_grants::canonical_existing_file;
 use crate::AppState;
 
 #[derive(Debug, serde::Serialize)]
@@ -31,6 +32,10 @@ pub async fn move_file_to_media(
     conflict_strategy: Option<ConflictStrategy>,
 ) -> Result<FileOperationResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let media_root = canonical_media_root(&db)?;
+    drop(db);
+    ensure_read_allowed(&state, &source_path, &media_root)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
 
     match move_file_to_media_internal(
         &db,
@@ -54,6 +59,10 @@ pub async fn copy_file_to_media(
     file_type: Option<String>,
     conflict_strategy: Option<ConflictStrategy>,
 ) -> Result<FileOperationResult, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let media_root = canonical_media_root(&db)?;
+    drop(db);
+    ensure_read_allowed(&state, &source_path, &media_root)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
     match copy_file_to_media_internal(
@@ -179,6 +188,25 @@ fn fail_result(message: String) -> FileOperationResult {
         target_path: None,
         file_size: None,
     }
+}
+
+fn canonical_media_root(db: &Database) -> Result<PathBuf, String> {
+    db.media_root
+        .canonicalize()
+        .map_err(|error| format!("媒体目录不可访问: {}", error))
+}
+
+fn ensure_read_allowed(
+    state: &State<'_, AppState>,
+    source_path: &str,
+    media_root: &Path,
+) -> Result<(), String> {
+    let source = canonical_existing_file(Path::new(source_path))?;
+    let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+    if grants.allows_read_file(&source, media_root) {
+        return Ok(());
+    }
+    Err("源文件未经过用户授权".to_string())
 }
 
 fn move_file_to_media_internal(

@@ -2511,25 +2511,31 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                     }
                   );
 
-            addAsset(
-              normalizedFile,
-              AssetType.IMAGE,
-              AssetSource.LOCAL,
-              normalizedFile.name
-            ).catch((err) => {
-              console.warn('[AIInputBar] Failed to add asset to library:', err);
-            });
+            try {
+              const addedAsset = await addAsset(
+                normalizedFile,
+                AssetType.IMAGE,
+                AssetSource.LOCAL,
+                normalizedFile.name
+              );
+              newContent.push(await assetToSelectedContent(addedAsset));
+            } catch (assetError) {
+              console.warn(
+                '[AIInputBar] Failed to add local image to asset library, falling back to inline image:',
+                assetError
+              );
 
-            const { url, width, height } = await fileToBase64WithDimensions(
-              normalizedFile
-            );
-            newContent.push({
-              type: 'image',
-              url,
-              name: normalizedFile.name || `上传图片 ${index + 1}`,
-              width: width || undefined,
-              height: height || undefined,
-            });
+              const { url, width, height } = await fileToBase64WithDimensions(
+                normalizedFile
+              );
+              newContent.push({
+                type: 'image',
+                url,
+                name: normalizedFile.name || `上传图片 ${index + 1}`,
+                width: width || undefined,
+                height: height || undefined,
+              });
+            }
           } catch (error) {
             console.error('[AIInputBar] Failed to import local image:', error);
             MessagePlugin.error(localImageMessages.loadFailed);
@@ -2540,7 +2546,12 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           setUploadedContent((prev) => [...prev, ...newContent]);
         }
       },
-      [addAsset, fileToBase64WithDimensions, localImageMessages]
+      [
+        addAsset,
+        assetToSelectedContent,
+        fileToBase64WithDimensions,
+        localImageMessages,
+      ]
     );
 
     // 处理文件选择

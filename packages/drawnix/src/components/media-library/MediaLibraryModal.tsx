@@ -10,20 +10,30 @@ import { useAssets } from '../../contexts/AssetContext';
 import { MediaLibraryGrid } from './MediaLibraryGrid';
 import { MediaLibraryInspector } from './MediaLibraryInspector';
 import { WinBoxWindow } from '../winbox/WinBoxWindow';
-import type {
-  MediaLibraryModalProps,
-  Asset,
-} from '../../types/asset.types';
+import type { MediaLibraryModalProps, Asset } from '../../types/asset.types';
 import { AssetType, AssetSource, SelectionMode } from '../../types/asset.types';
 import { useDrawnix } from '../../hooks/use-drawnix';
-import { removeElementsByAssetIds, removeElementsByAssetUrls, isCacheUrl } from '../../utils/asset-cleanup';
+import {
+  removeElementsByAssetIds,
+  removeElementsByAssetUrls,
+  isCacheUrl,
+} from '../../utils/asset-cleanup';
 import { isZipFile, extractMediaFromZip } from '../../utils/zip-utils';
-import { buildAssetDownloadItem, smartDownload } from '../../utils/download-utils';
+import {
+  buildAssetDownloadItem,
+  smartDownload,
+} from '../../utils/download-utils';
 import { assetStorageService } from '../../services/asset-storage-service';
-import { getNativeFilePath, isTauriEnvironment } from '../../utils/desktop-asset-url';
+import {
+  getNativeFilePath,
+  isTauriEnvironment,
+} from '../../utils/desktop-asset-url';
 import './MediaLibraryModal.scss';
 
-function getAssetTypeFromDesktopFile(fileType: string, mimeType: string): AssetType | null {
+function getAssetTypeFromDesktopFile(
+  fileType: string,
+  mimeType: string
+): AssetType | null {
   const normalizedFileType = fileType.toLowerCase();
   if (normalizedFileType === 'image' || mimeType.startsWith('image/')) {
     return AssetType.IMAGE;
@@ -63,9 +73,9 @@ export function MediaLibraryModal({
 
   const { board } = useDrawnix();
 
-  const [localSelectedAssetId, setLocalSelectedAssetId] = useState<string | null>(
-    null,
-  );
+  const [localSelectedAssetId, setLocalSelectedAssetId] = useState<
+    string | null
+  >(null);
   const [showMobileInspector, setShowMobileInspector] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -128,7 +138,7 @@ export function MediaLibraryModal({
       setSelectedAssetId(id);
       // 移动端不再自动弹出详情抽屉，用户可以通过双击预览或点击详情按钮
     },
-    [setSelectedAssetId],
+    [setSelectedAssetId]
   );
 
   // 关闭移动端检查器
@@ -155,7 +165,7 @@ export function MediaLibraryModal({
         }
       }
     },
-    [onClose, onSelect],
+    [onClose, onSelect]
   );
 
   // 处理"使用"按钮点击
@@ -177,7 +187,7 @@ export function MediaLibraryModal({
         }
       }
     },
-    [onClose, onSelect],
+    [onClose, onSelect]
   );
 
   // 处理批量使用
@@ -202,7 +212,7 @@ export function MediaLibraryModal({
         }
       }
     },
-    [onClose, onSelectMultiple],
+    [onClose, onSelectMultiple]
   );
 
   const handleSelectionChange = useCallback(
@@ -246,12 +256,15 @@ export function MediaLibraryModal({
 
         if (!isImage && !isVideo && !isAudio) {
           console.warn(`[MediaLibrary] Invalid file type: ${file.type}`);
-          MessagePlugin.warning(`文件 "${file.name}" 不是有效的图片、视频或音频格式`);
+          MessagePlugin.warning(
+            `文件 "${file.name}" 不是有效的图片、视频或音频格式`
+          );
           continue;
         }
 
         const maxSize = 100 * 1024 * 1024;
-        const canUseNativePath = isTauriEnvironment() && !!getNativeFilePath(file);
+        const canUseNativePath =
+          isTauriEnvironment() && !!getNativeFilePath(file);
         if (file.size > maxSize) {
           if (canUseNativePath) {
             validFiles.push(file);
@@ -279,13 +292,21 @@ export function MediaLibraryModal({
 
           // 上传解压出的文件
           for (const extracted of result.files) {
-            const type = extracted.type === 'image' ? AssetType.IMAGE : AssetType.VIDEO;
-            await addAsset(extracted.blob, type, AssetSource.LOCAL, extracted.name);
+            const type =
+              extracted.type === 'image' ? AssetType.IMAGE : AssetType.VIDEO;
+            await addAsset(
+              extracted.blob,
+              type,
+              AssetSource.LOCAL,
+              extracted.name
+            );
             zipExtractedCount++;
           }
 
           if (result.skippedCount > 0) {
-            MessagePlugin.info(`"${zipFile.name}" 中跳过了 ${result.skippedCount} 个不支持的文件`);
+            MessagePlugin.info(
+              `"${zipFile.name}" 中跳过了 ${result.skippedCount} 个不支持的文件`
+            );
           }
         } catch (error) {
           console.error('[MediaLibrary] ZIP extraction error:', error);
@@ -298,7 +319,11 @@ export function MediaLibraryModal({
         for (const file of validFiles) {
           const isImage = file.type.startsWith('image/');
           const isAudio = file.type.startsWith('audio/');
-          const type = isImage ? AssetType.IMAGE : isAudio ? AssetType.AUDIO : AssetType.VIDEO;
+          const type = isImage
+            ? AssetType.IMAGE
+            : isAudio
+            ? AssetType.AUDIO
+            : AssetType.VIDEO;
           await addAsset(file, type, AssetSource.LOCAL);
         }
 
@@ -312,7 +337,7 @@ export function MediaLibraryModal({
         console.error('[MediaLibrary] File upload error:', error);
       }
     },
-    [addAsset, loadAssets],
+    [addAsset, loadAssets]
   );
 
   const handleDesktopNativeUpload = useCallback(async () => {
@@ -327,7 +352,10 @@ export function MediaLibraryModal({
       let failedCount = 0;
       for (const file of files) {
         try {
-          const type = getAssetTypeFromDesktopFile(file.fileType, file.mimeType);
+          const type = getAssetTypeFromDesktopFile(
+            file.fileType,
+            file.mimeType
+          );
           if (!type) {
             skippedCount++;
             continue;
@@ -342,7 +370,11 @@ export function MediaLibraryModal({
           importedCount++;
         } catch (error) {
           failedCount++;
-          console.error('[MediaLibrary] Desktop native asset import failed:', file.path, error);
+          console.error('[MediaLibrary] Desktop native asset import failed:', {
+            name: file.name,
+            type: file.fileType,
+            error,
+          });
         }
       }
 
@@ -381,7 +413,7 @@ export function MediaLibraryModal({
       // 清空input值，允许重复上传同一文件
       event.target.value = '';
     },
-    [handleFileUpload],
+    [handleFileUpload]
   );
 
   // 获取当前选中的资产
@@ -392,25 +424,28 @@ export function MediaLibraryModal({
   const showSelectButton = mode === 'SELECT' && !!onSelect;
 
   // 处理删除素材（同时删除画布上使用该素材的元素）
-  const handleRemoveAsset = useCallback(async (assetId: string) => {
-    // 查找素材信息
-    const asset = assets.find(a => a.id === assetId);
+  const handleRemoveAsset = useCallback(
+    async (assetId: string) => {
+      // 查找素材信息
+      const asset = assets.find((a) => a.id === assetId);
 
-    // 删除画布上使用该素材的元素
-    if (board && asset) {
-      // 缓存类型素材使用 URL 匹配，其他类型使用 ID 匹配
-      const isCacheAsset = isCacheUrl(asset.url);
+      // 删除画布上使用该素材的元素
+      if (board && asset) {
+        // 缓存类型素材使用 URL 匹配，其他类型使用 ID 匹配
+        const isCacheAsset = isCacheUrl(asset.url);
 
-      if (isCacheAsset) {
-        removeElementsByAssetUrls(board, asset.dedupeUrls || [asset.url]);
-      } else {
-        removeElementsByAssetIds(board, asset.dedupeAssetIds || [assetId]);
+        if (isCacheAsset) {
+          removeElementsByAssetUrls(board, asset.dedupeUrls || [asset.url]);
+        } else {
+          removeElementsByAssetIds(board, asset.dedupeAssetIds || [assetId]);
+        }
       }
-    }
 
-    // 然后删除素材本身
-    await removeAsset(assetId);
-  }, [board, removeAsset, assets]);
+      // 然后删除素材本身
+      await removeAsset(assetId);
+    },
+    [board, removeAsset, assets]
+  );
 
   return (
     <>

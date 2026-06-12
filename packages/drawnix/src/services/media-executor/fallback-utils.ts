@@ -22,6 +22,7 @@ import {
 } from '../../utils/virtual-media-url';
 import {
   convertLocalFilePathToAssetUrl,
+  isDesktopAssetUrl,
   isTauriEnvironment,
 } from '../../utils/desktop-asset-url';
 import {
@@ -68,7 +69,11 @@ export async function ensureBase64ForAI(
     const blob = await res.blob();
     return blobToBase64Under1MB(blob);
   }
-  if (value.startsWith('http://') || value.startsWith('https://')) {
+  if (
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    isDesktopAssetUrl(value)
+  ) {
     const res = await fetch(value, { signal, referrerPolicy: 'no-referrer' });
     if (!res.ok)
       throw new Error(`Failed to fetch reference image: ${res.status}`);

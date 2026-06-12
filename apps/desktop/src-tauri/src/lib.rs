@@ -1,12 +1,15 @@
 mod commands;
 mod database;
+mod path_grants;
 
 use database::Database;
+use path_grants::PathGrantStore;
 use std::sync::Mutex;
 use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<Database>,
+    pub path_grants: Mutex<PathGrantStore>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,7 +23,10 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let db = Database::new(app.handle())?;
-            app.manage(AppState { db: Mutex::new(db) });
+            app.manage(AppState {
+                db: Mutex::new(db),
+                path_grants: Mutex::new(PathGrantStore::default()),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

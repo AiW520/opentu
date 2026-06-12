@@ -45,13 +45,16 @@ export function initializeVirtualUrlInterceptor(): void {
         });
         mutation.removedNodes.forEach((node) => {
           if (node instanceof Element) {
-            revokeElementObjectUrls(node);
+            revokeElementObjectUrl(node);
           }
         });
         continue;
       }
 
-      if (mutation.type === 'attributes' && mutation.target instanceof Element) {
+      if (
+        mutation.type === 'attributes' &&
+        mutation.target instanceof Element
+      ) {
         handleMediaElement(mutation.target);
       }
     }
@@ -77,10 +80,12 @@ function patchFetchForVirtualMedia(): void {
       typeof input === 'string'
         ? input
         : input instanceof URL
-          ? input.toString()
-          : input.url;
+        ? input.toString()
+        : input.url;
     const method =
-      init?.method || (input instanceof Request ? input.method : undefined) || 'GET';
+      init?.method ||
+      (input instanceof Request ? input.method : undefined) ||
+      'GET';
 
     if (method.toUpperCase() === 'GET' && isVirtualMediaUrl(url)) {
       const blob = await unifiedCacheService.getCachedBlob(url);
@@ -123,13 +128,19 @@ function handleMediaElement(element: Element): void {
 
   const src = element.getAttribute('src') || '';
   const poster =
-    element instanceof HTMLVideoElement ? element.getAttribute('poster') || '' : '';
+    element instanceof HTMLVideoElement
+      ? element.getAttribute('poster') || ''
+      : '';
 
   if (src && isVirtualMediaUrl(src)) {
     void replaceElementUrl(element, src, 'src');
   }
 
-  if (poster && isVirtualMediaUrl(poster) && element instanceof HTMLVideoElement) {
+  if (
+    poster &&
+    isVirtualMediaUrl(poster) &&
+    element instanceof HTMLVideoElement
+  ) {
     void replaceElementUrl(element, poster, 'poster');
   }
 }
@@ -153,13 +164,17 @@ async function replaceElementUrl(
       window.setTimeout(() => revokeElementObjectUrl(element), 10000);
     };
     element.addEventListener('load', revokeLater, { once: true });
-    element.addEventListener('error', () => revokeElementObjectUrl(element), { once: true });
+    element.addEventListener('error', () => revokeElementObjectUrl(element), {
+      once: true,
+    });
   } else if (element instanceof HTMLMediaElement) {
     element.load();
     element.addEventListener('emptied', () => revokeElementObjectUrl(element), {
       once: true,
     });
-    element.addEventListener('error', () => revokeElementObjectUrl(element), { once: true });
+    element.addEventListener('error', () => revokeElementObjectUrl(element), {
+      once: true,
+    });
   }
 }
 

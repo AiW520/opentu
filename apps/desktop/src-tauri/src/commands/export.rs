@@ -27,6 +27,14 @@ pub async fn show_save_dialog(
         .add_filter("All", &["*"])
         .set_file_name(default_path.to_string_lossy().to_string())
         .blocking_save_file();
+    if let Some(path) = file_path.as_ref() {
+        let path = path
+            .clone()
+            .into_path()
+            .map_err(|e| format!("无法解析授权保存路径: {}", e))?;
+        let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+        grants.grant_write_file(&path)?;
+    }
 
     Ok(file_path.map(|p| p.to_string()))
 }

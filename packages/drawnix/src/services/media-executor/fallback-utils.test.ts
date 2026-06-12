@@ -6,7 +6,9 @@ const isCached = vi.fn(async (url: string) => cachedUrls.has(url));
 const calculateBlobChecksum = vi.fn(async () => 'a'.repeat(64));
 
 vi.mock('@aitu/utils', async () => {
-  const actual = await vi.importActual<typeof import('@aitu/utils')>('@aitu/utils');
+  const actual = await vi.importActual<typeof import('@aitu/utils')>(
+    '@aitu/utils'
+  );
   return {
     ...actual,
     calculateBlobChecksum,
@@ -33,13 +35,11 @@ describe('cacheRemoteUrl', () => {
   });
 
   it('caches raw base64 image payloads as content-addressed local URLs', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(new Blob(['png-binary'], { type: 'image/png' }), {
-          status: 200,
-        })
-      );
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Blob(['png-binary'], { type: 'image/png' }), {
+        status: 200,
+      })
+    );
 
     vi.stubGlobal('fetch', fetchMock);
 
@@ -52,7 +52,9 @@ describe('cacheRemoteUrl', () => {
       'png'
     );
 
-    expect(result).toMatch(/^\/__aitu_cache__\/image\/content-[0-9a-f]{64}\.png$/);
+    expect(result).toMatch(
+      /^\/__aitu_cache__\/image\/content-[0-9a-f]{64}\.png$/
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/^data:image\/png;base64,/)
     );
@@ -67,13 +69,12 @@ describe('cacheRemoteUrl', () => {
   });
 
   it('reuses the same cached file for identical base64 payloads across tasks', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockImplementation(async () =>
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
         new Response(new Blob(['same-binary'], { type: 'image/png' }), {
           status: 200,
         })
-      );
+    );
 
     vi.stubGlobal('fetch', fetchMock);
 
@@ -107,19 +108,22 @@ describe('cacheRemoteUrl', () => {
   });
 
   it('caches remote https audio urls while keeping original URLs', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(new Blob(['audio-binary'], { type: 'audio/mpeg' }), {
-          status: 200,
-        })
-      );
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Blob(['audio-binary'], { type: 'audio/mpeg' }), {
+        status: 200,
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const { cacheRemoteUrl } = await import('./fallback-utils');
     const remoteUrl = 'https://cdn.example.com/audio/task-123.mp3';
 
-    const result = await cacheRemoteUrl(remoteUrl, 'task-audio', 'audio', 'mp3');
+    const result = await cacheRemoteUrl(
+      remoteUrl,
+      'task-audio',
+      'audio',
+      'mp3'
+    );
 
     expect(result).toBe(remoteUrl);
     expect(fetchMock).toHaveBeenCalledWith(remoteUrl, {
@@ -141,13 +145,11 @@ describe('cacheRemoteUrl', () => {
   });
 
   it('caches playback-only remote audio urls while keeping original URLs', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(new Blob(['audio-binary'], { type: 'audio/mpeg' }), {
-          status: 200,
-        })
-      );
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Blob(['audio-binary'], { type: 'audio/mpeg' }), {
+        status: 200,
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const { cacheRemoteUrl } = await import('./fallback-utils');
@@ -177,13 +179,11 @@ describe('cacheRemoteUrl', () => {
   });
 
   it('caches force-remote cover images while keeping original URLs', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(new Blob(['cover-binary'], { type: 'image/jpeg' }), {
-          status: 200,
-        })
-      );
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Blob(['cover-binary'], { type: 'image/jpeg' }), {
+        status: 200,
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const { cacheRemoteUrl } = await import('./fallback-utils');
@@ -213,15 +213,15 @@ describe('cacheRemoteUrl', () => {
   });
 
   it('keeps the original remote URL when cache write cannot be verified', async () => {
-    cacheMediaFromBlob.mockResolvedValueOnce('https://cdn.example.com/audio/cover.jpg');
+    cacheMediaFromBlob.mockResolvedValueOnce(
+      'https://cdn.example.com/audio/cover.jpg'
+    );
 
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(new Blob(['cover-binary'], { type: 'image/jpeg' }), {
-          status: 200,
-        })
-      );
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Blob(['cover-binary'], { type: 'image/jpeg' }), {
+        status: 200,
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const { cacheRemoteUrl } = await import('./fallback-utils');
@@ -257,12 +257,68 @@ describe('cacheRemoteUrl', () => {
     const { cacheRemoteUrl } = await import('./fallback-utils');
     const remoteUrl = 'http://cdn.example.com/video/task-123.mp4';
 
-    const result = await cacheRemoteUrl(remoteUrl, 'task-video', 'video', 'mp4');
+    const result = await cacheRemoteUrl(
+      remoteUrl,
+      'task-video',
+      'video',
+      'mp4'
+    );
 
     expect(result).toBe(remoteUrl);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(cacheMediaFromBlob).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
+  });
+});
+
+describe('ensureBase64ForAI', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('loads desktop asset urls before sending image references to providers', async () => {
+    class TestFileReader {
+      result: string | ArrayBuffer | null = null;
+      onload: (() => void) | null = null;
+      onerror: ((error: unknown) => void) | null = null;
+
+      readAsDataURL(blob: Blob) {
+        blob
+          .arrayBuffer()
+          .then((buffer) => {
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (const byte of bytes) {
+              binary += String.fromCharCode(byte);
+            }
+            this.result = `data:${blob.type};base64,${btoa(binary)}`;
+            this.onload?.();
+          })
+          .catch((error) => this.onerror?.(error));
+      }
+    }
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Blob(['desktop-image'], { type: 'image/png' }), {
+        status: 200,
+      })
+    );
+    vi.stubGlobal('window', {
+      location: { origin: 'http://localhost' },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('FileReader', TestFileReader);
+
+    const { ensureBase64ForAI } = await import('./fallback-utils');
+    const url = 'opentu-asset://localhost/C%3A%5Cimages%5Cref.png';
+
+    const result = await ensureBase64ForAI({ type: 'url', value: url });
+
+    expect(fetchMock).toHaveBeenCalledWith(url, {
+      signal: undefined,
+      referrerPolicy: 'no-referrer',
+    });
+    expect(result).toBe('data:image/png;base64,ZGVza3RvcC1pbWFnZQ==');
   });
 });

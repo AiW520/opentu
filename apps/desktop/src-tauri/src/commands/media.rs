@@ -1,3 +1,4 @@
+use crate::path_grants::{canonical_existing_file, canonical_write_file};
 use crate::AppState;
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
@@ -79,6 +80,12 @@ pub fn get_media_root_path(state: State<AppState>) -> Result<String, String> {
 #[tauri::command]
 pub fn set_media_root_path(state: State<AppState>, path: String) -> Result<String, String> {
     let new_path = PathBuf::from(&path);
+    {
+        let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+        if !grants.allows_directory(&new_path) {
+            return Err("请先通过目录选择器选择媒体目录".to_string());
+        }
+    }
     let mut db = state.db.lock().map_err(|e| e.to_string())?;
     db.set_media_root(new_path).map_err(|e| e.to_string())?;
     Ok(db.media_root.to_string_lossy().to_string())
@@ -96,6 +103,15 @@ pub async fn pick_media_folder(app: tauri::AppHandle) -> Result<Option<String>, 
     use tauri_plugin_dialog::DialogExt;
 
     let folder_path = app.dialog().file().blocking_pick_folder();
+    if let Some(path) = folder_path.as_ref() {
+        let path = path
+            .clone()
+            .into_path()
+            .map_err(|e| format!("无法解析授权目录: {}", e))?;
+        let state = app.state::<AppState>();
+        let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+        grants.grant_directory(&path)?;
+    }
 
     Ok(folder_path.map(|p| p.to_string()))
 }
@@ -128,6 +144,11 @@ pub async fn pick_media_files(app: tauri::AppHandle) -> Result<Vec<PickedMediaFi
         if !path.is_file() {
             continue;
         }
+        {
+            let state = app.state::<AppState>();
+            let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+            grants.grant_read_file(&path)?;
+        }
         let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
         let file_name = path
             .file_name()
@@ -159,20 +180,39 @@ pub async fn pick_save_location(
         .file()
         .set_file_name(&default_name)
         .blocking_save_file();
+    if let Some(path) = file_path.as_ref() {
+        let path = path
+            .clone()
+            .into_path()
+            .map_err(|e| format!("无法解析授权保存路径: {}", e))?;
+        let state = app.state::<AppState>();
+        let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+        grants.grant_write_file(&path)?;
+    }
 
     Ok(file_path.map(|p| p.to_string()))
 }
 
 #[tauri::command]
-pub fn write_file_to_path(save_path: String, buffer: Vec<u8>) -> Result<(), String> {
+pub fn write_file_to_path(
+    state: State<'_, AppState>,
+    save_path: String,
+    buffer: Vec<u8>,
+) -> Result<(), String> {
     let path = PathBuf::from(save_path);
+    ensure_write_allowed(&state, &path)?;
     validate_save_path(&path)?;
     fs::write(&path, buffer).map_err(|e| format!("无法写入文件: {}", e))
 }
 
 #[tauri::command]
-pub async fn download_url_to_path(url: String, save_path: String) -> Result<(), String> {
+pub async fn download_url_to_path(
+    state: State<'_, AppState>,
+    url: String,
+    save_path: String,
+) -> Result<(), String> {
     let path = PathBuf::from(save_path);
+    ensure_write_allowed(&state, &path)?;
     validate_save_path(&path)?;
     let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("无效下载地址: {}", e))?;
     if !matches!(parsed_url.scheme(), "http" | "https") {
@@ -327,6 +367,7 @@ pub fn copy_media_file_to_path(
     save_path: String,
 ) -> Result<(), String> {
     let target_path = PathBuf::from(save_path);
+    ensure_write_allowed(&state, &target_path)?;
     validate_save_path(&target_path)?;
 
     let media_root = {
@@ -373,6 +414,10 @@ pub fn get_cached_media_file(
     let file_path = resolve_media_file_path(&media_root, &file_name, file_type.as_deref())?;
 
     if file_path.exists() {
+        let size = fs::metadata(&file_path).map_err(|e| e.to_string())?.len();
+        if size > MAX_FULL_RESPONSE_BYTES {
+            return Err("媒体文件过大，不能通过 base64 缓存接口读取".to_string());
+        }
         let data = fs::read(&file_path).map_err(|e| e.to_string())?;
         Ok(general_purpose::STANDARD.encode(&data))
     } else {
@@ -392,6 +437,8 @@ pub fn import_local_asset(
     mime_type: Option<String>,
 ) -> Result<AssetImportResult, String> {
     let source = validate_source_file(&source_path)?;
+    let source = ensure_read_allowed(&state, source)?;
+    let source = source.as_path();
     let metadata = fs::metadata(source).map_err(|e| format!("无法读取源文件: {}", e))?;
     let source_name = source
         .file_name()
@@ -406,6 +453,9 @@ pub fn import_local_asset(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(inferred_file_type.as_str()),
     );
+    if !is_supported_import_media(&normalized_file_type, &detected_mime_type, source) {
+        return Err("不支持的媒体文件类型".to_string());
+    }
 
     let media_root = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -505,6 +555,36 @@ fn validate_save_path(path: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn canonical_media_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {
+    let media_root = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.media_root.clone()
+    };
+    media_root
+        .canonicalize()
+        .map_err(|e| format!("媒体目录不可访问: {}", e))
+}
+
+fn ensure_write_allowed(state: &State<'_, AppState>, path: &Path) -> Result<(), String> {
+    let media_root = canonical_media_root(state)?;
+    let canonical_path = canonical_write_file(path)?;
+    let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+    if grants.allows_write_file(&canonical_path, &media_root) {
+        return Ok(());
+    }
+    Err("保存路径未经过用户授权".to_string())
+}
+
+fn ensure_read_allowed(state: &State<'_, AppState>, path: &Path) -> Result<PathBuf, String> {
+    let media_root = canonical_media_root(state)?;
+    let canonical_path = canonical_existing_file(path)?;
+    let mut grants = state.path_grants.lock().map_err(|e| e.to_string())?;
+    if grants.allows_read_file(&canonical_path, &media_root) {
+        return Ok(canonical_path);
+    }
+    Err("源文件未经过用户授权".to_string())
 }
 
 fn copy_file_streaming(source: &Path, target: &Path) -> Result<(), String> {
@@ -813,6 +893,35 @@ fn infer_file_type(mime_type: &str, path: &Path) -> String {
     "image".to_string()
 }
 
+fn is_supported_import_media(file_type: &str, mime_type: &str, path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match file_type {
+        "image" => {
+            mime_type.starts_with("image/")
+                && matches!(
+                    extension.as_str(),
+                    "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg"
+                )
+        }
+        "video" => {
+            mime_type.starts_with("video/")
+                && matches!(extension.as_str(), "mp4" | "webm" | "mov" | "m4v")
+        }
+        "audio" => {
+            mime_type.starts_with("audio/")
+                && matches!(
+                    extension.as_str(),
+                    "mp3" | "wav" | "ogg" | "m4a" | "aac" | "flac"
+                )
+        }
+        "archive" => mime_type == "application/zip" && extension == "zip",
+        _ => false,
+    }
+}
+
 fn normalize_media_type(file_type: &str) -> String {
     match file_type.to_ascii_lowercase().as_str() {
         "video" => "video",
@@ -887,6 +996,13 @@ fn serve_opentu_asset(
         })?;
         db.media_root.clone()
     };
+    serve_opentu_asset_from_root(&media_root, request)
+}
+
+fn serve_opentu_asset_from_root(
+    media_root: &Path,
+    request: tauri::http::Request<Vec<u8>>,
+) -> Result<tauri::http::Response<Cow<'static, [u8]>>, (tauri::http::StatusCode, String)> {
     let media_root = media_root.canonicalize().map_err(|e| {
         (
             tauri::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1330,5 +1446,176 @@ mod tests {
             normalize_decoded_asset_path("/D:\\OpenTu\\图片\\demo.png".to_string()),
             "D:\\OpenTu\\图片\\demo.png"
         );
+    }
+
+    #[test]
+    fn parses_byte_range_request() {
+        assert_eq!(parse_single_range("bytes=10-19", 100).unwrap(), (10, 19));
+    }
+
+    #[test]
+    fn parses_suffix_byte_range_request() {
+        assert_eq!(parse_single_range("bytes=-10", 100).unwrap(), (90, 99));
+    }
+
+    #[test]
+    fn clamps_open_ended_range_to_memory_limit() {
+        assert_eq!(
+            parse_single_range("bytes=5-", MAX_RANGE_BYTES * 2).unwrap(),
+            (5, 5 + MAX_RANGE_BYTES - 1)
+        );
+    }
+
+    #[test]
+    fn rejects_unsatisfiable_range_request() {
+        let error = parse_single_range("bytes=100-120", 100).unwrap_err();
+        assert_eq!(error.0, tauri::http::StatusCode::RANGE_NOT_SATISFIABLE);
+    }
+
+    fn temp_media_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "opentu-asset-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            chrono::Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn percent_encode_path(path: &Path) -> String {
+        path.to_string_lossy()
+            .bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (byte as char).to_string()
+                }
+                _ => format!("%{byte:02X}"),
+            })
+            .collect()
+    }
+
+    fn asset_request(
+        method: tauri::http::Method,
+        path: &Path,
+        range: Option<&str>,
+    ) -> tauri::http::Request<Vec<u8>> {
+        let uri = format!("opentu-asset://localhost/{}", percent_encode_path(path));
+        let mut builder = tauri::http::Request::builder().method(method).uri(uri);
+        if let Some(range) = range {
+            builder = builder.header(tauri::http::header::RANGE, range);
+        }
+        builder.body(Vec::new()).unwrap()
+    }
+
+    #[test]
+    fn asset_full_response_returns_small_file() {
+        let root = temp_media_root("full");
+        let file_path = root.join("small.png");
+        std::fs::write(&file_path, b"small-body").unwrap();
+
+        let response = serve_opentu_asset_from_root(
+            &root,
+            asset_request(tauri::http::Method::GET, &file_path, None),
+        )
+        .unwrap();
+
+        assert_eq!(response.status(), tauri::http::StatusCode::OK);
+        assert_eq!(response.body().as_ref(), b"small-body");
+        assert_eq!(
+            response.headers().get(tauri::http::header::ACCEPT_RANGES),
+            Some(&tauri::http::HeaderValue::from_static("bytes"))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn asset_head_response_advertises_range_support() {
+        let root = temp_media_root("head");
+        let file_path = root.join("head.png");
+        std::fs::write(&file_path, b"head-body").unwrap();
+
+        let response = serve_opentu_asset_from_root(
+            &root,
+            asset_request(tauri::http::Method::HEAD, &file_path, None),
+        )
+        .unwrap();
+
+        assert_eq!(response.status(), tauri::http::StatusCode::OK);
+        assert!(response.body().is_empty());
+        assert_eq!(
+            response.headers().get(tauri::http::header::CONTENT_LENGTH),
+            Some(&tauri::http::HeaderValue::from_static("9"))
+        );
+        assert_eq!(
+            response.headers().get(tauri::http::header::ACCEPT_RANGES),
+            Some(&tauri::http::HeaderValue::from_static("bytes"))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn asset_range_response_returns_partial_content() {
+        let root = temp_media_root("range");
+        let file_path = root.join("range.png");
+        std::fs::write(&file_path, b"0123456789abcdef").unwrap();
+
+        let response = serve_opentu_asset_from_root(
+            &root,
+            asset_request(tauri::http::Method::GET, &file_path, Some("bytes=4-7")),
+        )
+        .unwrap();
+
+        assert_eq!(response.status(), tauri::http::StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.body().as_ref(), b"4567");
+        assert_eq!(
+            response.headers().get(tauri::http::header::CONTENT_RANGE),
+            Some(&tauri::http::HeaderValue::from_static("bytes 4-7/16"))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn asset_invalid_range_returns_416() {
+        let root = temp_media_root("invalid-range");
+        let file_path = root.join("range.png");
+        std::fs::write(&file_path, b"0123456789abcdef").unwrap();
+
+        let error = serve_opentu_asset_from_root(
+            &root,
+            asset_request(tauri::http::Method::GET, &file_path, Some("bytes=100-120")),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.0, tauri::http::StatusCode::RANGE_NOT_SATISFIABLE);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn asset_large_non_range_response_is_rejected() {
+        let root = temp_media_root("large");
+        let file_path = root.join("large.png");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&file_path)
+            .unwrap();
+        file.set_len(MAX_FULL_RESPONSE_BYTES + 1).unwrap();
+
+        let error = serve_opentu_asset_from_root(
+            &root,
+            asset_request(tauri::http::Method::GET, &file_path, None),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.0, tauri::http::StatusCode::PAYLOAD_TOO_LARGE);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

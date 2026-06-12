@@ -9,10 +9,6 @@ export function isTauriEnvironment(): boolean {
 export function convertLocalFilePathToAssetUrl(filePath: string): string {
   if (isTauriEnvironment()) {
     const encodedPath = encodeURIComponent(filePath);
-    if (navigator.platform.toLowerCase().includes('win')) {
-      return `http://${OPENTU_ASSET_PROTOCOL}.localhost/${encodedPath}`;
-    }
-
     return `${OPENTU_ASSET_PROTOCOL}://localhost/${encodedPath}`;
   }
 
@@ -35,7 +31,9 @@ export function isDesktopAssetUrl(url: string | undefined | null): boolean {
   }
 }
 
-export function getAssetRuntimeUrl(asset: Pick<Asset, 'url' | 'filePath'>): string {
+export function getAssetRuntimeUrl(
+  asset: Pick<Asset, 'url' | 'filePath'>
+): string {
   if (asset.filePath && isTauriEnvironment()) {
     return convertLocalFilePathToAssetUrl(asset.filePath);
   }

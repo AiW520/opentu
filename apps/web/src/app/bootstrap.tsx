@@ -33,8 +33,12 @@ const swQueryParam =
 const isServiceWorkerExplicitlyDisabled = swQueryParam === '0';
 const hasServiceWorkerSupport =
   typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+const isTauriDesktopRuntime =
+  typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const shouldUseServiceWorker =
-  hasServiceWorkerSupport && !isServiceWorkerExplicitlyDisabled;
+  hasServiceWorkerSupport &&
+  !isServiceWorkerExplicitlyDisabled &&
+  !isTauriDesktopRuntime;
 
 // ===== 控制台日志捕获（尽早初始化，确保默认 console 被改写） =====
 // 必须在其他业务代码之前执行，否则后续工具（如 rrweb）可能先改写 console 导致捕获失效
@@ -339,10 +343,7 @@ if (typeof window !== 'undefined') {
   });
 }
 
-if (
-  hasServiceWorkerSupport &&
-  isServiceWorkerExplicitlyDisabled
-) {
+if (hasServiceWorkerSupport && isServiceWorkerExplicitlyDisabled) {
   cleanupDisabledServiceWorker();
 }
 
