@@ -36,9 +36,10 @@ export function isInternalLibraryExcludedCache(item: {
  * Validate Asset Name
  * 验证素材名称
  */
-export function validateAssetName(
-  name: string,
-): { valid: boolean; error?: string } {
+export function validateAssetName(name: string): {
+  valid: boolean;
+  error?: string;
+} {
   if (!name || name.trim().length === 0) {
     return { valid: false, error: '素材名称不能为空' };
   }
@@ -55,9 +56,10 @@ export function validateAssetName(
  * Validate MIME Type
  * 验证MIME类型
  */
-export function validateMimeType(
-  mimeType: string,
-): { valid: boolean; error?: string } {
+export function validateMimeType(mimeType: string): {
+  valid: boolean;
+  error?: string;
+} {
   const allowedTypes = [
     ...ASSET_CONSTANTS.ALLOWED_IMAGE_TYPES,
     ...ASSET_CONSTANTS.ALLOWED_VIDEO_TYPES,
@@ -88,21 +90,13 @@ function normalizeSearchText(value: string | undefined): string {
   return value?.trim().toLowerCase() || '';
 }
 
-/**
- * Match Asset Search Query
- * 按标题/提示词模糊匹配素材搜索关键词
- */
-export function matchesAssetSearchQuery(
-  asset: Asset,
-  searchQuery: string | undefined,
-): boolean {
-  const tokens = normalizeSearchText(searchQuery).split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) {
-    return true;
-  }
+function tokenizeSearchQuery(searchQuery: string | undefined): string[] {
+  return normalizeSearchText(searchQuery).split(/\s+/).filter(Boolean);
+}
 
+function getAssetSearchableText(asset: Asset): string {
   const searchableAsset = asset as SearchableAsset;
-  const searchableText = [
+  return [
     searchableAsset.name,
     searchableAsset.title,
     searchableAsset.prompt,
@@ -112,8 +106,26 @@ export function matchesAssetSearchQuery(
     .map(normalizeSearchText)
     .filter(Boolean)
     .join(' ');
+}
 
+function assetMatchesSearchTokens(asset: Asset, tokens: string[]): boolean {
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  const searchableText = getAssetSearchableText(asset);
   return tokens.every((token) => searchableText.includes(token));
+}
+
+/**
+ * Match Asset Search Query
+ * 按标题/提示词模糊匹配素材搜索关键词
+ */
+export function matchesAssetSearchQuery(
+  asset: Asset,
+  searchQuery: string | undefined
+): boolean {
+  return assetMatchesSearchTokens(asset, tokenizeSearchQuery(searchQuery));
 }
 
 /**
@@ -122,14 +134,16 @@ export function matchesAssetSearchQuery(
  */
 export function filterAssets(
   assets: Asset[],
-  filters: FilterState,
+  filters: FilterState
 ): FilteredAssetsResult {
+  const searchTokens = tokenizeSearchQuery(filters.searchQuery);
+
   const filtered = assets
     .filter((asset) => {
       // Type filter
       const matchesType =
-        !filters.activeType || 
-        filters.activeType === ('ALL' as any) || 
+        !filters.activeType ||
+        filters.activeType === ('ALL' as any) ||
         asset.type === filters.activeType;
 
       // Source filter
@@ -145,7 +159,7 @@ export function filterAssets(
         (asset.category || AssetCategory.GENERAL) === filters.activeCategory;
 
       // Search filter
-      const matchesSearch = matchesAssetSearchQuery(asset, filters.searchQuery);
+      const matchesSearch = assetMatchesSearchTokens(asset, searchTokens);
 
       return matchesType && matchesSource && matchesCategory && matchesSearch;
     })
@@ -194,10 +208,13 @@ export function downloadAsset(asset: Asset): void {
  */
 export function generateAssetNameFromPrompt(
   prompt: string | undefined,
-  type: AssetType,
+  type: AssetType
 ): string {
   if (prompt && prompt.length > 0) {
-    const truncated = prompt.substring(0, ASSET_CONSTANTS.PROMPT_NAME_MAX_LENGTH);
+    const truncated = prompt.substring(
+      0,
+      ASSET_CONSTANTS.PROMPT_NAME_MAX_LENGTH
+    );
     return truncated.length < prompt.length ? `${truncated}...` : truncated;
   }
 
@@ -212,7 +229,10 @@ export function generateAssetNameFromPrompt(
   return format.replace('{timestamp}', timestamp);
 }
 
-import { formatFileSize as formatFileSizeUtil, formatDate as formatDateUtil } from '@aitu/utils';
+import {
+  formatFileSize as formatFileSizeUtil,
+  formatDate as formatDateUtil,
+} from '@aitu/utils';
 
 /**
  * Format File Size

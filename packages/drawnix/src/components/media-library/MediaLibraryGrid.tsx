@@ -69,11 +69,7 @@ import type {
   SortOption,
   Asset,
 } from '../../types/asset.types';
-import {
-  AssetType,
-  AssetSource,
-  AssetCategory,
-} from '../../types/asset.types';
+import { AssetType, AssetSource, AssetCategory } from '../../types/asset.types';
 import { useDrawnix } from '../../hooks/use-drawnix';
 import {
   removeElementsByAssetIds,
@@ -103,6 +99,8 @@ import { HoverTip } from '../shared/hover';
 
 // 视图切换防抖时间
 const VIEW_MODE_DEBOUNCE_MS = 150;
+const SEARCH_DEBOUNCE_MS = 220;
+const PREVIEW_WINDOW_RADIUS = 60;
 
 // localStorage keys
 const VIEW_MODE_STORAGE_KEY = 'media-library-view-mode';
@@ -274,7 +272,11 @@ function matchesSelectionScope(
   }
 
   return (
-    matchesType && matchesSource && matchesCategory && matchesSearch && matchesPlaylist
+    matchesType &&
+    matchesSource &&
+    matchesCategory &&
+    matchesSearch &&
+    matchesPlaylist
   );
 }
 
@@ -317,6 +319,9 @@ export function MediaLibraryGrid({
     createEmptySelectionState()
   );
   const [gridSize, setGridSize] = useState<number>(getStoredGridSize); // 从缓存恢复网格尺寸
+  const [searchInputValue, setSearchInputValue] = useState(
+    filters.searchQuery || ''
+  );
   const lastSelectedIdRef = useRef<string | null>(null); // 记录上次选中的素材ID，用于Shift连选
 
   // 预览状态
@@ -411,17 +416,28 @@ export function MediaLibraryGrid({
 
   // 计算各类型的数量
   const counts = useMemo(() => {
-    return {
+    const nextCounts = {
       all: assets.length,
-      image: assets.filter((a) => a.type === AssetType.IMAGE).length,
-      video: assets.filter((a) => a.type === AssetType.VIDEO).length,
-      audio: assets.filter((a) => a.type === AssetType.AUDIO).length,
-      character: assets.filter(
-        (a) => a.category === AssetCategory.CHARACTER
-      ).length,
-      local: assets.filter((a) => a.source === AssetSource.LOCAL).length,
-      ai: assets.filter((a) => a.source === AssetSource.AI_GENERATED).length,
+      image: 0,
+      video: 0,
+      audio: 0,
+      character: 0,
+      local: 0,
+      ai: 0,
     };
+
+    for (const asset of assets) {
+      if (asset.type === AssetType.IMAGE) nextCounts.image += 1;
+      if (asset.type === AssetType.VIDEO) nextCounts.video += 1;
+      if (asset.type === AssetType.AUDIO) nextCounts.audio += 1;
+      if (asset.category === AssetCategory.CHARACTER) {
+        nextCounts.character += 1;
+      }
+      if (asset.source === AssetSource.LOCAL) nextCounts.local += 1;
+      if (asset.source === AssetSource.AI_GENERATED) nextCounts.ai += 1;
+    }
+
+    return nextCounts;
   }, [assets]);
 
   // 获取选中的素材（用于移动端底部简介）
@@ -444,6 +460,22 @@ export function MediaLibraryGrid({
   const viewModeDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // 应用筛选和排序
+  useEffect(() => {
+    setSearchInputValue(filters.searchQuery || '');
+  }, [filters.searchQuery]);
+
+  useEffect(() => {
+    if (searchInputValue === (filters.searchQuery || '')) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setFilters({ searchQuery: searchInputValue });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [filters.searchQuery, searchInputValue, setFilters]);
+
   const filteredResult = useMemo(() => {
     const result = filterAssets(assets, filters);
     if (!selectedPlaylistId) {
@@ -1240,10 +1272,23 @@ export function MediaLibraryGrid({
   // 打开预览
   const handlePreview = useCallback(
     (asset: Asset) => {
-      const allMediaItems = convertToMediaItems(filteredResult.assets);
       const index = filteredResult.assets.findIndex((a) => a.id === asset.id);
-      setPreviewItems(allMediaItems);
-      setPreviewInitialIndex(index >= 0 ? index : 0);
+      if (index < 0) {
+        setPreviewItems(convertToMediaItems([asset]));
+        setPreviewInitialIndex(0);
+        setPreviewVisible(true);
+        return;
+      }
+
+      const start = Math.max(0, index - PREVIEW_WINDOW_RADIUS);
+      const end = Math.min(
+        filteredResult.assets.length,
+        index + PREVIEW_WINDOW_RADIUS + 1
+      );
+      setPreviewItems(
+        convertToMediaItems(filteredResult.assets.slice(start, end))
+      );
+      setPreviewInitialIndex(index - start);
       setPreviewVisible(true);
     },
     [filteredResult.assets, convertToMediaItems]
@@ -1283,7 +1328,10 @@ export function MediaLibraryGrid({
               providerTaskId: asset?.providerTaskId,
             });
           } else {
-            await quickInsertCanvasMedia('image', normalizeImageDataUrl(item.url));
+            await quickInsertCanvasMedia(
+              'image',
+              normalizeImageDataUrl(item.url)
+            );
           }
           // 插入成功后关闭预览
           setPreviewVisible(false);
@@ -1391,8 +1439,8 @@ export function MediaLibraryGrid({
         <div className="media-library-grid__header-top">
           <div className="media-library-grid__search">
             <Input
-              value={filters.searchQuery}
-              onChange={(value) => setFilters({ searchQuery: value as string })}
+              value={searchInputValue}
+              onChange={(value) => setSearchInputValue(value as string)}
               placeholder="搜索素材..."
               prefixIcon={<Search size={16} />}
               clearable
@@ -1533,9 +1581,7 @@ export function MediaLibraryGrid({
                         aria-label={`${opt.label}：${count}`}
                         aria-pressed={isActive}
                         className={`media-library-grid__type-tab ${
-                          isActive
-                            ? 'media-library-grid__type-tab--active'
-                            : ''
+                          isActive ? 'media-library-grid__type-tab--active' : ''
                         }`}
                         onClick={() =>
                           setFilters({

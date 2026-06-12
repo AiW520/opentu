@@ -3,7 +3,7 @@ use crate::AppState;
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tauri::{Manager, State};
@@ -203,6 +203,31 @@ pub fn write_file_to_path(
     ensure_write_allowed(&state, &path)?;
     validate_save_path(&path)?;
     fs::write(&path, buffer).map_err(|e| format!("无法写入文件: {}", e))
+}
+
+#[tauri::command]
+pub fn write_file_chunk_to_path(
+    state: State<'_, AppState>,
+    save_path: String,
+    buffer: Vec<u8>,
+    append: bool,
+) -> Result<(), String> {
+    let path = PathBuf::from(save_path);
+    ensure_write_allowed(&state, &path)?;
+    validate_save_path(&path)?;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .open(&path)
+        .map_err(|e| format!("failed to open file: {}", e))?;
+
+    file.write_all(&buffer)
+        .map_err(|e| format!("failed to write file: {}", e))?;
+    file.flush()
+        .map_err(|e| format!("failed to flush file: {}", e))
 }
 
 #[tauri::command]

@@ -19,9 +19,14 @@ import type { Asset } from '../types/asset.types';
 import { AssetType } from '../types/asset.types';
 import type { Task } from '../types/task.types';
 import { TaskType } from '../types/task.types';
-import { applyAudioMetadataToBlob, type AudioDownloadMetadata } from './audio-id3';
+import {
+  applyAudioMetadataToBlob,
+  type AudioDownloadMetadata,
+} from './audio-id3';
 import { isDesktopAssetUrl } from './desktop-asset-url';
 import { isVirtualMediaUrl } from './virtual-media-url';
+
+const DESKTOP_WRITE_CHUNK_BYTES = 1024 * 1024;
 
 export interface SmartDownloadResult {
   openedCount: number;
@@ -143,7 +148,9 @@ export async function downloadMediaFile(
   // 如果提供了自定义保存位置，使用该位置
   if (saveLocation) {
     return runSingleDownloadWithFallback(normalizedUrl, async () => {
-      const response = await fetch(normalizedUrl, { referrerPolicy: 'no-referrer' });
+      const response = await fetch(normalizedUrl, {
+        referrerPolicy: 'no-referrer',
+      });
       if (!response.ok) {
         throw new Error(`Failed to fetch ${normalizedUrl}: ${response.status}`);
       }
@@ -156,7 +163,9 @@ export async function downloadMediaFile(
 
   if (fallbackName === 'audio') {
     return runSingleDownloadWithFallback(normalizedUrl, async () => {
-      const response = await fetch(normalizedUrl, { referrerPolicy: 'no-referrer' });
+      const response = await fetch(normalizedUrl, {
+        referrerPolicy: 'no-referrer',
+      });
       if (!response.ok) {
         throw new Error(`Failed to fetch ${normalizedUrl}: ${response.status}`);
       }
@@ -170,16 +179,18 @@ export async function downloadMediaFile(
     });
   }
 
-  return runSingleDownloadWithFallback(
-    normalizedUrl,
-    async () => downloadFile(normalizedUrl, filename)
+  return runSingleDownloadWithFallback(normalizedUrl, async () =>
+    downloadFile(normalizedUrl, filename)
   );
 }
 
 /**
  * 保存数据到自定义位置的函数类型
  */
-export type SaveToLocationFn = (path: string, data: Uint8Array) => Promise<void>;
+export type SaveToLocationFn = (
+  path: string,
+  data: Uint8Array
+) => Promise<void>;
 
 // 默认实现：浏览器下载
 let saveToCustomLocation: SaveToLocationFn = async (path, data) => {
@@ -236,12 +247,52 @@ async function copyMediaUrlToDesktopPath(
   });
 }
 
-async function writeBlobToDesktopPath(path: string, blob: Blob): Promise<void> {
-  const arrayBuffer = await blob.arrayBuffer();
-  await tauriInvoke<void>('write_file_to_path', {
+async function writeBytesToDesktopPath(
+  path: string,
+  bytes: Uint8Array,
+  append: boolean
+): Promise<void> {
+  await tauriInvoke<void>('write_file_chunk_to_path', {
     savePath: path,
-    buffer: Array.from(new Uint8Array(arrayBuffer)),
+    buffer: Array.from(bytes),
+    append,
   });
+}
+
+async function writeBlobToDesktopPath(path: string, blob: Blob): Promise<void> {
+  if (blob.stream) {
+    const reader = blob.stream().getReader();
+    let append = false;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+        await writeBytesToDesktopPath(path, value, append);
+        append = true;
+      }
+      if (!append) {
+        await writeBytesToDesktopPath(path, new Uint8Array(), false);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return;
+  }
+
+  const arrayBuffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  for (
+    let offset = 0;
+    offset < bytes.byteLength;
+    offset += DESKTOP_WRITE_CHUNK_BYTES
+  ) {
+    await writeBytesToDesktopPath(
+      path,
+      bytes.subarray(offset, offset + DESKTOP_WRITE_CHUNK_BYTES),
+      offset > 0
+    );
+  }
 }
 
 async function saveUrlToDesktopPath(
@@ -406,12 +457,16 @@ function resolveDownloadExtension(
     return primaryValue.toLowerCase();
   }
 
-  const primaryExtension = primaryValue ? getFileExtension(primaryValue) : 'bin';
+  const primaryExtension = primaryValue
+    ? getFileExtension(primaryValue)
+    : 'bin';
   if (primaryExtension !== 'bin') {
     return primaryExtension;
   }
 
-  const secondaryExtension = secondaryValue ? getFileExtension(secondaryValue) : 'bin';
+  const secondaryExtension = secondaryValue
+    ? getFileExtension(secondaryValue)
+    : 'bin';
   if (secondaryExtension !== 'bin') {
     return secondaryExtension;
   }
@@ -439,7 +494,10 @@ function getUniqueFilename(
 }
 
 export function buildAssetDownloadItem(
-  asset: Pick<Asset, 'url' | 'type' | 'name' | 'thumbnail' | 'prompt' | 'modelName'>
+  asset: Pick<
+    Asset,
+    'url' | 'type' | 'name' | 'thumbnail' | 'prompt' | 'modelName'
+  >
 ): BatchDownloadItem {
   const type =
     asset.type === AssetType.IMAGE
@@ -589,7 +647,11 @@ export async function downloadAsZip(
         const ext = getFileExtension(assetUrl, blob.type);
 
         const prefix =
-          item.type === 'image' ? 'image' : item.type === 'video' ? 'video' : 'audio';
+          item.type === 'image'
+            ? 'image'
+            : item.type === 'video'
+            ? 'video'
+            : 'audio';
         const filename = getUniqueFilename(
           item.filename || `${prefix}_${index + 1}.${ext}`,
           seenFilenames
@@ -615,12 +677,9 @@ export async function downloadAsZip(
   }
 
   // 生成 ZIP 并下载
-  const content = await zip.generateAsync(
-    { type: 'blob' },
-    (metadata) => {
-      reportProgress(onProgress, 50 + metadata.percent / 2);
-    }
-  );
+  const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+    reportProgress(onProgress, 50 + metadata.percent / 2);
+  });
   if (desktopZipPath) {
     await writeBlobToDesktopPath(desktopZipPath, content);
   } else {
@@ -651,7 +710,8 @@ export async function smartDownload(
 
   if (items.length === 1) {
     const item = items[0];
-    const assetUrl = item.type === 'image' ? normalizeImageDataUrl(item.url) : item.url;
+    const assetUrl =
+      item.type === 'image' ? normalizeImageDataUrl(item.url) : item.url;
 
     // 如果有自定义保存路径，使用该路径
     if (item.saveLocation) {
@@ -682,7 +742,8 @@ export async function smartDownload(
     }
 
     if (isTauriEnvironment()) {
-      const ext = getFileExtension(assetUrl) || getTypeFallbackExtension(item.type);
+      const ext =
+        getFileExtension(assetUrl) || getTypeFallbackExtension(item.type);
       const filename = item.filename || `${item.type}_download.${ext}`;
       const desktopPath = await pickDesktopSavePath(filename);
       if (!desktopPath) {
@@ -690,12 +751,15 @@ export async function smartDownload(
         return createDownloadResult();
       }
       if (desktopPath) {
-        const result = await runSingleDownloadWithFallback(assetUrl, async () => {
-          await saveUrlToDesktopPath(assetUrl, desktopPath, {
-            type: item.type,
-            audioMetadata: item.audioMetadata,
-          });
-        });
+        const result = await runSingleDownloadWithFallback(
+          assetUrl,
+          async () => {
+            await saveUrlToDesktopPath(assetUrl, desktopPath, {
+              type: item.type,
+              audioMetadata: item.audioMetadata,
+            });
+          }
+        );
         reportProgress(onProgress, 100);
         return result;
       }
@@ -703,7 +767,9 @@ export async function smartDownload(
 
     if (item.type === 'audio') {
       const result = await runSingleDownloadWithFallback(assetUrl, async () => {
-        const response = await fetch(assetUrl, { referrerPolicy: 'no-referrer' });
+        const response = await fetch(assetUrl, {
+          referrerPolicy: 'no-referrer',
+        });
         if (!response.ok) {
           throw new Error(`Failed to fetch ${assetUrl}: ${response.status}`);
         }
@@ -726,9 +792,8 @@ export async function smartDownload(
       getFileExtension(assetUrl) ||
       (item.type === 'image' ? 'png' : item.type === 'video' ? 'mp4' : 'mp3');
     const filename = item.filename || `${item.type}_download.${ext}`;
-    const result = await runSingleDownloadWithFallback(
-      assetUrl,
-      async () => downloadFile(assetUrl, filename)
+    const result = await runSingleDownloadWithFallback(assetUrl, async () =>
+      downloadFile(assetUrl, filename)
     );
     reportProgress(onProgress, 100);
     return result;

@@ -6,9 +6,25 @@ export function isTauriEnvironment(): boolean {
   return typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 }
 
+function shouldUseHttpAssetProtocol(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const platform =
+    (navigator as Navigator & { userAgentData?: { platform?: string } })
+      .userAgentData?.platform ||
+    navigator.platform ||
+    '';
+  return /win/i.test(platform) || /windows/i.test(navigator.userAgent);
+}
+
 export function convertLocalFilePathToAssetUrl(filePath: string): string {
   if (isTauriEnvironment()) {
     const encodedPath = encodeURIComponent(filePath);
+    if (shouldUseHttpAssetProtocol()) {
+      return `http://${OPENTU_ASSET_PROTOCOL}.localhost/${encodedPath}`;
+    }
     return `${OPENTU_ASSET_PROTOCOL}://localhost/${encodedPath}`;
   }
 

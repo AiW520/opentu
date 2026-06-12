@@ -19,7 +19,6 @@
 import React, {
   useState,
   useEffect,
-  useLayoutEffect,
   useCallback,
   useRef,
   useMemo,
@@ -478,12 +477,7 @@ function getTextareaHeightForRows(textarea: HTMLTextAreaElement, rows: number) {
 
 function getTextareaContentRows(textarea: HTMLTextAreaElement): number {
   const { lineHeight, verticalPadding } = getTextareaMetrics(textarea);
-  let explicitRows = 1;
-  for (let i = 0; i < textarea.value.length; i += 1) {
-    if (textarea.value.charCodeAt(i) === 10) {
-      explicitRows += 1;
-    }
-  }
+  const explicitRows = (textarea.value.match(/\n/g)?.length || 0) + 1;
   const previousHeight = textarea.style.height;
   textarea.style.height = 'auto';
   const contentHeight = textarea.scrollHeight;
@@ -1105,6 +1099,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     const [isSubmitting, setIsSubmitting] = useState(false); // 防止快速重复点击（3秒防抖）
     const submitLockRef = useRef(false);
     const submitCooldownRef = useRef<NodeJS.Timeout | null>(null); // 提交冷却定时器
+    const inputResizeFrameRef = useRef<number | null>(null);
     const [isFocused, setIsFocused] = useState(false);
     const [isPromptManuallyExpanded, setIsPromptManuallyExpanded] =
       useState(false);
@@ -4765,23 +4760,39 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
       ? '展开提示词输入框'
       : 'Expand prompt input';
 
-    useLayoutEffect(() => {
-      const textarea = inputRef.current;
-      if (!textarea) return;
-
-      const shouldShowExpandButton =
-        getTextareaContentRows(textarea) > AI_INPUT_PROMPT_EXPAND_TRIGGER_ROWS;
-      setCanPromptManuallyExpand(shouldShowExpandButton);
-      if (!shouldShowExpandButton && isPromptManuallyExpanded) {
-        setIsPromptManuallyExpanded(false);
-        resizeAIInputTextarea(
-          textarea,
-          shouldKeepExpanded ? 'expanded' : 'collapsed'
-        );
-        return;
+    useEffect(() => {
+      if (inputResizeFrameRef.current !== null) {
+        cancelAnimationFrame(inputResizeFrameRef.current);
       }
 
-      resizeAIInputTextarea(textarea, inputResizeMode);
+      inputResizeFrameRef.current = requestAnimationFrame(() => {
+        inputResizeFrameRef.current = null;
+
+        const textarea = inputRef.current;
+        if (!textarea) return;
+
+        const shouldShowExpandButton =
+          getTextareaContentRows(textarea) >
+          AI_INPUT_PROMPT_EXPAND_TRIGGER_ROWS;
+        setCanPromptManuallyExpand(shouldShowExpandButton);
+        if (!shouldShowExpandButton && isPromptManuallyExpanded) {
+          setIsPromptManuallyExpanded(false);
+          resizeAIInputTextarea(
+            textarea,
+            shouldKeepExpanded ? 'expanded' : 'collapsed'
+          );
+          return;
+        }
+
+        resizeAIInputTextarea(textarea, inputResizeMode);
+      });
+
+      return () => {
+        if (inputResizeFrameRef.current !== null) {
+          cancelAnimationFrame(inputResizeFrameRef.current);
+          inputResizeFrameRef.current = null;
+        }
+      };
     }, [inputResizeMode, isPromptManuallyExpanded, prompt, shouldKeepExpanded]);
 
     return (

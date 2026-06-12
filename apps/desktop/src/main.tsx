@@ -2,26 +2,55 @@ import '../web/src/utils/permissions-policy-fix';
 import { isTauriEnvironment } from './utils/tauri-api';
 import { initializeVirtualUrlInterceptor } from './utils/virtual-url-interceptor';
 
+const DESKTOP_WRITE_CHUNK_BYTES = 1024 * 1024;
+
 function updateBootProgress(progress: number) {
   const fill = document.getElementById('boot-progress-fill');
   const value = document.getElementById('boot-progress-value');
-  if (fill) fill.style.width = progress + '%';
-  if (value) value.textContent = progress + '%';
+  if (fill) fill.style.width = `${progress}%`;
+  if (value) value.textContent = `${progress}%`;
 }
 
 function hideBootScreen() {
   const bootRoot = document.getElementById('app-boot-loading');
-  if (bootRoot) {
-    bootRoot.classList.add('is-leaving');
-    setTimeout(() => {
-      if (bootRoot.parentNode) {
-        bootRoot.parentNode.removeChild(bootRoot);
+  if (!bootRoot) return;
+
+  bootRoot.classList.add('is-leaving');
+  setTimeout(() => {
+    bootRoot.parentNode?.removeChild(bootRoot);
+  }, 360);
+}
+
+async function writeDataToPathInChunks(path: string, data: Uint8Array) {
+  if (data.byteLength === 0) {
+    await (window as any).__TAURI_INTERNALS__.invoke(
+      'write_file_chunk_to_path',
+      {
+        savePath: path,
+        buffer: [],
+        append: false,
       }
-    }, 360);
+    );
+    return;
+  }
+
+  for (
+    let offset = 0;
+    offset < data.byteLength;
+    offset += DESKTOP_WRITE_CHUNK_BYTES
+  ) {
+    const chunk = data.subarray(offset, offset + DESKTOP_WRITE_CHUNK_BYTES);
+    await (window as any).__TAURI_INTERNALS__.invoke(
+      'write_file_chunk_to_path',
+      {
+        savePath: path,
+        buffer: Array.from(chunk),
+        append: offset > 0,
+      }
+    );
   }
 }
 
-// 立即初始化虚拟 URL 拦截器（在应用启动前）
 if (isTauriEnvironment()) {
   console.log('[Desktop] Early initialize virtual URL interceptor');
   initializeVirtualUrlInterceptor();
@@ -30,35 +59,31 @@ if (isTauriEnvironment()) {
 async function bootstrap() {
   updateBootProgress(30);
 
-  // 初始化保存位置函数（仅在桌面环境中）
   if (isTauriEnvironment()) {
-    // 动态设置保存函数
     const { setSaveLocationFn } = await import('@drawnix/drawnix');
     setSaveLocationFn(async (path: string, data: Uint8Array) => {
-      await (window as any).__TAURI_INTERNALS__.invoke('write_file_to_path', {
-        savePath: path,
-        buffer: Array.from(data),
-      });
+      await writeDataToPathInChunks(path, data);
     });
   }
 
   updateBootProgress(60);
 
-  import('../web/src/app/bootstrap').then(() => {
-    updateBootProgress(100);
+  import('../web/src/app/bootstrap')
+    .then(() => {
+      updateBootProgress(100);
 
-    // 再次确保拦截器已初始化（兜底）
-    if (isTauriEnvironment()) {
-      initializeVirtualUrlInterceptor();
-    }
+      if (isTauriEnvironment()) {
+        initializeVirtualUrlInterceptor();
+      }
 
-    setTimeout(hideBootScreen, 200);
-  }).catch((error) => {
-    console.error('[Desktop] Failed to load app bootstrap:', error);
-    updateBootProgress(100);
-    const tip = document.querySelector('.app-boot-tip');
-    if (tip) tip.textContent = '启动失败，请重启应用';
-  });
+      setTimeout(hideBootScreen, 200);
+    })
+    .catch((error) => {
+      console.error('[Desktop] Failed to load app bootstrap:', error);
+      updateBootProgress(100);
+      const tip = document.querySelector('.app-boot-tip');
+      if (tip) tip.textContent = '启动失败，请重启应用';
+    });
 }
 
 bootstrap();
