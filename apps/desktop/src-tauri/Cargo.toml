@@ -27,6 +27,6 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 base64 = "0.22"
 sha2 = "0.10"
-image = { version = "0.25", default-features = false, features = ["std", "io", "imageops", "png", "jpeg", "gif", "bmp", "tiff", "webp"] }
+image = { version = "0.25", default-features = false, features = ["std", "io", "png", "jpeg", "gif", "bmp", "tiff", "webp"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
