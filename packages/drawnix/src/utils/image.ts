@@ -83,23 +83,15 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
         // 桌面端使用 Tauri 原生文件保存对话框
         if (isTauriEnvironment()) {
           try {
-            const { pick_save_location } = await import('@tauri-apps/plugin-dialog');
-            const savePath = await pick_save_location({
-              defaultPath: imageName,
-              filters: [{
-                name: ext.toUpperCase(),
-                extensions: [ext],
-              }],
+            const savePath = await (window as any).__TAURI_INTERNALS__.invoke('pick_save_location', {
+              defaultName: imageName,
             });
             if (savePath) {
-              // 将 Blob 转换为 ArrayBuffer
               const arrayBuffer = await pngImage.arrayBuffer();
               const uint8Array = new Uint8Array(arrayBuffer);
-              // 调用 Tauri 命令保存文件
-              await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
-                fileName: savePath,
+              await (window as any).__TAURI_INTERNALS__.invoke('write_file_to_path', {
+                savePath: savePath,
                 buffer: Array.from(uint8Array),
-                fileType: 'image',
               });
               MessagePlugin.success('图片已保存');
             }

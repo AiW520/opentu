@@ -126,7 +126,7 @@ pub async fn pick_media_files(app: tauri::AppHandle) -> Result<Vec<PickedMediaFi
         .add_filter(
             "媒体素材",
             &[
-                "png", "jpg", "jpeg", "gif", "webp", "svg", "mp4", "webm", "mov", "m4v", "ogg",
+                "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "mp4", "webm", "mov", "m4v", "ogg",
                 "mp3", "wav", "m4a", "aac", "flac", "zip",
             ],
         )
