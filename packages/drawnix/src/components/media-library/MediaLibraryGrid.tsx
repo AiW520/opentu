@@ -760,8 +760,11 @@ export function MediaLibraryGrid({
   );
 
   const filteredSelectedAssets = useMemo(() => {
+    if (!isSelectionMode) {
+      return [];
+    }
     return filteredResult.assets.filter(isAssetSelected);
-  }, [filteredResult.assets, isAssetSelected]);
+  }, [filteredResult.assets, isAssetSelected, isSelectionMode]);
 
   const filteredSelectedCount = filteredSelectedAssets.length;
 

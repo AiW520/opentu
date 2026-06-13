@@ -616,6 +616,19 @@ export function AssetProvider({ children }: AssetProviderProps) {
         // 直接从 IndexedDB 获取所有缓存媒体的元数据
         // 这比遍历 Cache Storage 快得多
         const cachedMediaList = await unifiedCacheService.getAllCachedMedia();
+        const mediaPathnameSet = new Set(
+          cachedMediaList.map((item) =>
+            item.url.startsWith('/')
+              ? item.url
+              : (() => {
+                  try {
+                    return new URL(item.url).pathname;
+                  } catch {
+                    return item.url;
+                  }
+                })()
+          )
+        );
 
         const assets: Asset[] = [];
         const metadataByNormalizedUrl = new Map<string, CachedMedia>();
@@ -685,18 +698,7 @@ export function AssetProvider({ children }: AssetProviderProps) {
           let thumbnail: string | undefined;
           if (isAudio && item.metadata?.taskId) {
             const coverUrl = `/__aitu_cache__/image/${item.metadata.taskId}-cover.png`;
-            const hasCover = cachedMediaList.some((m) => {
-              const mPath = m.url.startsWith('/')
-                ? m.url
-                : (() => {
-                    try {
-                      return new URL(m.url).pathname;
-                    } catch {
-                      return m.url;
-                    }
-                  })();
-              return mPath === coverUrl;
-            });
+            const hasCover = mediaPathnameSet.has(coverUrl);
             if (hasCover) thumbnail = coverUrl;
           }
 

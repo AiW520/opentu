@@ -101,6 +101,7 @@ export class ValidationError extends AssetStorageError {
 class AssetStorageService {
   private store: LocalForage | null = null;
   private migrationDone = false;
+  private assetCachePromise: Promise<Cache> | null = null;
 
   private async calculateBlobChecksum(blob: Blob): Promise<string> {
     const arrayBuffer = await blob.arrayBuffer();
@@ -125,6 +126,31 @@ class AssetStorageService {
 
     const slashIndex = mimeType.indexOf('/');
     return slashIndex >= 0 ? mimeType.slice(slashIndex + 1) : 'bin';
+  }
+
+  private async hasCachedAssetUrl(url: string): Promise<boolean> {
+    if (typeof caches === 'undefined') {
+      return true;
+    }
+
+    try {
+      if (!this.assetCachePromise) {
+        this.assetCachePromise = caches.open('drawnix-images');
+      }
+
+      const cache = await this.assetCachePromise;
+      let response = await cache.match(url);
+      if (!response && typeof window !== 'undefined') {
+        response = await cache.match(
+          new URL(url, window.location.origin).toString()
+        );
+      }
+
+      return Boolean(response);
+    } catch (error) {
+      console.warn('[AssetStorageService] Failed to check Cache Storage:', error);
+      return true;
+    }
   }
 
   /**
@@ -586,20 +612,6 @@ class AssetStorageService {
         return [];
       }
 
-      // 获取 Cache Storage 中的有效 URL 集合
-      let validCacheUrls: Set<string> = new Set();
-      if (typeof caches !== 'undefined') {
-        try {
-          const cache = await caches.open('drawnix-images');
-          const requests = await cache.keys();
-          validCacheUrls = new Set(
-            requests.map(req => new URL(req.url).pathname)
-          );
-        } catch (cacheError) {
-          console.warn('[AssetStorageService] Failed to read Cache Storage:', cacheError);
-        }
-      }
-
       // 分批并行加载素材，每批最多 20 个
       const batchSize = 20;
       const allAssets: Asset[] = [];
@@ -617,7 +629,7 @@ class AssetStorageService {
               if (stored.filePath || isDesktopAssetUrl(stored.url)) {
                 return this.toRuntimeAsset(stored);
               }
-              if (validCacheUrls.size > 0 && !validCacheUrls.has(stored.url)) {
+              if (!(await this.hasCachedAssetUrl(stored.url))) {
                 // Cache Storage 中没有实际数据，跳过此素材
                 return null;
               }

@@ -8,6 +8,57 @@
 import { useState, useEffect, useCallback } from 'react';
 import { unifiedCacheService, type CacheInfo, type StorageUsage } from '../services/unified-cache-service';
 
+const CACHE_INFO_TTL_MS = 30 * 1000;
+const EMPTY_CACHE_INFO: CacheInfo = { isCached: false };
+
+const cacheInfoMemory = new Map<
+  string,
+  {
+    info: CacheInfo;
+    updatedAt: number;
+  }
+>();
+const pendingCacheInfoLoads = new Map<string, Promise<CacheInfo>>();
+
+function setCacheInfoMemory(url: string, info: CacheInfo): void {
+  cacheInfoMemory.set(url, {
+    info,
+    updatedAt: Date.now(),
+  });
+}
+
+async function loadCacheInfoWithMemory(
+  url: string,
+  force = false
+): Promise<CacheInfo> {
+  const cached = cacheInfoMemory.get(url);
+  if (!force && cached && Date.now() - cached.updatedAt < CACHE_INFO_TTL_MS) {
+    return cached.info;
+  }
+
+  const pending = pendingCacheInfoLoads.get(url);
+  if (pending) {
+    return pending;
+  }
+
+  const promise = unifiedCacheService
+    .getCacheInfo(url)
+    .then((info) => {
+      setCacheInfoMemory(url, info);
+      return info;
+    })
+    .catch((error) => {
+      console.error('[useUnifiedCache] Failed to load cache info:', error);
+      return EMPTY_CACHE_INFO;
+    })
+    .finally(() => {
+      pendingCacheInfoLoads.delete(url);
+    });
+
+  pendingCacheInfoLoads.set(url, promise);
+  return promise;
+}
+
 /**
  * Hook for managing cache of a specific URL
  */
@@ -16,33 +67,49 @@ export function useUnifiedCache(url: string | undefined) {
   const [isLoading, setIsLoading] = useState(false);
 
   // Load cache info
-  const loadCacheInfo = useCallback(async () => {
+  const loadCacheInfo = useCallback(async (force = false) => {
     if (!url) {
-      setCacheInfo({ isCached: false });
+      setCacheInfo(EMPTY_CACHE_INFO);
       return;
     }
 
-    try {
-      const info = await unifiedCacheService.getCacheInfo(url);
-      setCacheInfo(info);
-    } catch (error) {
-      console.error('[useUnifiedCache] Failed to load cache info:', error);
-      setCacheInfo({ isCached: false });
-    }
+    const info = await loadCacheInfoWithMemory(url, force);
+    setCacheInfo(info);
   }, [url]);
 
   // Initial load
   useEffect(() => {
-    loadCacheInfo();
-  }, [loadCacheInfo]);
+    let mounted = true;
+
+    if (!url) {
+      setCacheInfo(EMPTY_CACHE_INFO);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void loadCacheInfoWithMemory(url).then((info) => {
+      if (mounted) {
+        setCacheInfo(info);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [url]);
 
   // Subscribe to cache changes
   useEffect(() => {
+    if (!url) {
+      return undefined;
+    }
+
     const unsubscribe = unifiedCacheService.subscribe(() => {
-      loadCacheInfo();
+      void loadCacheInfo(true);
     });
     return unsubscribe;
-  }, [loadCacheInfo]);
+  }, [loadCacheInfo, url]);
 
   // Cache image manually
   const cacheImage = useCallback(async (metadata?: any) => {
@@ -52,7 +119,7 @@ export function useUnifiedCache(url: string | undefined) {
     try {
       const success = await unifiedCacheService.cacheImage(url, metadata);
       if (success) {
-        await loadCacheInfo();
+        await loadCacheInfo(true);
       }
       return success;
     } catch (error) {
@@ -70,7 +137,7 @@ export function useUnifiedCache(url: string | undefined) {
     setIsLoading(true);
     try {
       await unifiedCacheService.deleteCache(url);
-      await loadCacheInfo();
+      await loadCacheInfo(true);
       return true;
     } catch (error) {
       console.error('[useUnifiedCache] Failed to delete cache:', error);
