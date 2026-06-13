@@ -845,7 +845,10 @@ export const PopupToolbar = () => {
         source: 'canvas-toolbar',
       });
     } catch (error) {
-      console.error('[PopupToolbar] Failed to prefill image generation:', error);
+      console.error(
+        '[PopupToolbar] Failed to prefill image generation:',
+        error
+      );
       MessagePlugin.error(
         language === 'zh'
           ? '回填失败，请稍后重试'
@@ -1450,7 +1453,9 @@ export const PopupToolbar = () => {
                 type="icon"
                 icon={<Copy size={15} />}
                 visible={true}
-                tooltip={language === 'zh' ? '复制文本内容' : 'Copy text content'}
+                tooltip={
+                  language === 'zh' ? '复制文本内容' : 'Copy text content'
+                }
                 aria-label={
                   language === 'zh' ? '复制文本内容' : 'Copy text content'
                 }
@@ -1485,7 +1490,9 @@ export const PopupToolbar = () => {
                 type="icon"
                 icon={<AIImageIcon />}
                 visible={true}
-                tooltip={language === 'zh' ? 'AI图片生成' : 'AI Image Generation'}
+                tooltip={
+                  language === 'zh' ? 'AI图片生成' : 'AI Image Generation'
+                }
                 aria-label={
                   language === 'zh' ? 'AI图片生成' : 'AI Image Generation'
                 }
@@ -1500,7 +1507,9 @@ export const PopupToolbar = () => {
                 type="icon"
                 icon={<AIVideoIcon />}
                 visible={true}
-                tooltip={language === 'zh' ? 'AI视频生成' : 'AI Video Generation'}
+                tooltip={
+                  language === 'zh' ? 'AI视频生成' : 'AI Video Generation'
+                }
                 aria-label={
                   language === 'zh' ? 'AI视频生成' : 'AI Video Generation'
                 }
@@ -1543,7 +1552,9 @@ export const PopupToolbar = () => {
                 type="icon"
                 icon={<Scaling size={15} />}
                 visible={true}
-                tooltip={language === 'zh' ? '素材自适应PPT' : 'Fit media to PPT'}
+                tooltip={
+                  language === 'zh' ? '素材自适应PPT' : 'Fit media to PPT'
+                }
                 aria-label={
                   language === 'zh' ? '素材自适应PPT' : 'Fit media to PPT'
                 }
@@ -1680,11 +1691,7 @@ export const PopupToolbar = () => {
                     ? '蒙层反选：反向填充图片'
                     : 'Invert mask: fill the opposite area'
                 }
-                aria-label={
-                  language === 'zh'
-                    ? '蒙层反选'
-                    : 'Invert mask'
-                }
+                aria-label={language === 'zh' ? '蒙层反选' : 'Invert mask'}
                 data-track="toolbar_click_mask_invert"
                 onPointerUp={toggleMaskInvert}
               />
@@ -2213,16 +2220,20 @@ export const PopupToolbar = () => {
                         type: mimeType,
                       });
                       const downloadUrl = URL.createObjectURL(downloadBlob);
-
-                      const link = document.createElement('a');
-                      link.href = downloadUrl;
-                      link.download = `merged-video-${Date.now()}.${extension}`;
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-
-                      // 延迟释放 URL
-                      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+                      try {
+                        await smartDownload([
+                          {
+                            url: downloadUrl,
+                            type: 'video',
+                            filename: `merged-video-${Date.now()}.${extension}`,
+                          },
+                        ]);
+                      } finally {
+                        setTimeout(
+                          () => URL.revokeObjectURL(downloadUrl),
+                          1000
+                        );
+                      }
 
                       MessagePlugin.warning(
                         language === 'zh'

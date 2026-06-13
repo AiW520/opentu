@@ -79,6 +79,23 @@ import { buildMJPromptSuffix } from '../../utils/mj-params';
 
 // 本地缓存 key
 const BATCH_IMAGE_CACHE_KEY = LS_KEYS_TO_MIGRATE.BATCH_IMAGE_CACHE;
+const XLSX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+async function downloadWorkbook(
+  XLSX: typeof import('xlsx'),
+  workbook: import('xlsx').WorkBook,
+  filename: string
+): Promise<void> {
+  const data = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([data], { type: XLSX_MIME_TYPE });
+  const url = URL.createObjectURL(blob);
+  try {
+    await smartDownload([{ url, type: 'file', filename }]);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 // 任务行数据
 interface TaskRow {
@@ -1621,7 +1638,7 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
       XLSX.utils.book_append_sheet(wb, ws, '批量出图模板');
 
       // 导出文件
-      XLSX.writeFile(wb, 'batch-image-template.xlsx');
+      await downloadWorkbook(XLSX, wb, 'batch-image-template.xlsx');
 
       MessagePlugin.success(
         language === 'zh'
@@ -1893,7 +1910,7 @@ const BatchImageGeneration: React.FC<BatchImageGenerationProps> = ({
       const filename = `batch-image-export_${dateStr}_${timeStr}.xlsx`;
 
       // 导出文件
-      XLSX.writeFile(wb, filename);
+      await downloadWorkbook(XLSX, wb, filename);
 
       MessagePlugin.success(
         language === 'zh'

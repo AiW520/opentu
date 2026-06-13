@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Button, MessagePlugin } from 'tdesign-react';
 import { ImageUploadIcon, MediaLibraryIcon } from '../../icons';
 import { MediaLibraryModal } from '../../media-library/MediaLibraryModal';
@@ -11,7 +11,11 @@ import {
 import { useAssets } from '../../../contexts/AssetContext';
 import { HoverCard } from '../../shared';
 import { Z_INDEX } from '../../../constants/z-index';
-import { getAssetRuntimeUrl } from '../../../utils/desktop-asset-url';
+import {
+  getAssetRuntimeUrl,
+  isTauriEnvironment,
+} from '../../../utils/desktop-asset-url';
+import { assetStorageService } from '../../../services/asset-storage-service';
 
 const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024;
 const COMPRESSION_THRESHOLD_BYTES = 10 * 1024 * 1024;
@@ -48,6 +52,9 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
 }) => {
   const [showMediaLibrary, setShowMediaLibrary] = useState(false);
   const { addAsset } = useAssets();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const moreFileInputRef = useRef<HTMLInputElement>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -81,7 +88,9 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
 
           // Compress if file is 10-25MB
           if (file.size > COMPRESSION_THRESHOLD_BYTES) {
-            const { compressImageBlob, getCompressionStrategy } = await import('@aitu/utils');
+            const { compressImageBlob, getCompressionStrategy } = await import(
+              '@aitu/utils'
+            );
             const strategy = getCompressionStrategy(file.size / (1024 * 1024));
             const msgId = MessagePlugin.loading({
               content:
@@ -206,7 +215,15 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
       throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);
     }
 
-    const response = await fetch(getAssetRuntimeUrl(asset));
+    const runtimeUrl = getAssetRuntimeUrl(asset);
+    if (isTauriEnvironment()) {
+      return {
+        url: runtimeUrl,
+        name: asset.name,
+      };
+    }
+
+    const response = await fetch(runtimeUrl);
     let blob = await response.blob();
 
     if (blob.size > MAX_IMAGE_SIZE_BYTES) {
@@ -214,7 +231,9 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     }
 
     if (blob.size > COMPRESSION_THRESHOLD_BYTES) {
-      const { compressImageBlob, getCompressionStrategy } = await import('@aitu/utils');
+      const { compressImageBlob, getCompressionStrategy } = await import(
+        '@aitu/utils'
+      );
       const strategy = getCompressionStrategy(blob.size / (1024 * 1024));
       blob = await compressImageBlob(blob, strategy.targetSizeMB);
     }
@@ -251,6 +270,81 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     }
   };
 
+  const handleDesktopLocalSelect = async (
+    mode: 'append' | 'replace',
+    replaceIndex?: number
+  ) => {
+    if (!isTauriEnvironment()) return false;
+
+    try {
+      const pickedFiles = await assetStorageService.pickDesktopMediaFiles();
+      const imageFiles = pickedFiles.filter(
+        (file) =>
+          file.fileType === 'image' || file.mimeType.startsWith('image/')
+      );
+      const selectedFiles = multiple ? imageFiles : imageFiles.slice(0, 1);
+      if (selectedFiles.length === 0) {
+        return true;
+      }
+
+      const nextImages: ImageFile[] = [];
+      for (const file of selectedFiles) {
+        if (file.size > MAX_IMAGE_SIZE_BYTES) {
+          onError?.(
+            language === 'zh'
+              ? `图片 "${file.name}" 超过25MB限制`
+              : `Image "${file.name}" exceeds 25MB limit`
+          );
+          continue;
+        }
+
+        const asset = await assetStorageService.addDesktopLocalAssetFromPath({
+          path: file.path,
+          type: AssetType.IMAGE,
+          name: file.name,
+          mimeType: file.mimeType,
+        });
+        nextImages.push({
+          url: getAssetRuntimeUrl(asset),
+          name: asset.name,
+        });
+      }
+
+      if (nextImages.length === 0) {
+        return true;
+      }
+
+      if (mode === 'replace' && replaceIndex !== undefined) {
+        const updated = [...images];
+        updated[replaceIndex] = nextImages[0];
+        onImagesChange(updated);
+      } else if (multiple) {
+        onImagesChange([...images, ...nextImages]);
+      } else {
+        onImagesChange([nextImages[0]]);
+      }
+      onError?.(null);
+      return true;
+    } catch (error) {
+      console.error('[ImageUpload] Desktop local selection failed:', error);
+      onError?.(
+        language === 'zh' ? '本地图片导入失败' : 'Failed to import local images'
+      );
+      return true;
+    }
+  };
+
+  const openLocalFilePicker = async (
+    input: HTMLInputElement | null,
+    mode: 'append' | 'replace' = 'append',
+    replaceIndex?: number
+  ) => {
+    const handled = await handleDesktopLocalSelect(mode, replaceIndex);
+    if (!handled) {
+      input?.click();
+    }
+  };
+
   const handleMediaLibrarySelectMultiple = async (assets: Asset[]) => {
     if (assets.length === 0) return;
 
@@ -272,7 +366,11 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
         try {
           newImages.push(await assetToImageFile(asset));
         } catch (err) {
-          console.error('[ImageUpload] Failed to convert asset:', asset.name, err);
+          console.error(
+            '[ImageUpload] Failed to convert asset:',
+            asset.name,
+            err
+          );
         }
       }
 
@@ -313,6 +411,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
           {images.length === 0 ? (
             <div className="add-more-item">
               <input
+                ref={fileInputRef}
                 type="file"
                 id="image-upload"
                 multiple={multiple}
@@ -326,9 +425,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
                 <Button
                   variant="outline"
                   icon={<ImageUploadIcon size={18} />}
-                  onClick={() =>
-                    document.getElementById('image-upload')?.click()
-                  }
+                  onClick={() => openLocalFilePicker(fileInputRef.current)}
                   disabled={disabled}
                   data-track="image_upload_select_from_local"
                   className="add-more-btn"
@@ -386,6 +483,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
               {multiple && (
                 <div className="add-more-item">
                   <input
+                    ref={moreFileInputRef}
                     type="file"
                     id="image-upload-more"
                     multiple
@@ -400,7 +498,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
                       variant="outline"
                       icon={<ImageUploadIcon size={18} />}
                       onClick={() =>
-                        document.getElementById('image-upload-more')?.click()
+                        openLocalFilePicker(moreFileInputRef.current)
                       }
                       disabled={disabled}
                       data-track="image_upload_select_from_local_more"
@@ -424,6 +522,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
               {!multiple && (
                 <div className="add-more-item">
                   <input
+                    ref={replaceFileInputRef}
                     type="file"
                     id="image-replace"
                     accept="image/*"
@@ -437,7 +536,11 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
                       variant="outline"
                       icon={<ImageUploadIcon size={18} />}
                       onClick={() =>
-                        document.getElementById('image-replace')?.click()
+                        openLocalFilePicker(
+                          replaceFileInputRef.current,
+                          'replace',
+                          0
+                        )
                       }
                       disabled={disabled}
                       data-track="image_upload_replace_from_local"
@@ -471,7 +574,9 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
           mode={SelectionMode.SELECT}
           filterType={AssetType.IMAGE}
           onSelect={handleMediaLibrarySelect}
-          onSelectMultiple={multiple ? handleMediaLibrarySelectMultiple : undefined}
+          onSelectMultiple={
+            multiple ? handleMediaLibrarySelectMultiple : undefined
+          }
           batchSelectButtonText={multiple ? '批量插入对话框' : undefined}
         />
       )}

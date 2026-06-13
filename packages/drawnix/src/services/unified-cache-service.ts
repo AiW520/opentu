@@ -121,18 +121,28 @@ export interface CacheMediaFromBlobOptions {
 type CacheMediaMetadata = NonNullable<CacheMediaFromBlobOptions['metadata']>;
 
 function isTauriRuntime(): boolean {
-  return typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__);
+  return (
+    typeof window !== 'undefined' &&
+    Boolean((window as any).__TAURI_INTERNALS__)
+  );
 }
 
-function waitForIdle(timeout = DESKTOP_FILE_SAVE_IDLE_TIMEOUT_MS): Promise<void> {
+function waitForIdle(
+  timeout = DESKTOP_FILE_SAVE_IDLE_TIMEOUT_MS
+): Promise<void> {
   if (typeof window === 'undefined') {
     return Promise.resolve();
   }
 
   return new Promise((resolve) => {
-    const requestIdle = (window as Window & {
-      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-    }).requestIdleCallback;
+    const requestIdle = (
+      window as Window & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions
+        ) => number;
+      }
+    ).requestIdleCallback;
 
     if (requestIdle) {
       requestIdle(() => resolve(), { timeout });
@@ -1364,11 +1374,17 @@ class UnifiedCacheService {
       .then(() => waitForIdle())
       .then(() => this.saveToTauriFileSystem(url, blob, type, contentHash))
       .catch((error) => {
-        console.warn('[UnifiedCache] Failed to save to Tauri file system:', error);
+        console.warn(
+          '[UnifiedCache] Failed to save to Tauri file system:',
+          error
+        );
       });
   }
 
-  private shouldGenerateEagerThumbnail(blob: Blob, type: CacheMediaType): boolean {
+  private shouldGenerateEagerThumbnail(
+    blob: Blob,
+    type: CacheMediaType
+  ): boolean {
     return (
       type === 'image' &&
       blob.size > 0 &&
@@ -1385,25 +1401,80 @@ class UnifiedCacheService {
     type: CacheMediaType,
     contentHash: string
   ): Promise<void> {
+    void contentHash;
     try {
       // 从 URL 提取文件名
       const fileName = this.getFileNameFromUrl(url);
-      
-      // 将 blob 转换为 arrayBuffer
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      
-      // 调用 Tauri 命令保存文件
-      const result = await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
-        fileName,
-        buffer: Array.from(uint8Array),
-        fileType: type,
-      });
 
-      console.log('[UnifiedCache] Saved to Tauri file system:', fileName, result);
+      const result = await (window as any).__TAURI_INTERNALS__.invoke(
+        'get_default_save_path',
+        {
+          fileName,
+          fileType: type,
+        }
+      );
+
+      await this.writeBlobToTauriPath(String(result), blob);
+
+      console.log(
+        '[UnifiedCache] Saved to Tauri file system:',
+        fileName,
+        result
+      );
     } catch (error) {
-      console.error('[UnifiedCache] Failed to save to Tauri file system:', error);
+      console.error(
+        '[UnifiedCache] Failed to save to Tauri file system:',
+        error
+      );
       // 不要抛出错误，继续执行其他操作
+    }
+  }
+
+  private async writeBlobToTauriPath(path: string, blob: Blob): Promise<void> {
+    const writeChunk = async (buffer: Uint8Array, append: boolean) => {
+      await (window as any).__TAURI_INTERNALS__.invoke(
+        'write_file_chunk_to_path',
+        {
+          savePath: path,
+          buffer: Array.from(buffer),
+          append,
+        }
+      );
+    };
+
+    if (blob.stream) {
+      const reader = blob.stream().getReader();
+      let append = false;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value || value.byteLength === 0) continue;
+          await writeChunk(value, append);
+          append = true;
+        }
+        if (!append) {
+          await writeChunk(new Uint8Array(), false);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      return;
+    }
+
+    const arrayBuffer = await blob.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    const chunkSize = 1024 * 1024;
+    if (uint8Array.byteLength === 0) {
+      await writeChunk(new Uint8Array(), false);
+      return;
+    }
+
+    for (let offset = 0; offset < uint8Array.byteLength; offset += chunkSize) {
+      await writeChunk(
+        uint8Array.subarray(offset, offset + chunkSize),
+        offset > 0
+      );
     }
   }
 
@@ -1413,7 +1484,7 @@ class UnifiedCacheService {
   private getFileNameFromUrl(url: string): string {
     const pathname = url.split('?')[0].split('#')[0];
     const fileName = pathname.split('/').pop() || `unknown-${Date.now()}`;
-    
+
     // 添加文件扩展名（如果没有的话）
     if (!fileName.includes('.')) {
       return `${fileName}.png`;
@@ -1433,7 +1504,10 @@ class UnifiedCacheService {
   }
 
   private getMimeTypeFromUrl(url: string): string {
-    const extension = this.getFileNameFromUrl(url).split('.').pop()?.toLowerCase();
+    const extension = this.getFileNameFromUrl(url)
+      .split('.')
+      .pop()
+      ?.toLowerCase();
     const mimeTypes: Record<string, string> = {
       png: 'image/png',
       jpg: 'image/jpeg',

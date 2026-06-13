@@ -395,7 +395,7 @@ export interface BatchDownloadItem {
   /** 文件 URL */
   url: string;
   /** 文件类型 */
-  type: 'image' | 'video' | 'audio';
+  type: 'image' | 'video' | 'audio' | 'file';
   /** 可选文件名 */
   filename?: string;
   /** 音频下载时写入的元数据 */
@@ -444,6 +444,9 @@ function getTypeFallbackExtension(type: BatchDownloadItem['type']): string {
   }
   if (type === 'video') {
     return 'mp4';
+  }
+  if (type === 'file') {
+    return 'bin';
   }
   return 'mp3';
 }
@@ -651,6 +654,8 @@ export async function downloadAsZip(
             ? 'image'
             : item.type === 'video'
             ? 'video'
+            : item.type === 'file'
+            ? 'file'
             : 'audio';
         const filename = getUniqueFilename(
           item.filename || `${prefix}_${index + 1}.${ext}`,
@@ -789,8 +794,7 @@ export async function smartDownload(
 
     // Use getFileExtension to detect correct extension (handles SVG, PNG, etc.)
     const ext =
-      getFileExtension(assetUrl) ||
-      (item.type === 'image' ? 'png' : item.type === 'video' ? 'mp4' : 'mp3');
+      getFileExtension(assetUrl) || getTypeFallbackExtension(item.type);
     const filename = item.filename || `${item.type}_download.${ext}`;
     const result = await runSingleDownloadWithFallback(assetUrl, async () =>
       downloadFile(assetUrl, filename)

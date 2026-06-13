@@ -42,6 +42,7 @@ import { CropPanel } from './CropPanel';
 import { FilterPanel } from './FilterPanel';
 import './ImageEditorCore.scss';
 import { HoverTip } from '../shared/hover';
+import { smartDownload } from '../../utils/download-utils';
 
 // Tooltip z-index 需要高于模态框
 const TOOLTIP_Z_INDEX = 10010;
@@ -718,7 +719,7 @@ export const ImageEditorCore = forwardRef<
 
     // 处理保存选项
     const handleSaveAction = useCallback(
-      (action: SaveAction) => {
+      async (action: SaveAction) => {
         if (!pendingImageUrl) return;
 
         switch (action) {
@@ -729,10 +730,13 @@ export const ImageEditorCore = forwardRef<
             onInsert?.(pendingImageUrl);
             break;
           case 'download': {
-            const link = document.createElement('a');
-            link.href = pendingImageUrl;
-            link.download = `edited-image-${Date.now()}.png`;
-            link.click();
+            await smartDownload([
+              {
+                url: pendingImageUrl,
+                type: 'image',
+                filename: `edited-image-${Date.now()}.png`,
+              },
+            ]);
             MessagePlugin.success('图片已下载');
             break;
           }

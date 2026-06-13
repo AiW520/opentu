@@ -60,6 +60,57 @@ function getExtensionFromMimeType(mimeType: string): string {
   return mimeToExt[mimeType] || 'png';
 }
 
+async function invoke<T>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  return (window as any).__TAURI_INTERNALS__.invoke(command, args);
+}
+
+async function writeBytesToPath(
+  savePath: string,
+  bytes: Uint8Array
+): Promise<void> {
+  const chunkSize = 1024 * 1024;
+  if (bytes.byteLength === 0) {
+    await invoke<void>('write_file_chunk_to_path', {
+      savePath,
+      buffer: [],
+      append: false,
+    });
+    return;
+  }
+
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    await invoke<void>('write_file_chunk_to_path', {
+      savePath,
+      buffer: Array.from(chunk),
+      append: offset > 0,
+    });
+  }
+}
+
+async function saveUrlToPath(
+  url: string,
+  savePath: string,
+  fallbackFetch: () => Promise<Uint8Array>
+): Promise<void> {
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      await invoke<void>('download_url_to_path', {
+        url,
+        savePath,
+      });
+      return;
+    } catch (error) {
+      console.warn('[Desktop] 原生下载失败，回退到浏览器 fetch:', error);
+    }
+  }
+
+  await writeBytesToPath(savePath, await fallbackFetch());
+}
+
 /**
  * 下载图片到用户选择的位置
  * @param imageUrl 图片 URL
@@ -76,14 +127,18 @@ export async function downloadImageToCustomLocation(
     // 非桌面环境，使用浏览器默认下载
     const link = document.createElement('a');
     link.href = imageUrl;
-    link.download = `${sanitizeFilename(defaultName)}.${getExtensionFromMimeType(mimeType || '')}`;
+    link.download = `${sanitizeFilename(
+      defaultName
+    )}.${getExtensionFromMimeType(mimeType || '')}`;
     link.click();
     return true;
   }
 
   try {
     // 获取扩展名
-    const ext = mimeType ? getExtensionFromMimeType(mimeType) : getExtensionFromUrl(imageUrl);
+    const ext = mimeType
+      ? getExtensionFromMimeType(mimeType)
+      : getExtensionFromUrl(imageUrl);
     const fileName = `${sanitizeFilename(defaultName)}.${ext}`;
 
     // 显示保存对话框
@@ -92,19 +147,13 @@ export async function downloadImageToCustomLocation(
       return false; // 用户取消
     }
 
-    // 下载图片数据
-    const response = await fetch(imageUrl, { referrerPolicy: 'no-referrer' });
-    if (!response.ok) {
-      throw new Error(`下载失败: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    // 保存到用户选择的位置
-    const { writeFile } = await import('@tauri-apps/plugin-fs');
-    await writeFile(savePath, uint8Array);
+    await saveUrlToPath(imageUrl, savePath, async () => {
+      const response = await fetch(imageUrl, { referrerPolicy: 'no-referrer' });
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.status}`);
+      }
+      return new Uint8Array(await (await response.blob()).arrayBuffer());
+    });
 
     return true;
   } catch (error) {
@@ -128,7 +177,9 @@ export async function downloadVideoToCustomLocation(
   if (!isTauriEnvironment()) {
     const link = document.createElement('a');
     link.href = videoUrl;
-    link.download = `${sanitizeFilename(defaultName)}.${getExtensionFromMimeType(mimeType || 'video/mp4')}`;
+    link.download = `${sanitizeFilename(
+      defaultName
+    )}.${getExtensionFromMimeType(mimeType || 'video/mp4')}`;
     link.click();
     return true;
   }
@@ -142,17 +193,13 @@ export async function downloadVideoToCustomLocation(
       return false;
     }
 
-    const response = await fetch(videoUrl, { referrerPolicy: 'no-referrer' });
-    if (!response.ok) {
-      throw new Error(`下载失败: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    const { writeFile } = await import('@tauri-apps/plugin-fs');
-    await writeFile(savePath, uint8Array);
+    await saveUrlToPath(videoUrl, savePath, async () => {
+      const response = await fetch(videoUrl, { referrerPolicy: 'no-referrer' });
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.status}`);
+      }
+      return new Uint8Array(await (await response.blob()).arrayBuffer());
+    });
 
     return true;
   } catch (error) {
@@ -176,7 +223,9 @@ export async function downloadAudioToCustomLocation(
   if (!isTauriEnvironment()) {
     const link = document.createElement('a');
     link.href = audioUrl;
-    link.download = `${sanitizeFilename(defaultName)}.${getExtensionFromMimeType(mimeType || 'audio/mpeg')}`;
+    link.download = `${sanitizeFilename(
+      defaultName
+    )}.${getExtensionFromMimeType(mimeType || 'audio/mpeg')}`;
     link.click();
     return true;
   }
@@ -190,17 +239,13 @@ export async function downloadAudioToCustomLocation(
       return false;
     }
 
-    const response = await fetch(audioUrl, { referrerPolicy: 'no-referrer' });
-    if (!response.ok) {
-      throw new Error(`下载失败: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    const { writeFile } = await import('@tauri-apps/plugin-fs');
-    await writeFile(savePath, uint8Array);
+    await saveUrlToPath(audioUrl, savePath, async () => {
+      const response = await fetch(audioUrl, { referrerPolicy: 'no-referrer' });
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.status}`);
+      }
+      return new Uint8Array(await (await response.blob()).arrayBuffer());
+    });
 
     return true;
   } catch (error) {

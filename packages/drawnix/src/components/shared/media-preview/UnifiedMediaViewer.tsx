@@ -7,12 +7,22 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { normalizeImageDataUrl } from '@aitu/utils';
-import type { UnifiedMediaViewerProps, CompareLayout, ViewerMode, MediaItem, MediaViewportRef } from './types';
+import type {
+  UnifiedMediaViewerProps,
+  CompareLayout,
+  ViewerMode,
+  MediaItem,
+  MediaViewportRef,
+} from './types';
 import { useViewerState } from './useViewerState';
 import { MediaViewport } from './MediaViewport';
 import { ThumbnailQueue } from './ThumbnailQueue';
 import { ViewerToolbar } from './ViewerToolbar';
-import { ImageEditorContent, ImageEditorContentRef, ImageEditState } from './ImageEditorContent';
+import {
+  ImageEditorContent,
+  ImageEditorContentRef,
+  ImageEditState,
+} from './ImageEditorContent';
 import {
   exitFullscreenIfActive,
   requestFullscreenIfAllowed,
@@ -94,12 +104,12 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
   // 对比模式下切换到下一组
   const goToNextGroup = useCallback(() => {
     if (items.length <= slotCount) return;
-    
+
     // 找到当前组的最大索引
     const maxCurrentIndex = Math.max(...compareIndices);
     // 下一组的起始索引
     const nextStartIndex = maxCurrentIndex + 1;
-    
+
     if (nextStartIndex >= items.length) {
       // 已经是最后一组，循环到开头
       const newIndices: number[] = [];
@@ -121,12 +131,12 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
   // 对比模式下切换到上一组
   const goToPrevGroup = useCallback(() => {
     if (items.length <= slotCount) return;
-    
+
     // 找到当前组的最小索引
     const minCurrentIndex = Math.min(...compareIndices);
     // 上一组的起始索引
     const prevStartIndex = minCurrentIndex - slotCount;
-    
+
     if (prevStartIndex < 0) {
       // 已经是第一组，循环到最后
       const lastGroupStart = Math.max(0, items.length - slotCount);
@@ -153,18 +163,18 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
       if (!targetItem || targetItem.type !== 'image') {
         return false;
       }
-      
+
       // 保存当前图片的编辑状态（使用 ref 获取最新值）
       const currentEditingItem = editingItemRef.current;
       if (currentEditingItem && editorRef.current) {
         const currentState = editorRef.current.getState();
         editStatesRef.current.set(currentEditingItem.url, currentState);
       }
-      
+
       // 切换图片
       actions.goTo(index);
       updateEditingItem(targetItem);
-      
+
       // 恢复目标图片的编辑状态（如果有）
       // 使用 setTimeout 确保编辑器已经更新
       setTimeout(() => {
@@ -173,7 +183,7 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
           editorRef.current.setState(savedState);
         }
       }, 50);
-      
+
       return true;
     },
     [items, actions, updateEditingItem]
@@ -183,7 +193,7 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
   const handleResetViewWithVideos = useCallback(() => {
     // 重置缩放和位置
     actions.resetView();
-    
+
     // 重置所有视频进度到开始位置
     viewportRefs.current.forEach((viewportRef) => {
       if (viewportRef?.isVideo()) {
@@ -306,7 +316,21 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [visible, mode, items.length, items, currentIndex, focusedSlot, actions, onClose, slotCount, goToNextGroup, goToPrevGroup, switchToEditImage, handleResetViewWithVideos]);
+  }, [
+    visible,
+    mode,
+    items.length,
+    items,
+    currentIndex,
+    focusedSlot,
+    actions,
+    onClose,
+    slotCount,
+    goToNextGroup,
+    goToPrevGroup,
+    switchToEditImage,
+    handleResetViewWithVideos,
+  ]);
 
   // 全屏处理
   const handleFullscreen = useCallback(() => {
@@ -390,13 +414,47 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
     const currentItem = items[currentIndex];
     if (!currentItem) return;
 
-    const url = currentItem.type === 'image'
-      ? normalizeImageDataUrl(currentItem.url)
-      : currentItem.url;
+    const url =
+      currentItem.type === 'image'
+        ? normalizeImageDataUrl(currentItem.url)
+        : currentItem.url;
+    const isDesktopDownload =
+      typeof window !== 'undefined' &&
+      Boolean((window as any).__TAURI_INTERNALS__);
+
+    if (isDesktopDownload) {
+      const { smartDownload, buildDownloadFilename } = await import(
+        '../../../utils/download-utils'
+      );
+      await smartDownload([
+        {
+          url,
+          type: currentItem.type,
+          filename:
+            currentItem.type === 'audio'
+              ? buildDownloadFilename(currentItem.title, 'audio', 'mp3')
+              : undefined,
+          audioMetadata:
+            currentItem.type === 'audio'
+              ? {
+                  title: currentItem.title,
+                  prompt: currentItem.prompt,
+                  tags: currentItem.tags,
+                  coverUrl: currentItem.posterUrl,
+                  artist: currentItem.artist,
+                  album: currentItem.album,
+                }
+              : undefined,
+        },
+      ]);
+      return;
+    }
 
     // 处理 blob: URL（可能是从 IndexedDB 缓存的视频）
     if (url.startsWith('blob:')) {
-      const { unifiedCacheService } = await import('../../../services/unified-cache-service');
+      const { unifiedCacheService } = await import(
+        '../../../services/unified-cache-service'
+      );
       const { downloadFromBlob } = await import('@aitu/utils');
 
       const hashIndex = url.indexOf('#');
@@ -406,8 +464,11 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
         const cachedBlob = await unifiedCacheService.getCachedBlob(taskId);
         if (cachedBlob) {
           const mimeType = cachedBlob.type || 'video/webm';
-          const ext = mimeType.startsWith('video/mp4') ? 'mp4' :
-                     mimeType.startsWith('video/webm') ? 'webm' : 'bin';
+          const ext = mimeType.startsWith('video/mp4')
+            ? 'mp4'
+            : mimeType.startsWith('video/webm')
+            ? 'webm'
+            : 'bin';
           downloadFromBlob(cachedBlob, `merged-video-${Date.now()}.${ext}`);
           return;
         }
@@ -417,40 +478,54 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
       try {
         const response = await fetch(url);
         const blob = await response.blob();
-        const ext = blob.type.startsWith('video/mp4') ? 'mp4' :
-                   blob.type.startsWith('video/webm') ? 'webm' :
-                   blob.type.startsWith('audio/mpeg') ? 'mp3' :
-                   blob.type.startsWith('audio/wav') ? 'wav' :
-                   blob.type.startsWith('audio/') ? 'm4a' :
-                   blob.type.startsWith('image/') ? 'png' : 'bin';
+        const ext = blob.type.startsWith('video/mp4')
+          ? 'mp4'
+          : blob.type.startsWith('video/webm')
+          ? 'webm'
+          : blob.type.startsWith('audio/mpeg')
+          ? 'mp3'
+          : blob.type.startsWith('audio/wav')
+          ? 'wav'
+          : blob.type.startsWith('audio/')
+          ? 'm4a'
+          : blob.type.startsWith('image/')
+          ? 'png'
+          : 'bin';
         downloadFromBlob(blob, `${currentItem.type}_${Date.now()}.${ext}`);
       } catch (fetchError) {
-        console.error('[UnifiedMediaViewer] Failed to fetch blob URL:', fetchError);
+        console.error(
+          '[UnifiedMediaViewer] Failed to fetch blob URL:',
+          fetchError
+        );
       }
       return;
     }
 
     // 普通 URL，使用 smartDownload
-    const { smartDownload, buildDownloadFilename } = await import('../../../utils/download-utils');
-    await smartDownload([{
-      url,
-      type: currentItem.type,
-      filename:
-        currentItem.type === 'audio'
-          ? buildDownloadFilename(currentItem.title, 'audio', 'mp3')
-          : undefined,
-      audioMetadata:
-        currentItem.type === 'audio'
-          ? {
-              title: currentItem.title,
-              prompt: currentItem.prompt,
-              tags: currentItem.tags,
-              coverUrl: currentItem.posterUrl,
-              artist: currentItem.artist,
-              album: currentItem.album,
-            }
-          : undefined,
-    }]);
+    const { smartDownload, buildDownloadFilename } = await import(
+      '../../../utils/download-utils'
+    );
+    await smartDownload([
+      {
+        url,
+        type: currentItem.type,
+        filename:
+          currentItem.type === 'audio'
+            ? buildDownloadFilename(currentItem.title, 'audio', 'mp3')
+            : undefined,
+        audioMetadata:
+          currentItem.type === 'audio'
+            ? {
+                title: currentItem.title,
+                prompt: currentItem.prompt,
+                tags: currentItem.tags,
+                coverUrl: currentItem.posterUrl,
+                artist: currentItem.artist,
+                album: currentItem.album,
+              }
+            : undefined,
+      },
+    ]);
   }, [items, currentIndex]);
 
   // 处理编辑当前媒体
@@ -466,19 +541,29 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
         onEdit(currentItem);
       }
     }
-  }, [items, currentIndex, onEdit, useBuiltInEditor, actions, updateEditingItem]);
+  }, [
+    items,
+    currentIndex,
+    onEdit,
+    useBuiltInEditor,
+    actions,
+    updateEditingItem,
+  ]);
 
   // 处理模式变化（包装 actions.setMode，确保进入编辑模式时设置 editingItem）
-  const handleModeChange = useCallback((newMode: ViewerMode) => {
-    if (newMode === 'edit') {
-      // 进入编辑模式时，设置 editingItem
-      const currentItem = items[currentIndex];
-      if (currentItem && currentItem.type === 'image') {
-        updateEditingItem(currentItem);
+  const handleModeChange = useCallback(
+    (newMode: ViewerMode) => {
+      if (newMode === 'edit') {
+        // 进入编辑模式时，设置 editingItem
+        const currentItem = items[currentIndex];
+        if (currentItem && currentItem.type === 'image') {
+          updateEditingItem(currentItem);
+        }
       }
-    }
-    actions.setMode(newMode);
-  }, [items, currentIndex, actions, updateEditingItem]);
+      actions.setMode(newMode);
+    },
+    [items, currentIndex, actions, updateEditingItem]
+  );
 
   // 返回预览模式
   const handleBackToPreview = useCallback(() => {
@@ -499,64 +584,79 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
   }, []);
 
   // 编辑覆盖回调
-  const handleEditorOverwrite = useCallback((editedImageUrl: string) => {
-    // 使用 ref 获取最新的 editingItem，避免闭包捕获旧值
-    const currentEditingItem = editingItemRef.current;
-    if (onEditOverwrite && currentEditingItem) {
-      onEditOverwrite(editedImageUrl, currentEditingItem);
-    }
-    handleBackToPreview();
-  }, [onEditOverwrite, handleBackToPreview]);
+  const handleEditorOverwrite = useCallback(
+    (editedImageUrl: string) => {
+      // 使用 ref 获取最新的 editingItem，避免闭包捕获旧值
+      const currentEditingItem = editingItemRef.current;
+      if (onEditOverwrite && currentEditingItem) {
+        onEditOverwrite(editedImageUrl, currentEditingItem);
+      }
+      handleBackToPreview();
+    },
+    [onEditOverwrite, handleBackToPreview]
+  );
 
   // 编辑插入回调
-  const handleEditorInsert = useCallback((editedImageUrl: string) => {
-    if (onEditInsert) {
-      onEditInsert(editedImageUrl);
-    }
-    handleBackToPreview();
-  }, [onEditInsert, handleBackToPreview]);
+  const handleEditorInsert = useCallback(
+    (editedImageUrl: string) => {
+      if (onEditInsert) {
+        onEditInsert(editedImageUrl);
+      }
+      handleBackToPreview();
+    },
+    [onEditInsert, handleBackToPreview]
+  );
 
   // 设置对比模式下的 viewport ref
-  const setViewportRef = useCallback((slotIdx: number, ref: MediaViewportRef | null) => {
-    viewportRefs.current[slotIdx] = ref;
-  }, []);
+  const setViewportRef = useCallback(
+    (slotIdx: number, ref: MediaViewportRef | null) => {
+      viewportRefs.current[slotIdx] = ref;
+    },
+    []
+  );
 
   // 视频播放状态同步（联动模式）
-  const handleVideoPlayStateChange = useCallback((sourceSlot: number, isPlaying: boolean) => {
-    if (isSyncingVideoRef.current) return;
-    isSyncingVideoRef.current = true;
-    
-    viewportRefs.current.forEach((viewportRef, idx) => {
-      if (idx !== sourceSlot && viewportRef?.isVideo()) {
-        if (isPlaying) {
-          viewportRef.playVideo();
-        } else {
-          viewportRef.pauseVideo();
+  const handleVideoPlayStateChange = useCallback(
+    (sourceSlot: number, isPlaying: boolean) => {
+      if (isSyncingVideoRef.current) return;
+      isSyncingVideoRef.current = true;
+
+      viewportRefs.current.forEach((viewportRef, idx) => {
+        if (idx !== sourceSlot && viewportRef?.isVideo()) {
+          if (isPlaying) {
+            viewportRef.playVideo();
+          } else {
+            viewportRef.pauseVideo();
+          }
         }
-      }
-    });
-    
-    // 延迟重置标志，避免同步触发的回调再次触发同步
-    setTimeout(() => {
-      isSyncingVideoRef.current = false;
-    }, 50);
-  }, []);
+      });
+
+      // 延迟重置标志，避免同步触发的回调再次触发同步
+      setTimeout(() => {
+        isSyncingVideoRef.current = false;
+      }, 50);
+    },
+    []
+  );
 
   // 视频进度同步（联动模式，用于 seek 操作）
-  const handleVideoTimeUpdate = useCallback((sourceSlot: number, currentTime: number) => {
-    if (isSyncingVideoRef.current) return;
-    isSyncingVideoRef.current = true;
-    
-    viewportRefs.current.forEach((viewportRef, idx) => {
-      if (idx !== sourceSlot && viewportRef?.isVideo()) {
-        viewportRef.setVideoTime(currentTime);
-      }
-    });
-    
-    setTimeout(() => {
-      isSyncingVideoRef.current = false;
-    }, 50);
-  }, []);
+  const handleVideoTimeUpdate = useCallback(
+    (sourceSlot: number, currentTime: number) => {
+      if (isSyncingVideoRef.current) return;
+      isSyncingVideoRef.current = true;
+
+      viewportRefs.current.forEach((viewportRef, idx) => {
+        if (idx !== sourceSlot && viewportRef?.isVideo()) {
+          viewportRef.setVideoTime(currentTime);
+        }
+      });
+
+      setTimeout(() => {
+        isSyncingVideoRef.current = false;
+      }, 50);
+    },
+    []
+  );
 
   // 渲染单图模式
   const renderSingleMode = () => {
@@ -614,8 +714,7 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
       <div className={`unified-viewer__compare ${layoutClass}`}>
         {Array.from({ length: slotCount }).map((_, slotIdx) => {
           const itemIndex = compareIndices[slotIdx];
-          const item =
-            typeof itemIndex === 'number' ? items[itemIndex] : null;
+          const item = typeof itemIndex === 'number' ? items[itemIndex] : null;
 
           return (
             <MediaViewport
@@ -634,14 +733,21 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
               }
               videoAutoPlay={videoAutoPlay}
               videoLoop={videoLoop}
-              onZoomChange={
-                syncMode ? actions.setZoomLevel : undefined
-              }
+              onZoomChange={syncMode ? actions.setZoomLevel : undefined}
               onPanChange={syncMode ? actions.setPan : undefined}
               isCompareMode={true}
               isSyncMode={syncMode}
-              onVideoPlayStateChange={syncMode ? (isPlaying) => handleVideoPlayStateChange(slotIdx, isPlaying) : undefined}
-              onVideoTimeUpdate={syncMode ? (time) => handleVideoTimeUpdate(slotIdx, time) : undefined}
+              onVideoPlayStateChange={
+                syncMode
+                  ? (isPlaying) =>
+                      handleVideoPlayStateChange(slotIdx, isPlaying)
+                  : undefined
+              }
+              onVideoTimeUpdate={
+                syncMode
+                  ? (time) => handleVideoTimeUpdate(slotIdx, time)
+                  : undefined
+              }
             />
           );
         })}
@@ -709,7 +815,9 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
           onSlotCountChange={handleSlotCountChange}
           onLayoutChange={actions.setCompareLayout}
           onSyncToggle={actions.toggleSyncMode}
-          onResetView={mode === 'compare' ? handleResetViewWithVideos : actions.resetView}
+          onResetView={
+            mode === 'compare' ? handleResetViewWithVideos : actions.resetView
+          }
           onClose={onClose}
           onFullscreen={handleFullscreen}
           isImage={currentItem?.type === 'image'}
@@ -720,9 +828,7 @@ export const UnifiedMediaViewer: React.FC<UnifiedMediaViewerProps> = ({
         />
 
         {/* 主内容区 */}
-        <div className="unified-viewer__content">
-          {renderContent()}
-        </div>
+        <div className="unified-viewer__content">{renderContent()}</div>
 
         {/* 缩略图队列 */}
         {showThumbnails && items.length > 1 && (

@@ -39,6 +39,12 @@ export const ToolWinBoxManager: React.FC = () => {
   const { board } = useDrawnix();
   const { isMobile, isTablet, viewportWidth, viewportHeight } = useDeviceType();
   const promptHistoryStateSignatureRef = useRef('');
+  const [iframeLoadErrors, setIframeLoadErrors] = useState<
+    Record<string, boolean>
+  >({});
+  const [iframeReloadTokens, setIframeReloadTokens] = useState<
+    Record<string, number>
+  >({});
 
   const trackWindowInsertToCanvas = useCallback(
     (
@@ -328,6 +334,18 @@ export const ToolWinBoxManager: React.FC = () => {
     return result;
   }, [stackedStates]);
 
+  const openExternalToolUrl = useCallback((url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const reloadExternalTool = useCallback((instanceId: string) => {
+    setIframeLoadErrors((prev) => ({ ...prev, [instanceId]: false }));
+    setIframeReloadTokens((prev) => ({
+      ...prev,
+      [instanceId]: (prev[instanceId] || 0) + 1,
+    }));
+  }, []);
+
   if (stackedStates.length === 0) {
     return null;
   }
@@ -361,6 +379,9 @@ export const ToolWinBoxManager: React.FC = () => {
 
         // 计算窗口尺寸（移动端限制不超出屏幕）
         const windowSize = getWindowSize(tool, size);
+        const externalToolUrl = tool.url ? processToolUrl(tool.url).url : '';
+        const hasIframeLoadError = Boolean(iframeLoadErrors[instanceId]);
+        const iframeReloadToken = iframeReloadTokens[instanceId] || 0;
 
         return (
           <WinBoxWindow
@@ -416,15 +437,73 @@ export const ToolWinBoxManager: React.FC = () => {
                   <InternalComponent {...componentProps} />
                 </Suspense>
               ) : tool.url ? (
-                <iframe
-                  src={processToolUrl(tool.url).url}
-                  title={tool.name}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  sandbox={
-                    tool.permissions?.join(' ') ||
-                    'allow-scripts allow-same-origin'
-                  }
-                />
+                <div
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    height: '100%',
+                  }}
+                >
+                  <iframe
+                    key={`${instanceId}-${iframeReloadToken}`}
+                    src={externalToolUrl}
+                    title={tool.name}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    sandbox={
+                      tool.permissions?.join(' ') ||
+                      'allow-scripts allow-same-origin'
+                    }
+                    onLoad={() =>
+                      setIframeLoadErrors((prev) => ({
+                        ...prev,
+                        [instanceId]: false,
+                      }))
+                    }
+                    onError={() =>
+                      setIframeLoadErrors((prev) => ({
+                        ...prev,
+                        [instanceId]: true,
+                      }))
+                    }
+                  />
+                  {hasIframeLoadError && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 12,
+                        padding: 24,
+                        background: '#fff',
+                        color: '#333',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div>
+                        {language === 'zh'
+                          ? '外部工具加载失败'
+                          : 'External tool failed to load'}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => reloadExternalTool(instanceId)}
+                        >
+                          {language === 'zh' ? '重新加载' : 'Reload'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openExternalToolUrl(externalToolUrl)}
+                        >
+                          {language === 'zh' ? '外部打开' : 'Open externally'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div
                   style={{ padding: 20, textAlign: 'center', color: '#999' }}

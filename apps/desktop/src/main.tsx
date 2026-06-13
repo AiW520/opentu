@@ -1,4 +1,4 @@
-import '../web/src/utils/permissions-policy-fix';
+import '../../web/src/utils/permissions-policy-fix';
 import { isTauriEnvironment } from './utils/tauri-api';
 import { initializeVirtualUrlInterceptor } from './utils/virtual-url-interceptor';
 
@@ -68,7 +68,7 @@ async function bootstrap() {
 
   updateBootProgress(60);
 
-  import('../web/src/app/bootstrap')
+  import('../../web/src/app/bootstrap')
     .then(() => {
       updateBootProgress(100);
 

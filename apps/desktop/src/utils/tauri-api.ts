@@ -10,7 +10,10 @@ export function isTauriEnvironment(): boolean {
 }
 
 // 调用 Tauri 命令
-async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+async function invoke<T>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
   const internals = (window as any).__TAURI_INTERNALS__;
   if (!internals) {
     throw new Error('Not running in Tauri environment');
@@ -83,7 +86,10 @@ export async function getMediaDir(): Promise<string> {
 }
 
 /** 获取缓存媒体文件数据（用于桌面应用中加载虚拟URL） */
-export async function getCachedMediaFile(fileName: string, fileType?: string): Promise<Uint8Array | null> {
+export async function getCachedMediaFile(
+  fileName: string,
+  fileType?: string
+): Promise<Uint8Array | null> {
   try {
     const result = await invoke<string>('get_cached_media_file', {
       fileName,
@@ -124,7 +130,10 @@ export async function getLocalSetting(key: string): Promise<string | null> {
 }
 
 /** 设置本地配置 */
-export async function setLocalSetting(key: string, value: string): Promise<void> {
+export async function setLocalSetting(
+  key: string,
+  value: string
+): Promise<void> {
   return invoke<void>('set_local', { key, value });
 }
 
@@ -166,10 +175,10 @@ export interface FileOperationResult {
 
 /** 文件冲突处理策略 */
 export enum ConflictStrategy {
-  Overwrite = 'Overwrite',  // 覆盖
-  Rename = 'Rename',        // 重命名（添加数字后缀）
-  Skip = 'Skip',            // 跳过
-  Fail = 'Fail',            // 失败
+  Overwrite = 'Overwrite', // 覆盖
+  Rename = 'Rename', // 重命名（添加数字后缀）
+  Skip = 'Skip', // 跳过
+  Fail = 'Fail', // 失败
 }
 
 /**
@@ -255,7 +264,9 @@ export interface MediaFileInfo {
  * @param fileType 文件类型（image/video/audio）
  * @returns 文件列表
  */
-export async function listMediaFiles(fileType?: string): Promise<MediaFileInfo[]> {
+export async function listMediaFiles(
+  fileType?: string
+): Promise<MediaFileInfo[]> {
   return invoke<MediaFileInfo[]>('list_media_files', {
     fileType,
   });
@@ -269,6 +280,22 @@ export async function saveToLocation(
   savePath: string,
   data: Uint8Array
 ): Promise<void> {
-  const { writeFile } = await import('@tauri-apps/plugin-fs');
-  await writeFile(savePath, data);
+  const chunkSize = 1024 * 1024;
+  if (data.byteLength === 0) {
+    await invoke<void>('write_file_chunk_to_path', {
+      savePath,
+      buffer: [],
+      append: false,
+    });
+    return;
+  }
+
+  for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
+    const chunk = data.subarray(offset, offset + chunkSize);
+    await invoke<void>('write_file_chunk_to_path', {
+      savePath,
+      buffer: Array.from(chunk),
+      append: offset > 0,
+    });
+  }
 }

@@ -33,6 +33,7 @@ import {
   injectPPTSlideTransitions,
   normalizePPTSlideTransition,
 } from './ppt-transitions';
+import { smartDownload } from '../../utils/download-utils';
 
 export interface ExportPPTOptions {
   fileName?: string;
@@ -169,25 +170,17 @@ function toPPTXBlob(data: string | ArrayBuffer | Blob | Uint8Array): Blob {
   return new Blob([data as BlobPart], { type: PPTX_MIME_TYPE });
 }
 
-function downloadPPTXBlob(blob: Blob, fileName: string): void {
-  const link = document.createElement('a');
-  link.setAttribute('style', 'display:none;');
-  link.dataset.interception = 'off';
-  document.body.appendChild(link);
-
-  const url = window.URL.createObjectURL(
+async function downloadPPTXBlob(blob: Blob, fileName: string): Promise<void> {
+  const outputBlob =
     blob.type === PPTX_MIME_TYPE
       ? blob
-      : new Blob([blob], { type: PPTX_MIME_TYPE })
-  );
-  link.href = url;
-  link.download = fileName;
-  link.click();
-
-  setTimeout(() => {
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(link);
-  }, 100);
+      : new Blob([blob], { type: PPTX_MIME_TYPE });
+  const url = URL.createObjectURL(outputBlob);
+  try {
+    await smartDownload([{ url, type: 'file', filename: fileName }]);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 class ExportMediaTooLargeError extends Error {
@@ -588,7 +581,10 @@ function blobToDataUrl(
   });
 }
 
-function getMediaCoverSize(pos: { w: number; h: number }): ExportMediaCoverSize {
+function getMediaCoverSize(pos: {
+  w: number;
+  h: number;
+}): ExportMediaCoverSize {
   const ratio = Math.min(4, Math.max(0.4, pos.w / Math.max(pos.h, 0.1)));
   const width =
     ratio >= 1
@@ -605,10 +601,7 @@ function createPngCanvas(
   size: ExportMediaCoverSize
 ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
   if (typeof document === 'undefined') return null;
-  if (
-    typeof navigator !== 'undefined' &&
-    /jsdom/i.test(navigator.userAgent)
-  ) {
+  if (typeof navigator !== 'undefined' && /jsdom/i.test(navigator.userAgent)) {
     return null;
   }
   const canvas = document.createElement('canvas');
@@ -731,7 +724,10 @@ function withTimeout<T>(
   message: string
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    const timer = window.setTimeout(
+      () => reject(new Error(message)),
+      timeoutMs
+    );
     promise.then(
       (value) => {
         window.clearTimeout(timer);
@@ -1183,7 +1179,10 @@ async function resolveMediaCover(
     if (shouldSkipMediaCoverCandidate(candidate, descriptor)) {
       continue;
     }
-    if (candidate.startsWith('data:') && !candidate.toLowerCase().startsWith('data:image/')) {
+    if (
+      candidate.startsWith('data:') &&
+      !candidate.toLowerCase().startsWith('data:image/')
+    ) {
       continue;
     }
     try {
@@ -1887,14 +1886,15 @@ export async function exportFramesToPPT(
   const transitions = sortedFrames.map(getFramePPTTransition);
 
   if (!transitions.some(hasPPTSlideTransition)) {
-    await pptx.writeFile({ fileName });
+    const pptxData = await pptx.write({ outputType: 'blob' });
+    await downloadPPTXBlob(toPPTXBlob(pptxData), fileName);
     return;
   }
 
   const pptxData = await pptx.write({ outputType: 'blob' });
   const pptxBlob = toPPTXBlob(pptxData);
   const outputBlob = await injectPPTSlideTransitions(pptxBlob, transitions);
-  downloadPPTXBlob(outputBlob, fileName);
+  await downloadPPTXBlob(outputBlob, fileName);
 }
 
 export async function exportAllPPTFrames(
