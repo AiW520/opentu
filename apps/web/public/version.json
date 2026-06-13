@@ -1,6 +1,6 @@
 {
   "version": "0.9.9",
-  "buildTime": "2026-06-08T06:28:13.357Z",
+  "buildTime": "2026-06-13T09:34:15.860Z",
   "gitCommit": "unknown",
   "changelog": [
     "异步接口开关持久化 + 图片任务刷新后恢复轮询",

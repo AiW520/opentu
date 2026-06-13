@@ -28,6 +28,8 @@ import {
   isTauriEnvironment,
 } from '../../../utils/desktop-asset-url';
 import { assetStorageService } from '../../../services/asset-storage-service';
+import { unifiedCacheService } from '../../../services/unified-cache-service';
+import { isVirtualMediaUrl } from '../../../utils/virtual-media-url';
 import './ReferenceImageUpload.scss';
 
 const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024;
@@ -143,10 +145,28 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       }
 
       const runtimeUrl = getAssetRuntimeUrl(asset);
-      let blob =
-        isTauriEnvironment() && (asset.filePath || isDesktopAssetUrl(runtimeUrl))
-          ? await assetStorageService.getDesktopAssetBlob(asset)
-          : null;
+      let blob: Blob | null = null;
+
+      if (isTauriEnvironment() && (asset.filePath || isDesktopAssetUrl(runtimeUrl))) {
+        blob = await assetStorageService.getDesktopAssetBlob(asset);
+      }
+
+      if (!blob && isVirtualMediaUrl(runtimeUrl)) {
+        const imageData = await unifiedCacheService.getImageForAI(runtimeUrl);
+        if (imageData.type === 'base64') {
+          const match = imageData.value.match(/^data:([^;,]+)?(?:;[^,]*)?;base64,([\s\S]*)$/i);
+          if (match) {
+            const mimeType = (match[1] || 'image/png').toLowerCase();
+            const payload = (match[2] || '').replace(/\s+/g, '');
+            const binary = atob(payload);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            blob = new Blob([bytes], { type: mimeType });
+          }
+        }
+      }
 
       if (!blob) {
         const response = await fetch(runtimeUrl, {

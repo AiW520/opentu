@@ -8,6 +8,7 @@ import {
   isDesktopAssetUrl,
   isTauriEnvironment,
 } from '../utils/desktop-asset-url';
+import { isVirtualMediaUrl } from '../utils/virtual-media-url';
 import { assetStorageService } from './asset-storage-service';
 import { unifiedCacheService } from './unified-cache-service';
 
@@ -110,17 +111,38 @@ async function fetchReferenceBlob(
 }
 
 async function readDesktopReferenceBlob(source: string): Promise<Blob | null> {
-  if (!isTauriEnvironment() || !isDesktopAssetUrl(source)) {
+  if (!isTauriEnvironment()) {
     return null;
   }
 
-  return assetStorageService.getDesktopAssetBlob({
-    url: source,
-    filePath: undefined,
-    mimeType: 'image/png',
-    type: AssetType.IMAGE,
-    name: 'reference.png',
-  });
+  if (isDesktopAssetUrl(source)) {
+    return assetStorageService.getDesktopAssetBlob({
+      url: source,
+      filePath: undefined,
+      mimeType: 'image/png',
+      type: AssetType.IMAGE,
+      name: 'reference.png',
+    });
+  }
+
+  if (isVirtualMediaUrl(source)) {
+    const imageData = await unifiedCacheService.getImageForAI(source);
+    if (imageData.type === 'base64') {
+      const match = imageData.value.match(/^data:([^;,]+)?(?:;[^,]*)?;base64,([\s\S]*)$/i);
+      if (match) {
+        const mimeType = (match[1] || 'image/png').toLowerCase();
+        const payload = (match[2] || '').replace(/\s+/g, '');
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: mimeType });
+      }
+    }
+  }
+
+  return null;
 }
 
 async function normalizeReferenceBlob(
