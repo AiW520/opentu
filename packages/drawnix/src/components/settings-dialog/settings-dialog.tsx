@@ -711,6 +711,19 @@ export const SettingsDialog = ({
     null
   );
 
+  // 缓存清理相关状态
+  const [cacheStats, setCacheStats] = useState<{
+    totalSizeBytes: number;
+    assetCount: number;
+    percentUsed: number;
+    maxCacheSizeBytes: number;
+  } | null>(null);
+  const [cacheCleanupLoading, setCacheCleanupLoading] = useState(false);
+  const [cacheCleanupMsg, setCacheCleanupMsg] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
   const toggleGroupCollapse = (type: ModelType) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -1019,6 +1032,71 @@ export const SettingsDialog = ({
     }
   }, []);
 
+  const loadCacheStats = useCallback(async () => {
+    if (!isDesktopTauri) return;
+    try {
+      const stats = await tauriInvoke<{
+        totalSizeBytes: number;
+        assetCount: number;
+        percentUsed: number;
+        maxCacheSizeBytes: number;
+      }>('get_media_cache_stats');
+      setCacheStats(stats);
+    } catch (err) {
+      console.warn('[CacheSettings] Failed to load stats:', err);
+    }
+  }, []);
+
+  const handleRunCacheCleanup = useCallback(async () => {
+    if (!isDesktopTauri) return;
+    setCacheCleanupLoading(true);
+    setCacheCleanupMsg(null);
+    try {
+      const result = await tauriInvoke<{
+        removedCount: number;
+        freedBytes: number;
+        orphanFilesRemoved: number;
+        orphanRecordsRemoved: number;
+      }>('run_media_cache_cleanup', { onlyOrphans: false });
+      const freedMB = (result.freedBytes / (1024 * 1024)).toFixed(1);
+      setCacheCleanupMsg({
+        type: 'success',
+        text: `已清理 ${result.removedCount} 个素材，释放 ${freedMB} MB 空间。`,
+      });
+      await loadCacheStats();
+    } catch (err) {
+      console.error('[CacheSettings] Cleanup failed:', err);
+      setCacheCleanupMsg({
+        type: 'error',
+        text: `清理失败: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setCacheCleanupLoading(false);
+    }
+  }, [loadCacheStats]);
+
+  const handleSetMaxCacheSize = useCallback(
+    async (sizeBytes: number) => {
+      if (!isDesktopTauri) return;
+      try {
+        await tauriInvoke('set_media_cache_max_size', {
+          maxSizeBytes: sizeBytes,
+        });
+        await loadCacheStats();
+        setDesktopStorageMsg('缓存容量已更新');
+        if (desktopStorageMsgTimerRef.current) {
+          clearTimeout(desktopStorageMsgTimerRef.current);
+        }
+        desktopStorageMsgTimerRef.current = setTimeout(() => {
+          setDesktopStorageMsg('');
+        }, 3000);
+      } catch (err) {
+        console.error('[CacheSettings] Failed to set max size:', err);
+      }
+    },
+    [loadCacheStats]
+  );
+
   const handleDesktopBrowse = useCallback(async () => {
     try {
       const selected = await tauriInvoke<string | null>('pick_media_folder');
@@ -1077,6 +1155,11 @@ export const SettingsDialog = ({
     if (!isDesktopTauri) return;
     loadDesktopMediaPath();
   }, [loadDesktopMediaPath]);
+
+  useEffect(() => {
+    if (!isDesktopTauri) return;
+    loadCacheStats();
+  }, [loadCacheStats, activeView]);
 
   useEffect(() => {
     return () => {
@@ -3200,6 +3283,118 @@ export const SettingsDialog = ({
                     恢复默认
                   </button>
                 </div>
+
+                {/* 缓存清理区域 */}
+                {cacheStats && (
+                  <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #e5e7eb' }}>
+                    <div className="settings-dialog__section-header" style={{ marginBottom: 16 }}>
+                      <div>
+                        <h3 className="settings-dialog__section-title">媒体缓存</h3>
+                        <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                          {cacheStats.assetCount} 个素材，已使用{' '}
+                          {formatFileSize(cacheStats.totalSizeBytes)} /{' '}
+                          {formatFileSize(cacheStats.maxCacheSizeBytes)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 进度条 */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div
+                        style={{
+                          height: 8,
+                          background: '#e5e7eb',
+                          borderRadius: 4,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: '100%',
+                            width: `${Math.min(cacheStats.percentUsed, 100).toFixed(1)}%`,
+                            background:
+                              cacheStats.percentUsed >= 90
+                                ? '#ef4444'
+                                : cacheStats.percentUsed >= 70
+                                  ? '#f59e0b'
+                                  : '#22c55e',
+                            borderRadius: 4,
+                            transition: 'width 0.3s ease',
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 缓存容量滑块 */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label
+                        className="settings-dialog__label settings-dialog__label--stacked"
+                        style={{ marginBottom: 8 }}
+                      >
+                        最大缓存容量
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <input
+                          type="range"
+                          min="1073741824"
+                          max="107374182400"
+                          step="1073741824"
+                          value={cacheStats.maxCacheSizeBytes}
+                          onChange={(e) => {
+                            const newSize = Number(e.target.value);
+                            handleSetMaxCacheSize(newSize);
+                          }}
+                          style={{ flex: 1 }}
+                        />
+                        <span
+                          style={{
+                            minWidth: 70,
+                            textAlign: 'right',
+                            fontSize: 13,
+                            color: '#374151',
+                          }}
+                        >
+                          {formatFileSize(cacheStats.maxCacheSizeBytes)}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          fontSize: 11,
+                          color: '#9ca3af',
+                          marginTop: 4,
+                        }}
+                      >
+                        <span>1 GB</span>
+                        <span>100 GB</span>
+                      </div>
+                    </div>
+
+                    {/* 清理按钮 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <button
+                        type="button"
+                        className="settings-dialog__button"
+                        onClick={handleRunCacheCleanup}
+                        disabled={cacheCleanupLoading}
+                      >
+                        {cacheCleanupLoading ? '清理中...' : '立即清理缓存'}
+                      </button>
+                      {cacheCleanupMsg && (
+                        <span
+                          style={{
+                            fontSize: 13,
+                            color:
+                              cacheCleanupMsg.type === 'success' ? '#16a34a' : '#ef4444',
+                          }}
+                        >
+                          {cacheCleanupMsg.text}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -1,18 +1,19 @@
+mod cache_cleanup;
+mod cas;
 mod commands;
 mod database;
 mod path_grants;
+mod thumbnail;
 
 use database::Database;
 use path_grants::PathGrantStore;
 use std::sync::Mutex;
-use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<Database>,
     pub path_grants: Mutex<PathGrantStore>,
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .register_uri_scheme_protocol("opentu-asset", |ctx, request| {
@@ -58,6 +59,17 @@ pub fn run() {
             commands::file_manager::delete_media_file,
             commands::file_manager::verify_file_accessible,
             commands::file_manager::list_media_files,
+            commands::import_local_media_asset,
+            commands::download_url_to_media_asset,
+            commands::import_blob_to_media_asset,
+            commands::get_media_cache_stats,
+            commands::set_media_cache_max_size,
+            commands::run_media_cache_cleanup,
+            commands::get_asset_runtime_url,
+            commands::get_thumbnail_runtime_url,
+            commands::list_media_assets_paginated,
+            commands::run_media_migration,
+            commands::scan_legacy_media_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

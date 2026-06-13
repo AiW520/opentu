@@ -5,12 +5,34 @@
 
 import { ASSET_CONSTANTS } from '../constants/ASSET_CONSTANTS';
 import type { StorageQuota, StorageStatus } from '../types/asset.types';
+import { isTauriEnvironment } from './desktop-asset-url';
 
 /**
  * Check Storage Quota
  * 检查存储配额
  */
 export async function checkStorageQuota(): Promise<StorageQuota> {
+  // 桌面端：优先使用 Rust CAS 存储统计
+  if (isTauriEnvironment()) {
+    try {
+      const stats = await (window as any).__TAURI_INTERNALS__.invoke(
+        'get_media_cache_stats',
+      );
+      if (stats && typeof stats.totalSizeBytes === 'number') {
+        const usage = stats.totalSizeBytes;
+        const quota = stats.maxCacheSizeBytes || DEFAULT_DESKTOP_CACHE_QUOTA;
+        return {
+          usage,
+          quota,
+          percentUsed: quota > 0 ? (usage / quota) * 100 : 0,
+          available: quota - usage,
+        };
+      }
+    } catch (error) {
+      console.warn('[StorageQuota] Failed to get desktop cache stats:', error);
+    }
+  }
+
   if ('storage' in navigator && 'estimate' in navigator.storage) {
     const estimate = await navigator.storage.estimate();
     const usage = estimate.usage || 0;
@@ -32,6 +54,9 @@ export async function checkStorageQuota(): Promise<StorageQuota> {
     available: 0,
   };
 }
+
+// 桌面端默认缓存配额 10GB
+const DEFAULT_DESKTOP_CACHE_QUOTA = 10 * 1024 * 1024 * 1024;
 
 /**
  * Get Storage Status
@@ -66,7 +91,33 @@ export async function canAddAssetBySize(blobSize: number): Promise<boolean> {
   return quota.usage + blobSize < maxUsage;
 }
 
-
+/**
+ * Trigger desktop cache cleanup
+ * 触发桌面端缓存清理
+ */
+export async function triggerDesktopCacheCleanup(): Promise<{
+  success: boolean;
+  freedBytes?: number;
+  error?: string;
+}> {
+  if (!isTauriEnvironment()) {
+    return { success: false, error: 'Not in desktop environment' };
+  }
+  try {
+    const result = await (window as any).__TAURI_INTERNALS__.invoke(
+      'run_media_cache_cleanup',
+    );
+    return {
+      success: true,
+      freedBytes: result?.freedBytes || 0,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
 
 /**
  * Get Storage Warning Message

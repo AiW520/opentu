@@ -6,6 +6,8 @@ import { IMAGE_MIME_TYPES } from '../constants';
 import { insertImage } from '../data/image';
 import { MessagePlugin } from './message-plugin';
 import { getImageNaturalSize } from './image-natural-size';
+import { assetStorageService } from '../services/asset-storage-service';
+import { isTauriEnvironment } from './desktop-asset-url';
 
 export { getImageNaturalSize } from './image-natural-size';
 
@@ -77,7 +79,38 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
         const ext = isTransparent ? 'png' : 'jpg';
         const pngImage = base64ToBlob(image);
         const imageName = `drawnix-${new Date().getTime()}.${ext}`;
-        download(pngImage, imageName);
+
+        // 桌面端使用 Tauri 原生文件保存对话框
+        if (isTauriEnvironment()) {
+          try {
+            const { pick_save_location } = await import('@tauri-apps/plugin-dialog');
+            const savePath = await pick_save_location({
+              defaultPath: imageName,
+              filters: [{
+                name: ext.toUpperCase(),
+                extensions: [ext],
+              }],
+            });
+            if (savePath) {
+              // 将 Blob 转换为 ArrayBuffer
+              const arrayBuffer = await pngImage.arrayBuffer();
+              const uint8Array = new Uint8Array(arrayBuffer);
+              // 调用 Tauri 命令保存文件
+              await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
+                fileName: savePath,
+                buffer: Array.from(uint8Array),
+                fileType: 'image',
+              });
+              MessagePlugin.success('图片已保存');
+            }
+          } catch (tauriError) {
+            console.warn('[ImageExport] Tauri save failed, falling back to browser download:', tauriError);
+            download(pngImage, imageName);
+          }
+        } else {
+          // 浏览器端使用原生下载
+          download(pngImage, imageName);
+        }
       }
     } catch (error) {
       console.warn('[ImageExport] Failed to export image:', error);
@@ -88,6 +121,24 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
 
 export const addImage = async (board: PlaitBoard) => {
   try {
+    // 桌面端使用 Tauri 原生文件选择器
+    if (isTauriEnvironment()) {
+      const pickedFiles = await assetStorageService.pickDesktopMediaFiles();
+      if (pickedFiles.length === 0) {
+        return;
+      }
+      // 逐个添加选中的文件
+      for (const file of pickedFiles) {
+        await assetStorageService.addDesktopLocalAssetFromPath({
+          path: file.path,
+          type: 'IMAGE',
+          name: file.name,
+          mimeType: file.mimeType,
+        });
+      }
+      return;
+    }
+    // 浏览器端使用原生 fileOpen
     const imageFile = await fileOpen({
       description: 'Image',
       extensions: Object.keys(
@@ -99,6 +150,7 @@ export const addImage = async (board: PlaitBoard) => {
     if (isFileSystemAbortError(error)) {
       return;
     }
-    throw error;
+    MessagePlugin.error('添加图片失败');
+    console.error('[addImage] Error:', error);
   }
 };

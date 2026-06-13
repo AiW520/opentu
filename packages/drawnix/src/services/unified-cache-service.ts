@@ -1386,26 +1386,220 @@ class UnifiedCacheService {
     contentHash: string
   ): Promise<void> {
     try {
-      // 从 URL 提取文件名
-      const fileName = this.getFileNameFromUrl(url);
-      
-      // 将 blob 转换为 arrayBuffer
       const arrayBuffer = await blob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
-      
-      // 调用 Tauri 命令保存文件
-      const result = await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
-        fileName,
-        buffer: Array.from(uint8Array),
-        fileType: type,
-      });
 
-      console.log('[UnifiedCache] Saved to Tauri file system:', fileName, result);
+      const result = await (window as any).__TAURI_INTERNALS__.invoke(
+        'import_blob_to_media_asset',
+        {
+          blob: Array.from(uint8Array),
+          fileType: type,
+          originalName: this.getFileNameFromUrl(url),
+          mimeType: blob.type || `image/${this.getFileNameFromUrl(url).split('.').pop() || 'png'}`,
+          source: url,
+          generateThumbnails: type === 'image' && blob.size <= MAX_EAGER_THUMBNAIL_BYTES,
+        },
+      );
+
+      if (result && result.contentHash) {
+        const hash = result.contentHash as string;
+        const cachedAt = Date.now();
+        const mediaType = (result.mimeType as string) || `image/${type}`;
+
+        // 更新 IndexedDB 元数据记录
+        const existing = await this.getItem(url);
+        const cachedMedia: CachedMedia = {
+          url,
+          type,
+          mimeType: mediaType,
+          size: (result.size as number) || 0,
+          contentHash: hash,
+          cachedAt,
+          lastUsed: cachedAt,
+          metadata: {
+            ...(existing?.metadata || {}),
+            thumbnailPath: result.thumbnailSmallPath as string | undefined,
+            localPath: result.localPath as string | undefined,
+            width: (result.width as number) || undefined,
+            height: (result.height as number) || undefined,
+          },
+        };
+
+        await this.putItem(cachedMedia);
+
+        if (type === 'image' && result.thumbnailSmallPath) {
+          const runtimeThumbUrl = await (window as any).__TAURI_INTERNALS__.invoke(
+            'get_thumbnail_runtime_url',
+            { contentHash: hash, size: 'small' },
+          );
+          if (runtimeThumbUrl) {
+            this.inMemoryThumbnailCache.set(url, runtimeThumbUrl as string);
+          }
+        }
+
+        if (result.localPath) {
+          this.inMemoryLocalPathCache.set(url, result.localPath as string);
+        }
+
+        console.log('[UnifiedCache] Saved to CAS:', url, 'hash:', hash);
+      }
     } catch (error) {
-      console.error('[UnifiedCache] Failed to save to Tauri file system:', error);
-      // 不要抛出错误，继续执行其他操作
+      console.warn('[UnifiedCache] CAS save failed, falling back to legacy:', error);
+      // 降级：使用 save_file 写入文件，再尝试用 import_local_media_asset 注册到 CAS
+      try {
+        const fileName = this.getFileNameFromUrl(url);
+        const arrayBuffer = await blob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        const localPath = await (window as any).__TAURI_INTERNALS__.invoke('save_file', {
+          fileName,
+          buffer: Array.from(uint8Array),
+          fileType: type,
+        }) as string;
+
+        // 尝试将已保存的文件重新导入到 CAS
+        if (localPath) {
+          try {
+            const importResult = await (window as any).__TAURI_INTERNALS__.invoke(
+              'import_local_media_asset',
+              {
+                sourcePath: localPath,
+                fileType: type,
+                originalName: fileName,
+                mimeType: blob.type || `image/${fileName.split('.').pop() || 'png'}`,
+                source: url,
+                generateThumbnails: type === 'image',
+              },
+            );
+            if (importResult && importResult.contentHash) {
+              const hash = importResult.contentHash as string;
+              const cachedAt = Date.now();
+              const existing = await this.getItem(url);
+              const cachedMedia: CachedMedia = {
+                url,
+                type,
+                mimeType: (importResult.mimeType as string) || blob.type,
+                size: (importResult.size as number) || 0,
+                contentHash: hash,
+                cachedAt,
+                lastUsed: cachedAt,
+                metadata: {
+                  ...(existing?.metadata || {}),
+                  thumbnailPath: importResult.thumbnailSmallPath as string | undefined,
+                  localPath: importResult.localPath as string | undefined,
+                  width: (importResult.width as number) || undefined,
+                  height: (importResult.height as number) || undefined,
+                },
+              };
+              await this.putItem(cachedMedia);
+              if (importResult.localPath) {
+                this.inMemoryLocalPathCache.set(url, importResult.localPath as string);
+              }
+              if (type === 'image' && importResult.thumbnailSmallPath) {
+                const runtimeThumbUrl = await (window as any).__TAURI_INTERNALS__.invoke(
+                  'get_thumbnail_runtime_url',
+                  { contentHash: hash, size: 'small' },
+                );
+                if (runtimeThumbUrl) {
+                  this.inMemoryThumbnailCache.set(url, runtimeThumbUrl as string);
+                }
+              }
+              console.log('[UnifiedCache] Recovered to CAS via legacy path:', url, 'hash:', hash);
+            }
+          } catch (reimportError) {
+            console.warn('[UnifiedCache] CAS re-import failed, file saved to legacy path only:', reimportError);
+            // 文件已经通过 save_file 保存到磁盘，可通过 opentu-asset:// 协议访问
+            if (localPath) {
+              this.inMemoryLocalPathCache.set(url, localPath);
+            }
+          }
+        }
+      } catch (fallbackError) {
+        console.warn('[UnifiedCache] Legacy save also failed:', fallbackError);
+      }
     }
   }
+
+  /**
+   * 获取桌面端素材的运行时 URL
+   * 优先从 content-addressed storage 获取
+   */
+  async getAssetRuntimeUrl(url: string): Promise<string | null> {
+    if (!isTauriRuntime()) return null;
+    const item = await this.getItem(url);
+    const hash = item?.contentHash;
+    if (!hash) return null;
+    try {
+      const assetId = `asset-${hash}`;
+      const runtimeUrl = await (window as any).__TAURI_INTERNALS__.invoke(
+        'get_asset_runtime_url',
+        { assetId },
+      );
+      return runtimeUrl || null;
+    } catch (error) {
+      console.warn('[UnifiedCache] getAssetRuntimeUrl failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取桌面端缩略图的运行时 URL
+   */
+  async getThumbnailRuntimeUrl(url: string, size: 'small' | 'large' = 'small'): Promise<string | null> {
+    if (!isTauriRuntime()) return null;
+    const cached = this.inMemoryThumbnailCache.get(url);
+    if (cached) return cached;
+    const item = await this.getItem(url);
+    const hash = item?.contentHash;
+    if (!hash) return null;
+    try {
+      const runtimeUrl = await (window as any).__TAURI_INTERNALS__.invoke(
+        'get_thumbnail_runtime_url',
+        { contentHash: hash, size },
+      );
+      if (runtimeUrl) {
+        this.inMemoryThumbnailCache.set(url, runtimeUrl as string);
+      }
+      return runtimeUrl || null;
+    } catch (error) {
+      console.warn('[UnifiedCache] getThumbnailRuntimeUrl failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取媒体缓存统计信息
+   */
+  async getMediaCacheStats(): Promise<{ totalSizeBytes: number; assetCount: number; percentUsed: number } | null> {
+    if (!isTauriRuntime()) return null;
+    try {
+      const stats = await (window as any).__TAURI_INTERNALS__.invoke('get_media_cache_stats');
+      return {
+        totalSizeBytes: stats.totalSizeBytes || 0,
+        assetCount: stats.assetCount || 0,
+        percentUsed: stats.percentUsed || 0,
+      };
+    } catch (error) {
+      console.warn('[UnifiedCache] getMediaCacheStats failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 触发媒体缓存清理
+   */
+  async runMediaCacheCleanup(): Promise<boolean> {
+    if (!isTauriRuntime()) return false;
+    try {
+      await (window as any).__TAURI_INTERNALS__.invoke('run_media_cache_cleanup');
+      return true;
+    } catch (error) {
+      console.warn('[UnifiedCache] runMediaCacheCleanup failed:', error);
+      return false;
+    }
+  }
+
+  private inMemoryThumbnailCache: Map<string, string> = new Map();
+  private inMemoryLocalPathCache: Map<string, string> = new Map();
 
   /**
    * 从 URL 提取文件名

@@ -59,6 +59,8 @@ impl Database {
         for subdir in ["图片", "视频", "音频", "PPT", "文本", "压缩包"] {
             fs::create_dir_all(self.media_root.join(subdir))?;
         }
+        fs::create_dir_all(self.media_root.join("blobs"))?;
+        fs::create_dir_all(self.media_root.join("thumbs"))?;
         Ok(())
     }
 
@@ -149,12 +151,265 @@ impl Database {
                 created_at      INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS media_assets (
+                asset_id        TEXT PRIMARY KEY,
+                content_hash    TEXT NOT NULL,
+                mime_type       TEXT,
+                size            INTEGER NOT NULL DEFAULT 0,
+                width           INTEGER,
+                height          INTEGER,
+                duration        REAL,
+                local_path      TEXT NOT NULL,
+                thumbnail_path  TEXT,
+                last_accessed_at INTEGER NOT NULL,
+                ref_count       INTEGER NOT NULL DEFAULT 0,
+                source          TEXT,
+                status          TEXT NOT NULL DEFAULT 'active'
+            );
+
+            CREATE TABLE IF NOT EXISTS cache_settings (
+                key       TEXT PRIMARY KEY,
+                value     TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            );
+
             CREATE INDEX IF NOT EXISTS idx_assets_type    ON assets(type);
             CREATE INDEX IF NOT EXISTS idx_assets_created ON assets(created_at);
             CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_notes_updated  ON knowledge_notes(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_media_content_hash ON media_assets(content_hash);
+            CREATE INDEX IF NOT EXISTS idx_media_last_accessed ON media_assets(last_accessed_at);
+            CREATE INDEX IF NOT EXISTS idx_media_status        ON media_assets(status);
             ",
         )?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaAssetRecord {
+    pub asset_id: String,
+    pub content_hash: String,
+    pub mime_type: Option<String>,
+    pub size: i64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration: Option<f64>,
+    pub local_path: String,
+    pub thumbnail_path: Option<String>,
+    pub last_accessed_at: i64,
+    pub ref_count: i32,
+    pub source: Option<String>,
+    pub status: String,
+}
+
+impl Database {
+    pub fn upsert_media_asset(
+        &self,
+        asset: &MediaAssetRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO media_assets (asset_id, content_hash, mime_type, size, width, height, duration, local_path, thumbnail_path, last_accessed_at, ref_count, source, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            rusqlite::params![
+                asset.asset_id,
+                asset.content_hash,
+                asset.mime_type,
+                asset.size,
+                asset.width,
+                asset.height,
+                asset.duration,
+                asset.local_path,
+                asset.thumbnail_path,
+                asset.last_accessed_at,
+                asset.ref_count,
+                asset.source,
+                asset.status,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_media_asset(&self, asset_id: &str) -> Option<MediaAssetRecord> {
+        self.conn.query_row(
+            "SELECT asset_id, content_hash, mime_type, size, width, height, duration, local_path, thumbnail_path, last_accessed_at, ref_count, source, status
+             FROM media_assets WHERE asset_id = ?1",
+            rusqlite::params![asset_id],
+            |row| {
+                Ok(MediaAssetRecord {
+                    asset_id: row.get(0)?,
+                    content_hash: row.get(1)?,
+                    mime_type: row.get(2)?,
+                    size: row.get(3)?,
+                    width: row.get(4)?,
+                    height: row.get(5)?,
+                    duration: row.get(6)?,
+                    local_path: row.get(7)?,
+                    thumbnail_path: row.get(8)?,
+                    last_accessed_at: row.get(9)?,
+                    ref_count: row.get(10)?,
+                    source: row.get(11)?,
+                    status: row.get(12)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    pub fn get_media_assets_paginated(
+        &self,
+        offset: usize,
+        limit: usize,
+        status_filter: Option<&str>,
+    ) -> Vec<MediaAssetRecord> {
+        let mut query = String::from(
+            "SELECT asset_id, content_hash, mime_type, size, width, height, duration, local_path, thumbnail_path, last_accessed_at, ref_count, source, status FROM media_assets",
+        );
+        if status_filter.is_some() {
+            query.push_str(" WHERE status = ?1");
+        }
+        query.push_str(" ORDER BY last_accessed_at DESC LIMIT ? OFFSET ?");
+
+        let mut stmt = match self.conn.prepare(&query) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        let result: Result<Vec<MediaAssetRecord>, _> = match status_filter {
+            Some(status) => stmt
+                .query_map(rusqlite::params![status, limit as i64, offset as i64], |row| {
+                    Ok(MediaAssetRecord {
+                        asset_id: row.get(0)?,
+                        content_hash: row.get(1)?,
+                        mime_type: row.get(2)?,
+                        size: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
+                        duration: row.get(6)?,
+                        local_path: row.get(7)?,
+                        thumbnail_path: row.get(8)?,
+                        last_accessed_at: row.get(9)?,
+                        ref_count: row.get(10)?,
+                        source: row.get(11)?,
+                        status: row.get(12)?,
+                    })
+                })
+                .map(|iter| iter.filter_map(|r| r.ok()).collect()),
+            None => stmt
+                .query_map(rusqlite::params![limit as i64, offset as i64], |row| {
+                    Ok(MediaAssetRecord {
+                        asset_id: row.get(0)?,
+                        content_hash: row.get(1)?,
+                        mime_type: row.get(2)?,
+                        size: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
+                        duration: row.get(6)?,
+                        local_path: row.get(7)?,
+                        thumbnail_path: row.get(8)?,
+                        last_accessed_at: row.get(9)?,
+                        ref_count: row.get(10)?,
+                        source: row.get(11)?,
+                        status: row.get(12)?,
+                    })
+                })
+                .map(|iter| iter.filter_map(|r| r.ok()).collect()),
+        };
+
+        result.unwrap_or_default()
+    }
+
+    pub fn delete_media_asset(&self, asset_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "DELETE FROM media_assets WHERE asset_id = ?1",
+            rusqlite::params![asset_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn touch_media_asset(
+        &self,
+        asset_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = chrono::Utc::now().timestamp();
+        self.conn.execute(
+            "UPDATE media_assets SET last_accessed_at = ?1 WHERE asset_id = ?2",
+            rusqlite::params![now, asset_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_ref_count(
+        &self,
+        asset_id: &str,
+        delta: i32,
+    ) -> Result<i32, Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "UPDATE media_assets SET ref_count = ref_count + ?1 WHERE asset_id = ?2",
+            rusqlite::params![delta, asset_id],
+        )?;
+        let new_count: i32 = self.conn.query_row(
+            "SELECT ref_count FROM media_assets WHERE asset_id = ?1",
+            rusqlite::params![asset_id],
+            |row| row.get(0),
+        )?;
+        Ok(new_count)
+    }
+
+    pub fn get_cache_setting(&self, key: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT value FROM cache_settings WHERE key = ?1",
+                rusqlite::params![key],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
+    pub fn set_cache_setting(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = chrono::Utc::now().timestamp();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO cache_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![key, value, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_media_assets(
+        &self,
+        status_filter: Option<&str>,
+    ) -> i64 {
+        let (query, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match status_filter {
+            Some(status) => (
+                "SELECT COUNT(*) FROM media_assets WHERE status = ?1",
+                vec![Box::new(status.to_string()) as Box<dyn rusqlite::ToSql>],
+            ),
+            None => (
+                "SELECT COUNT(*) FROM media_assets",
+                Vec::new(),
+            ),
+        };
+
+        let mut refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = match self.conn.prepare(query) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+
+        stmt.query_row(
+            rusqlite::params_from_iter(refs.iter().copied()),
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+    }
+
+    pub fn get_total_media_db_size(&self) -> i64 {
+        self.conn
+            .query_row("SELECT COALESCE(SUM(size), 0) FROM media_assets", [], |row| row.get(0))
+            .unwrap_or(0)
     }
 }

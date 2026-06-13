@@ -4,10 +4,11 @@
  * 切换视图模式时组件不销毁，只更新样式，避免图片重新加载
  */
 
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState, useEffect } from 'react';
 import {
   getAssetRuntimeUrl,
   isDesktopAssetUrl,
+  isTauriEnvironment,
 } from '../../utils/desktop-asset-url';
 import {
   Image as ImageIcon,
@@ -32,6 +33,10 @@ import {
   type ViewMode,
 } from '../../types/asset.types';
 import './AssetItem.scss';
+
+// 桌面端缩略图内存缓存
+const desktopThumbnailCache = new Map<string, string>();
+const DESKTOP_THUMB_CACHE_TTL = 2 * 60 * 1000; // 2分钟缓存
 
 function getDisplayUrl(asset: Asset): string {
   return getAssetRuntimeUrl(asset);
@@ -95,6 +100,53 @@ export const AssetItem = memo<AssetItemProps>(
       asset.type === 'IMAGE' ? 'image' : undefined,
       thumbnailSize
     );
+
+    // 桌面端 CAS 缩略图：直接从 Rust 端获取缩略图 URL
+    const [desktopThumbUrl, setDesktopThumbUrl] = useState<string | undefined>(undefined);
+    useEffect(() => {
+      if (!isTauriEnvironment() || !isDesktopAssetUrl(displayUrl) || asset.type !== 'IMAGE') {
+        setDesktopThumbUrl(undefined);
+        return;
+      }
+
+      const cacheKey = `${displayUrl}|${thumbnailSize}`;
+      const cached = desktopThumbnailCache.get(cacheKey);
+      if (cached) {
+        setDesktopThumbUrl(cached);
+        return;
+      }
+
+      let cancelled = false;
+      (async () => {
+        try {
+          const { unifiedCacheService } = await import(
+            '../../services/unified-cache-service'
+          );
+          if (cancelled) return;
+          const url = await unifiedCacheService.getThumbnailRuntimeUrl(displayUrl, thumbnailSize);
+          if (cancelled) return;
+          if (url) {
+            desktopThumbnailCache.set(cacheKey, url);
+            setDesktopThumbUrl(url);
+          } else {
+            setDesktopThumbUrl(undefined);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            console.warn('[AssetItem] Failed to get desktop thumbnail:', error);
+            setDesktopThumbUrl(undefined);
+          }
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [displayUrl, thumbnailSize, asset.type]);
+
+    // 最终缩略图 URL：桌面 CAS 优先，否则用传统缩略图
+    const finalThumbnailUrl = desktopThumbUrl || thumbnailUrl;
+
     const { isCached, cacheWarning: detectedCacheWarning } = useUnifiedCache(
       (asset.type === 'IMAGE' || asset.type === 'VIDEO') &&
         !isDesktopAssetUrl(displayUrl)
@@ -214,7 +266,7 @@ export const AssetItem = memo<AssetItemProps>(
             )
           ) : asset.type === 'IMAGE' ? (
             <LazyImage
-              src={thumbnailUrl || displayUrl}
+              src={finalThumbnailUrl || displayUrl}
               alt={asset.name}
               className="asset-item__image"
               rootMargin="100px"

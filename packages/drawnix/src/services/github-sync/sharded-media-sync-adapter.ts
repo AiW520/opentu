@@ -31,7 +31,8 @@ import {
 const SHARD_SYSTEM_ENABLED_KEY = 'github_sync_shard_enabled';
 
 /** 应用版本（用于主索引） */
-const APP_VERSION = '0.5.0';
+declare const __APP_VERSION__: string;
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.9.9';
 
 /**
  * 分片媒体同步适配器

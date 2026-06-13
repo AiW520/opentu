@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const GRANT_TTL: Duration = Duration::from_secs(10 * 60);
+const GRANT_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_PATH_GRANTS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -790,6 +790,7 @@ fn extension_from_mime(mime_type: &str, file_type: &str) -> &'static str {
         "image/png" => "png",
         "image/gif" => "gif",
         "image/webp" => "webp",
+        "image/bmp" => "bmp",
         "image/svg+xml" => "svg",
         "video/mp4" => "mp4",
         "video/webm" => "webm",
@@ -874,6 +875,7 @@ fn detect_mime_type(path: &Path) -> String {
         "png" => "image/png",
         "gif" => "image/gif",
         "webp" => "image/webp",
+        "bmp" => "image/bmp",
         "svg" => "image/svg+xml",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
@@ -928,7 +930,7 @@ fn is_supported_import_media(file_type: &str, mime_type: &str, path: &Path) -> b
             mime_type.starts_with("image/")
                 && matches!(
                     extension.as_str(),
-                    "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg"
+                    "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "bmp"
                 )
         }
         "video" => {
@@ -1230,6 +1232,7 @@ fn is_asset_protocol_host(value: &str) -> bool {
 
 fn normalize_decoded_asset_path(value: String) -> String {
     let bytes = value.as_bytes();
+    // Windows absolute path: /X:/... or /X:\...
     if bytes.len() >= 3
         && matches!(bytes[0], b'/' | b'\\')
         && bytes[1].is_ascii_alphabetic()
@@ -1378,7 +1381,7 @@ fn get_media_subdir(file_type: &str) -> &str {
 
 const COPY_BUFFER_BYTES: usize = 128 * 1024;
 const MAX_RANGE_BYTES: u64 = 1024 * 1024;
-const MAX_FULL_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_FULL_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
