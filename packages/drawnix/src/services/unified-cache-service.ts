@@ -757,7 +757,7 @@ class UnifiedCacheService {
         try {
           const internals = (window as any).__TAURI_INTERNALS__;
           if (internals) {
-            const base64Data = await internals.invoke('read_local_file', { path: filePath });
+            const base64Data = await internals.invoke('read_local_file', { base64_path: filePath });
             const mimeType = this.getMimeTypeFromUrl(filePath);
             const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
             blob = new Blob([binaryData], { type: mimeType });

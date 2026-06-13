@@ -335,7 +335,12 @@ export const ToolWinBoxManager: React.FC = () => {
   }, [stackedStates]);
 
   const openExternalToolUrl = useCallback((url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    if (isTauri) {
+      (window as any).__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url });
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
   }, []);
 
   const reloadExternalTool = useCallback((instanceId: string) => {

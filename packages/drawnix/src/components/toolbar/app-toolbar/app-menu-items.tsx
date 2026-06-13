@@ -251,7 +251,12 @@ export const GitHubLink = () => {
       icon={<GithubIcon />}
       data-track="toolbar_click_menu_github"
       onSelect={() => {
-        window.open('https://github.com/ljquan/aitu', '_blank');
+        const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+        if (isTauri) {
+          (window as any).__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: 'https://github.com/AiW520/opentu' });
+        } else {
+          window.open('https://github.com/ljquan/aitu', '_blank');
+        }
       }}
       aria-label={t('menu.github')}
     >
@@ -290,7 +295,12 @@ export const UserManual = () => {
       icon={<BookOpenIcon />}
       data-track="toolbar_click_menu_manual"
       onSelect={() => {
-        window.open('./user-manual/index.html', '_blank');
+        const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+        if (isTauri) {
+          (window as any).__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: 'https://opentu.ai/user-manual/index.html' });
+        } else {
+          window.open('./user-manual/index.html', '_blank');
+        }
       }}
       aria-label={t('menu.userManual')}
     >
@@ -304,6 +314,15 @@ export const VersionInfo = () => {
   const { t } = useI18n();
   // 从 HTML meta 标签获取版本号
   const version = document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '0.0.0';
+
+  const openExternalUrl = (url: string) => {
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    if (isTauri) {
+      (window as any).__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url });
+    } else {
+      window.open(url, '_blank');
+    }
+  };
   
   return (
     <MenuItem
@@ -319,7 +338,7 @@ export const VersionInfo = () => {
             data-track="toolbar_click_menu_changelog"
             onClick={(e) => {
               e.stopPropagation();
-              window.open('./versions.html', '_blank');
+              openExternalUrl('./versions.html');
             }}
           >
             {t('menu.changelog')}
@@ -329,7 +348,7 @@ export const VersionInfo = () => {
             data-track="toolbar_click_menu_more_versions"
             onClick={(e) => {
               e.stopPropagation();
-              window.open('https://release.opentu.ai/', '_blank');
+              openExternalUrl('https://release.opentu.ai/');
             }}
           >
             {t('menu.more')}
