@@ -6,7 +6,7 @@
 
 use crate::cas::ContentAddressedStore;
 use crate::database::{Database, MediaAssetRecord};
-use image;
+use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -83,7 +83,8 @@ impl<'a> MediaMigration<'a> {
 
                     let name = path.file_name()
                         .and_then(|n| n.to_str())
-                        .unwrap_or("");
+                        .unwrap_or("")
+                        .to_string();
 
                     // 只处理旧格式 content-* 文件
                     if !name.starts_with(LEGACY_CONTENT_PREFIX) {

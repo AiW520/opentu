@@ -204,22 +204,23 @@ impl<'a> MediaCacheManager<'a> {
                 break;
             }
 
-            for (asset_id, content_hash, local_path, size) in candidates {
+            let candidate_count = candidates.len();
+            for (asset_id, content_hash, local_path, size) in &candidates {
                 if freed >= target_bytes_to_free {
                     break;
                 }
-                if let Ok(meta) = fs::metadata(&local_path) {
+                if let Ok(meta) = fs::metadata(local_path) {
                     freed += meta.len();
                 } else {
-                    freed += size.max(0) as u64;
+                    freed += (*size).max(0) as u64;
                 }
 
-                let _ = self.cas.remove_content(&content_hash);
-                let _ = self.db.delete_media_asset(&asset_id);
+                let _ = self.cas.remove_content(content_hash);
+                let _ = self.db.delete_media_asset(asset_id);
                 removed += 1;
             }
 
-            if candidates.len() < BATCH_SIZE {
+            if candidate_count < BATCH_SIZE {
                 break;
             }
             offset += BATCH_SIZE;

@@ -8,6 +8,7 @@ mod thumbnail;
 use database::Database;
 use path_grants::PathGrantStore;
 use std::sync::Mutex;
+use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<Database>,

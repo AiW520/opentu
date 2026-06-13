@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
-use image::{ExtendedColorType, ImageEncoder};
+use image::{ExtendedColorType, GenericImageView, ImageEncoder};
 
 use crate::cas::ContentAddressedStore;
 
@@ -109,7 +109,7 @@ impl<'a> ThumbnailGenerator<'a> {
         {
             let file = File::create(&tmp_path)?;
             let writer = BufWriter::new(file);
-            let encoder = WebPEncoder::new(writer);
+            let encoder = WebPEncoder::new_lossless(writer);
             let rgba = resized.to_rgba8();
             let (w, h) = rgba.dimensions();
             encoder.write_image(&rgba, w, h, ExtendedColorType::Rgba8)?;

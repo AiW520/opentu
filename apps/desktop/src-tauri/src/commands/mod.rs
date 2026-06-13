@@ -13,6 +13,7 @@ use crate::path_grants::canonical_existing_file;
 use crate::thumbnail::{read_image_info, ThumbnailGenerator, ThumbnailSize};
 use crate::AppState;
 use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tauri::State;
 

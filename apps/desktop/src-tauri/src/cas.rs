@@ -27,11 +27,11 @@ impl ContentAddressedStore {
         Self { root }
     }
 
-    fn blobs_root(&self) -> PathBuf {
+    pub fn blobs_root(&self) -> PathBuf {
         self.root.join(CAS_BLOBS_DIR)
     }
 
-    fn thumbs_root(&self) -> PathBuf {
+    pub fn thumbs_root(&self) -> PathBuf {
         self.root.join(CAS_THUMBS_DIR)
     }
 
