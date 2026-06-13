@@ -51,6 +51,7 @@ pub fn run() {
             commands::media::copy_media_file_to_path,
             commands::media::get_default_save_path,
             commands::media::get_cached_media_file,
+            commands::media::read_local_file,
             commands::media::import_local_asset,
             commands::export::show_save_dialog,
             commands::file_manager::move_file_to_media,

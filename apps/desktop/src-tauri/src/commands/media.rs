@@ -454,6 +454,19 @@ pub fn get_cached_media_file(
 }
 
 #[tauri::command]
+pub fn read_local_file(base64_path: String) -> Result<String, String> {
+    let path = base64_path;
+    let path = Path::new(&path);
+    
+    if !path.exists() {
+        return Err(format!("文件不存在: {}", path.to_string_lossy()));
+    }
+    
+    let data = fs::read(path).map_err(|e| format!("读取文件失败: {}", e))?;
+    Ok(general_purpose::STANDARD.encode(&data))
+}
+
+#[tauri::command]
 pub fn import_local_asset(
     state: State<AppState>,
     source_path: String,

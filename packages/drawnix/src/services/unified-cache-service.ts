@@ -752,15 +752,20 @@ class UnifiedCacheService {
       let blob: Blob | null = null;
 
       if (url.startsWith('file://')) {
-        // file:// 协议：通过 Tauri API 读取本地文件
+        // file:// 协议：通过 Tauri invoke 命令读取本地文件
         const filePath = url.replace('file://', '');
         try {
-          const fs = await import('@tauri-apps/api/fs');
-          const fileContents = await fs.readBinaryFile(filePath);
-          const mimeType = this.getMimeTypeFromUrl(filePath);
-          blob = new Blob([fileContents], { type: mimeType });
+          const internals = (window as any).__TAURI_INTERNALS__;
+          if (internals) {
+            const base64Data = await internals.invoke('read_local_file', { path: filePath });
+            const mimeType = this.getMimeTypeFromUrl(filePath);
+            const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+            blob = new Blob([binaryData], { type: mimeType });
+          } else {
+            throw new Error('Not in Tauri environment');
+          }
         } catch (error) {
-          console.warn('[UnifiedCache] Failed to read file via Tauri, trying fetch:', error);
+          console.warn('[UnifiedCache] Failed to read file via Tauri invoke, trying fetch:', error);
           // 降级尝试使用 fetch（某些环境可能支持）
           const response = await fetch(url);
           if (!response.ok) {
