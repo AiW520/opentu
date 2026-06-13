@@ -383,28 +383,23 @@ impl Database {
         &self,
         status_filter: Option<&str>,
     ) -> i64 {
-        let (query, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match status_filter {
-            Some(status) => (
-                "SELECT COUNT(*) FROM media_assets WHERE status = ?1",
-                vec![Box::new(status.to_string()) as Box<dyn rusqlite::ToSql>],
-            ),
-            None => (
-                "SELECT COUNT(*) FROM media_assets",
-                Vec::new(),
-            ),
-        };
-
-        let mut refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = match self.conn.prepare(query) {
-            Ok(s) => s,
-            Err(_) => return 0,
-        };
-
-        stmt.query_row(
-            rusqlite::params_from_iter(refs.iter().copied()),
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
+        if let Some(status) = status_filter {
+            self.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM media_assets WHERE status = ?1",
+                    rusqlite::params![status],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+        } else {
+            self.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM media_assets",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+        }
     }
 
     pub fn get_total_media_db_size(&self) -> i64 {

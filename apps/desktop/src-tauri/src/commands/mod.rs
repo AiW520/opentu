@@ -4,7 +4,6 @@ pub mod media;
 pub mod migration;
 pub mod storage;
 
-use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -74,7 +73,6 @@ pub fn import_local_media_asset(
     state: State<'_, AppState>,
     params: ImportMediaParams,
 ) -> Result<MediaAssetResponse, String> {
-    use sha2::Digest;
 
     let source_path = PathBuf::from(&params.source_path);
     if !source_path.exists() || !source_path.is_file() {
@@ -234,8 +232,6 @@ pub fn download_url_to_media_asset(
     source: Option<String>,
     generate_thumbnails: Option<bool>,
 ) -> Result<MediaAssetResponse, String> {
-    use sha2::Digest;
-    use std::io::{Read, Write};
 
     let parsed = reqwest::Url::parse(&url).map_err(|e| format!("无效 URL: {}", e))?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -400,7 +396,6 @@ pub fn import_blob_to_media_asset(
     source: Option<String>,
     generate_thumbnails: Option<bool>,
 ) -> Result<MediaAssetResponse, String> {
-    use sha2::Digest;
 
     let media_root = {
         let db = state.db.lock().map_err(|e| e.to_string())?;

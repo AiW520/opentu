@@ -6,7 +6,7 @@
 
 use crate::cas::ContentAddressedStore;
 use crate::database::{Database, MediaAssetRecord};
-use image;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
