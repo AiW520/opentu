@@ -50,7 +50,14 @@ interface DesktopMediaFileResult {
 export async function blobToBase64Under1MB(blob: Blob): Promise<string> {
   let target = blob;
   if (blob.type.startsWith('image/') && blob.size > MAX_REFERENCE_IMAGE_BYTES) {
-    target = await compressImageBlob(blob, 1);
+    try {
+      target = await compressImageBlob(blob, 1);
+    } catch (error) {
+      console.warn(
+        '[FallbackUtils] Failed to compress reference image, using original:',
+        error
+      );
+    }
   }
   return getDataURL(target);
 }

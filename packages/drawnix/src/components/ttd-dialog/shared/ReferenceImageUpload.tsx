@@ -142,14 +142,13 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       }
 
       const runtimeUrl = getAssetRuntimeUrl(asset);
-      if (isTauriEnvironment()) {
-        return {
-          url: runtimeUrl,
-          name: asset.name,
-        };
-      }
 
-      const response = await fetch(runtimeUrl);
+      const response = await fetch(runtimeUrl, {
+        referrerPolicy: 'no-referrer',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load asset: ${response.status}`);
+      }
       let blob = await response.blob();
 
       if (blob.size > MAX_IMAGE_SIZE_BYTES) {
@@ -161,7 +160,14 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
           '@aitu/utils'
         );
         const strategy = getCompressionStrategy(blob.size / (1024 * 1024));
-        blob = await compressImageBlob(blob, strategy.targetSizeMB);
+        try {
+          blob = await compressImageBlob(blob, strategy.targetSizeMB);
+        } catch (error) {
+          console.warn(
+            '[ReferenceImageUpload] Failed to compress asset reference, using original:',
+            error
+          );
+        }
       }
 
       const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -319,14 +325,10 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
               });
             } catch (compressionErr) {
               MessagePlugin.close(msgId);
-              console.error(
-                '[ReferenceImageUpload] Compression failed:',
+              console.warn(
+                '[ReferenceImageUpload] Compression failed, using original:',
                 compressionErr
               );
-              onError?.(
-                language === 'zh' ? '图片压缩失败' : 'Image compression failed'
-              );
-              continue;
             }
           }
 
@@ -431,10 +433,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
             name: file.name,
             mimeType: file.mimeType,
           });
-          nextImages.push({
-            url: getAssetRuntimeUrl(asset),
-            name: asset.name,
-          });
+          nextImages.push(await assetToReferenceImage(asset));
         }
 
         if (nextImages.length === 0) {
@@ -461,6 +460,7 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
     },
     [
       applySlotImages,
+      assetToReferenceImage,
       currentSlot,
       images,
       maxCount,
