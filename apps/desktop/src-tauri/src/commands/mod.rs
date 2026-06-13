@@ -9,11 +9,10 @@ use sha2::{Digest, Sha256};
 
 use crate::cas::ContentAddressedStore;
 use crate::database::{Database, MediaAssetRecord};
-use crate::path_grants::{canonical_existing_file, canonical_write_file, PathGrantStore};
+use crate::path_grants::canonical_existing_file;
 use crate::thumbnail::{read_image_info, ThumbnailGenerator, ThumbnailSize};
 use crate::AppState;
 use std::fs::{self, File};
-use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use tauri::State;
 

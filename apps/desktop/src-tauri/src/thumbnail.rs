@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
-use image::{ColorType, DynamicImage, GenericImageView};
+use image::{ExtendedColorType, ImageEncoder};
 
 use crate::cas::ContentAddressedStore;
 
@@ -109,34 +109,10 @@ impl<'a> ThumbnailGenerator<'a> {
         {
             let file = File::create(&tmp_path)?;
             let writer = BufWriter::new(file);
-            let encoder = WebPEncoder::new_lossless(writer);
-            let color_type = resized.color();
-            let (rgb_image, color_out) = match color_type {
-                ColorType::Rgba8 => (
-                    resized.to_rgba8().into_raw(),
-                    ColorType::Rgba8,
-                ),
-                ColorType::Rgb8 => (
-                    resized.to_rgb8().into_raw(),
-                    ColorType::Rgb8,
-                ),
-                _ => (
-                    resized.to_rgba8().into_raw(),
-                    ColorType::Rgba8,
-                ),
-            };
-            let (w, h) = (new_width.min(orig_width), new_height.min(orig_height));
-            match color_out {
-                ColorType::Rgba8 => {
-                    encoder.encode(&rgb_image, w, h, image::ExtendedColorType::Rgba8)?
-                }
-                ColorType::Rgb8 => {
-                    encoder.encode(&rgb_image, w, h, image::ExtendedColorType::Rgb8)?
-                }
-                _ => {
-                    encoder.encode(&rgb_image, w, h, image::ExtendedColorType::Rgba8)?
-                }
-            }
+            let encoder = WebPEncoder::new(writer);
+            let rgba = resized.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            encoder.write_image(&rgba, w, h, ExtendedColorType::Rgba8)?;
         }
 
         fs::rename(&tmp_path, &output_path)?;
@@ -192,17 +168,9 @@ pub struct ImageInfo {
 pub fn read_image_info(
     source: &Path,
 ) -> Result<ImageInfo, Box<dyn std::error::Error + Send + Sync>> {
-    let format = image::guess_format(source).map_err(|e| {
-        format!("无法识别图片格式: {}", e)
-    })?;
-    let file = File::open(source)?;
-    let mut reader = image::io::Reader::new(file);
-    reader.set_format(format);
-    let dimensions = reader.into_dimensions()?;
-    Ok(ImageInfo {
-        width: dimensions.0,
-        height: dimensions.1,
-    })
+    let img = image::open(source)?;
+    let (width, height) = img.dimensions();
+    Ok(ImageInfo { width, height })
 }
 
 fn calculate_resize_dimensions(

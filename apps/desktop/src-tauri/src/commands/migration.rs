@@ -6,7 +6,7 @@
 
 use crate::cas::ContentAddressedStore;
 use crate::database::{Database, MediaAssetRecord};
-
+use image;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -152,8 +152,11 @@ impl<'a> MediaMigration<'a> {
 
         // 获取图片尺寸（如果是图片）
         let (width, height) = if is_image_extension(&extension) {
-            match image::image_dimensions(source) {
-                Ok((w, h)) => (Some(w as i64), Some(h as i64)),
+            match image::open(source) {
+                Ok(img) => {
+                    let (w, h) = img.dimensions();
+                    (Some(w as i64), Some(h as i64))
+                }
                 Err(_) => (None, None),
             }
         } else {
