@@ -228,7 +228,7 @@ pub fn import_local_media_asset(
 pub fn download_url_to_media_asset(
     state: State<'_, AppState>,
     url: String,
-    file_type: Option<String>,
+    _file_type: Option<String>,
     source: Option<String>,
     generate_thumbnails: Option<bool>,
 ) -> Result<MediaAssetResponse, String> {

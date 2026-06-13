@@ -31,7 +31,8 @@ pub struct MigrationProgress {
     pub errors: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LegacyMediaFile {
     pub source_path: PathBuf,
     pub relative_path: String,
