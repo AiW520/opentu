@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::cas::ContentAddressedStore;
-use crate::database::{Database, MediaAssetRecord};
+use crate::database::MediaAssetRecord;
 use crate::path_grants::canonical_existing_file;
 use crate::thumbnail::{read_image_info, ThumbnailGenerator, ThumbnailSize};
 use crate::AppState;
@@ -390,7 +390,7 @@ pub fn download_url_to_media_asset(
 pub fn import_blob_to_media_asset(
     state: State<'_, AppState>,
     blob: Vec<u8>,
-    file_type: Option<String>,
+    _file_type: Option<String>,
     original_name: Option<String>,
     mime_type: Option<String>,
     source: Option<String>,
@@ -805,6 +805,3 @@ impl crate::database::Database {
         self.data_dir.join("opentu.db")
     }
 }
-
-// Migration types re-export
-pub use migration::{run_media_migration, scan_legacy_media_files, LegacyMediaFile, MigrationProgress};

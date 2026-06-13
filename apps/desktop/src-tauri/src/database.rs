@@ -370,7 +370,7 @@ impl Database {
         &self,
         key: &str,
         value: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = chrono::Utc::now().timestamp();
         self.conn.execute(
             "INSERT OR REPLACE INTO cache_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",

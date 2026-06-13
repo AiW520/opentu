@@ -69,8 +69,8 @@ pub fn run() {
             commands::get_asset_runtime_url,
             commands::get_thumbnail_runtime_url,
             commands::list_media_assets_paginated,
-            commands::run_media_migration,
-            commands::scan_legacy_media_files,
+            commands::migration::run_media_migration,
+            commands::migration::scan_legacy_media_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

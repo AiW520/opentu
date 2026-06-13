@@ -1,5 +1,5 @@
 use crate::cas::ContentAddressedStore;
-use crate::database::{Database, MediaAssetRecord};
+use crate::database::Database;
 use std::fs;
 use std::path::{Path, PathBuf};
 
