@@ -15,35 +15,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Write release notes to file
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "Opentu Desktop ${{ github.ref_name }}" \
-            --notes "## 安装方式
+          cat > release-notes.md <<'RELEASE_NOTES_EOF'
+          ## 安装方式
 
           ### macOS / Linux 一键安装
 
-          \`\`\`bash
+          ```bash
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | bash
-          \`\`\`
+          ```
 
           或指定版本：
 
-          \`\`\`bash
+          ```bash
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | OPENTU_TAG=${{ github.ref_name }} bash
-          \`\`\`
+          ```
 
           ### Windows
 
-          下载下方 Assets 中的 \`.msi\` 安装包，双击安装即可。
+          下载下方 Assets 中的 `.msi` 安装包，双击安装即可。
 
           ### macOS 未签名包打开方式
 
           如果第一次打开时被系统拦截：
-          1. 对应用点右键，选择\"打开\"，在弹窗里确认\"打开\"
-          2. 或在终端执行：\`xattr -dr com.apple.quarantine \"/Applications/Opentu.app\"\`
+          1. 对应用点右键，选择"打开"，在弹窗里确认"打开"
+          2. 或在终端执行：`xattr -dr com.apple.quarantine "/Applications/Opentu.app"`
 
           ---
 
@@ -83,7 +80,14 @@ jobs:
           2. 在文件资源管理器中打开该路径
           3. 进入对应的「图片」、「视频」或「音频」文件夹即可找到生成的文件
           4. 也可在应用的素材库面板中直接预览和管理生成的资源
-          "
+          RELEASE_NOTES_EOF
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Opentu Desktop ${{ github.ref_name }}" \
+            --notes-file release-notes.md
 
   build-macos-arm:
     needs: create-release
