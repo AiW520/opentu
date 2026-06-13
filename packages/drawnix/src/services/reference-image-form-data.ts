@@ -139,6 +139,8 @@ async function readDesktopReferenceBlob(source: string): Promise<Blob | null> {
         }
         return new Blob([bytes], { type: mimeType });
       }
+    } else if (imageData.type === 'url') {
+      return unifiedCacheService.getCachedBlob(source);
     }
   }
 
@@ -195,6 +197,10 @@ export async function prepareReferenceImageForMultipart(
 
   if (!blob) {
     blob = await readDesktopReferenceBlob(normalizedSource);
+  }
+
+  if (!blob && isVirtualMediaUrl(normalizedSource)) {
+    blob = await unifiedCacheService.getCachedBlob(normalizedSource);
   }
 
   if (!blob) {

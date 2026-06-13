@@ -165,6 +165,8 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
             }
             blob = new Blob([bytes], { type: mimeType });
           }
+        } else if (imageData.type === 'url') {
+          blob = await unifiedCacheService.getCachedBlob(runtimeUrl);
         }
       }
 
