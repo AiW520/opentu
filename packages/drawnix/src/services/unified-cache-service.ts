@@ -709,9 +709,9 @@ class UnifiedCacheService {
 
       url = normalizedUrl;
 
-      // 检查是否为虚拟 URL（素材库本地 URL）
-      // 虚拟 URL 必须转换为 base64，因为大模型无法访问本地虚拟路径
-      const isVirtualUrl = isVirtualMediaUrl(url);
+      // 检查是否为虚拟 URL（素材库本地 URL）或 file:// 协议的本地文件路径
+      // 这些 URL 必须转换为 base64，因为大模型无法访问本地路径
+      const isVirtualUrl = isVirtualMediaUrl(url) || url.startsWith('file://');
 
       // 1. 查询缓存信息
       const info = await this.getCacheInfo(url);
@@ -751,7 +751,24 @@ class UnifiedCacheService {
       // 对于普通 URL，通过 fetch 获取
       let blob: Blob | null = null;
 
-      if (isVirtualUrl) {
+      if (url.startsWith('file://')) {
+        // file:// 协议：通过 Tauri API 读取本地文件
+        const filePath = url.replace('file://', '');
+        try {
+          const fs = await import('@tauri-apps/api/fs');
+          const fileContents = await fs.readBinaryFile(filePath);
+          const mimeType = this.getMimeTypeFromUrl(filePath);
+          blob = new Blob([fileContents], { type: mimeType });
+        } catch (error) {
+          console.warn('[UnifiedCache] Failed to read file via Tauri, trying fetch:', error);
+          // 降级尝试使用 fetch（某些环境可能支持）
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch file:// URL: ${response.status}`);
+          }
+          blob = await response.blob();
+        }
+      } else if (isVirtualUrl) {
         // 虚拟路径：直接从 Cache API 读取，不依赖 SW 拦截
         blob = await this.getCachedBlob(url);
         if (!blob) {
