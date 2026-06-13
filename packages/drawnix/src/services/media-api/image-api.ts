@@ -24,6 +24,7 @@ import {
 } from './utils';
 import { providerTransport } from '../provider-routing/provider-transport';
 import { IMAGE_GENERATION_TIMEOUT_MS } from '../../constants/TASK_CONSTANTS';
+import { appendReferenceImageToFormData } from '../reference-image-form-data';
 
 // 重新导出工具函数，方便外部使用
 export { isAsyncImageModel, aspectRatioToSize };
@@ -219,27 +220,27 @@ export async function generateImageAsync(
   if (params.referenceImages && params.referenceImages.length > 0) {
     for (let i = 0; i < params.referenceImages.length; i++) {
       const refImage = params.referenceImages[i];
-      try {
-        // 尝试 fetch 图片（支持 base64 和 URL）
-        const response = await fetchFn(refImage, { signal });
-        if (response.ok) {
-          const blob = await response.blob();
-          formData.append('input_reference', blob, `reference-${i}.png`);
-        }
-      } catch (e) {
-        console.warn(`[ImageAPI] Failed to fetch reference image ${i}:`, e);
+      if (!refImage) {
+        continue;
       }
+      await appendReferenceImageToFormData(
+        formData,
+        'input_reference',
+        refImage,
+        {
+          filename: `reference-${i + 1}.png`,
+          fetcher: fetchFn,
+          signal,
+        }
+      );
     }
   }
   if (params.maskImage) {
-    try {
-      const response = await fetchFn(params.maskImage, { signal });
-      if (response.ok) {
-        formData.append('mask', await response.blob(), 'mask.png');
-      }
-    } catch (e) {
-      console.warn('[ImageAPI] Failed to fetch mask image:', e);
-    }
+    await appendReferenceImageToFormData(formData, 'mask', params.maskImage, {
+      filename: 'mask.png',
+      fetcher: fetchFn,
+      signal,
+    });
   }
 
   onProgress?.(5);

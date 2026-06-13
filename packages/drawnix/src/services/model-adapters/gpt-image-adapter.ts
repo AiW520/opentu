@@ -1,8 +1,4 @@
-import {
-  base64ToBlob,
-  getFileExtension,
-  normalizeImageDataUrl,
-} from '@aitu/utils';
+import { getFileExtension, normalizeImageDataUrl } from '@aitu/utils';
 import {
   resolveOfficialGPTImageQuality,
   resolveOfficialGPTImageEditSize,
@@ -10,6 +6,7 @@ import {
 } from './image-size-quality-resolver';
 import { sendAdapterRequest } from './context';
 import { registerModelAdapter } from './registry';
+import { prepareReferenceImageForMultipart } from '../reference-image-form-data';
 import type {
   ImageGenerationRequest,
   ImageGenerationResult,
@@ -194,43 +191,23 @@ function appendFormValue(
   formData.append(key, String(value));
 }
 
-function getBlobExtension(blob: Blob, source: string): string {
-  const sourceExtension = getFileExtension(source, blob.type);
-  if (sourceExtension && sourceExtension !== 'bin') {
-    return sourceExtension;
-  }
-
-  const mimeExtension = getFileExtension('', blob.type || 'image/png');
-  return mimeExtension === 'bin' ? 'png' : mimeExtension;
-}
-
 async function imageInputToBlob(
   value: string,
   filenamePrefix: string,
   fetcher: typeof fetch = fetch
 ): Promise<{ blob: Blob; filename: string }> {
-  const normalized = normalizeImageDataUrl(value, 'image/png');
-
-  if (normalized.startsWith('data:')) {
-    const blob = base64ToBlob(normalized);
-    return {
-      blob,
-      filename: `${filenamePrefix}.${getBlobExtension(blob, normalized)}`,
-    };
-  }
-
-  const response = await fetcher(normalized);
-  if (!response.ok) {
+  try {
+    return await prepareReferenceImageForMultipart(value, {
+      filenamePrefix,
+      fetcher,
+    });
+  } catch (error) {
     throw new Error(
-      `GPT Image 编辑图片读取失败: ${response.status} ${response.statusText}`
+      `GPT Image 编辑图片读取失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     );
   }
-
-  const blob = await response.blob();
-  return {
-    blob,
-    filename: `${filenamePrefix}.${getBlobExtension(blob, normalized)}`,
-  };
 }
 
 export async function buildGPTImageEditFormData(

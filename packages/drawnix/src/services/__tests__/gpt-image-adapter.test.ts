@@ -209,9 +209,14 @@ describe('gpt-image-adapter', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
-      'https://example.com/source.webp'
+      'https://example.com/source.webp',
+      expect.objectContaining({ referrerPolicy: 'no-referrer' })
     );
-    expect(fetcher).toHaveBeenNthCalledWith(2, 'https://example.com/mask.png');
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      'https://example.com/mask.png',
+      expect.objectContaining({ referrerPolicy: 'no-referrer' })
+    );
     expect(body.get('size')).toBe('1360x768');
     expect(body.get('image[]')).toBeInstanceOf(Blob);
     expect(body.get('mask')).toBeInstanceOf(Blob);
@@ -250,7 +255,9 @@ describe('gpt-image-adapter', () => {
         },
         fetcher as unknown as typeof fetch
       )
-    ).rejects.toThrow('GPT Image 编辑图片读取失败: 404 Not Found');
+    ).rejects.toThrow(
+      'GPT Image 编辑图片读取失败: 引用图读取失败: 404 Not Found'
+    );
   });
 
   it('requires reference images for official GPT Image edit form data', async () => {

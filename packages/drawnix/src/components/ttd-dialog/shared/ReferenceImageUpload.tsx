@@ -24,6 +24,7 @@ import {
 import { useAssets } from '../../../contexts/AssetContext';
 import {
   getAssetRuntimeUrl,
+  isDesktopAssetUrl,
   isTauriEnvironment,
 } from '../../../utils/desktop-asset-url';
 import { assetStorageService } from '../../../services/asset-storage-service';
@@ -142,14 +143,20 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
       }
 
       const runtimeUrl = getAssetRuntimeUrl(asset);
+      let blob =
+        isTauriEnvironment() && (asset.filePath || isDesktopAssetUrl(runtimeUrl))
+          ? await assetStorageService.getDesktopAssetBlob(asset)
+          : null;
 
-      const response = await fetch(runtimeUrl, {
-        referrerPolicy: 'no-referrer',
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to load asset: ${response.status}`);
+      if (!blob) {
+        const response = await fetch(runtimeUrl, {
+          referrerPolicy: 'no-referrer',
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to load asset: ${response.status}`);
+        }
+        blob = await response.blob();
       }
-      let blob = await response.blob();
 
       if (blob.size > MAX_IMAGE_SIZE_BYTES) {
         throw new Error(`Asset exceeds 25MB limit: ${asset.name}`);

@@ -9,7 +9,6 @@ import {
   resolveInvocationRoute,
   type ModelRef,
 } from '../utils/settings-manager';
-import { normalizeImageDataUrl } from '@aitu/utils';
 import {
   providerTransport,
   resolveInvocationPlanFromRoute,
@@ -17,6 +16,7 @@ import {
   type ResolvedProviderContext,
 } from './provider-routing';
 import { IMAGE_GENERATION_TIMEOUT_MS } from '../constants/TASK_CONSTANTS';
+import { appendReferenceImageToFormData } from './reference-image-form-data';
 
 function getFileExtension(url: string): string | null {
   const pathname = url.split('?')[0] || '';
@@ -93,35 +93,11 @@ function resolveProviderContext(
   };
 }
 
-function isLocalResolvableImage(value: string): boolean {
-  return (
-    value.startsWith('/__aitu_cache__/') || value.startsWith('/asset-library/')
-  );
-}
-
-function isDesktopReferenceUrl(value: string): boolean {
-  return (
-    value.startsWith('opentu-asset:') ||
-    value.startsWith('http://opentu-asset.localhost/') ||
-    value.startsWith('https://opentu-asset.localhost/')
-  );
-}
-
 function getReferenceFileName(
   field: 'input_reference' | 'mask',
   index: number
 ): string {
   return field === 'mask' ? 'mask.png' : `reference-${index + 1}.png`;
-}
-
-async function normalizeImageFormValue(value: string): Promise<string> {
-  if (!isLocalResolvableImage(value)) {
-    return value;
-  }
-
-  const { unifiedCacheService } = await import('./unified-cache-service');
-  const imageData = await unifiedCacheService.getImageForAI(value);
-  return imageData.value;
 }
 
 async function appendReferenceImage(
@@ -130,42 +106,9 @@ async function appendReferenceImage(
   value: string,
   index: number
 ): Promise<void> {
-  if (isDesktopReferenceUrl(value)) {
-    const response = await fetch(value, { referrerPolicy: 'no-referrer' });
-    if (!response.ok) {
-      throw new Error(
-        `Failed to load desktop reference image: ${response.status}`
-      );
-    }
-    const blob = await response.blob();
-    formData.append(field, blob, getReferenceFileName(field, index));
-    return;
-  }
-
-  const normalized = normalizeImageDataUrl(
-    await normalizeImageFormValue(value)
-  );
-  try {
-    const match = normalized.match(/^data:([^;,]+)?;base64,(.*)$/);
-    if (match) {
-      const mimeType = match[1] || 'image/png';
-      const binary = atob(match[2]);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      formData.append(
-        field,
-        new Blob([bytes], { type: mimeType }),
-        getReferenceFileName(field, index)
-      );
-      return;
-    }
-  } catch {
-    // Fall back to raw value below; provider gateway can still resolve URLs.
-  }
-
-  formData.append(field, normalized);
+  await appendReferenceImageToFormData(formData, field, value, {
+    filename: getReferenceFileName(field, index),
+  });
 }
 
 class AsyncImageAPIService {

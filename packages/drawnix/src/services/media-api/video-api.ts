@@ -26,6 +26,7 @@ import {
   shouldDownloadVideoContent,
 } from '../video-binding-utils';
 import { prepareVideoReferenceImageBlob } from '../video-reference-image-utils';
+import { prepareReferenceImageForMultipart } from '../reference-image-form-data';
 
 const DURATION_IN_MODEL_PREFIX = 'sora-2-';
 const durationEncodedInModel = (model?: string | null) =>
@@ -88,18 +89,19 @@ export async function submitVideoGeneration(
   if (params.referenceImages && params.referenceImages.length > 0) {
     for (let i = 0; i < params.referenceImages.length; i++) {
       const refImage = params.referenceImages[i];
-      try {
-        const response = await fetchFn(refImage, { signal });
-        if (response.ok) {
-          let blob = await response.blob();
-          blob = await prepareVideoReferenceImageBlob(blob, params.size);
-          formData.append('input_reference', blob, `reference-${i + 1}.png`);
-        } else {
-          formData.append('input_reference', refImage);
-        }
-      } catch {
-        formData.append('input_reference', refImage);
+      if (!refImage) {
+        continue;
       }
+      const prepared = await prepareReferenceImageForMultipart(refImage, {
+        filename: `reference-${i + 1}.png`,
+        fetcher: fetchFn,
+        signal,
+      });
+      const blob = await prepareVideoReferenceImageBlob(
+        prepared.blob,
+        params.size
+      );
+      formData.append('input_reference', blob, prepared.filename);
     }
   }
 

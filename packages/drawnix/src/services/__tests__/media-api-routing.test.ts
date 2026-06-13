@@ -147,7 +147,7 @@ describe('media-api provider routing', () => {
     );
 
     expect(result.url).toBe('https://cdn.example.com/final.png');
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('uses bearer auth for shared video submission', async () => {

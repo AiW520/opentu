@@ -336,6 +336,50 @@ class AssetStorageService {
     return this.invokeDesktopCommand<DesktopPickedMediaFile[]>('pick_media_files');
   }
 
+  async getDesktopAssetBlob(
+    asset: Pick<Asset, 'filePath' | 'url' | 'mimeType' | 'type' | 'name'>
+  ): Promise<Blob | null> {
+    if (!isTauriEnvironment()) {
+      return null;
+    }
+
+    const fileName = asset.filePath
+      ? getFileNameFromPath(asset.filePath)
+      : (() => {
+          try {
+            const parsed = new URL(asset.url, window.location.origin);
+            return getFileNameFromPath(decodeURIComponent(parsed.pathname));
+          } catch {
+            return getFileNameFromPath(asset.url);
+          }
+        })();
+
+    if (!fileName) {
+      return null;
+    }
+
+    try {
+      const base64Data = await this.invokeDesktopCommand<string>(
+        'get_cached_media_file',
+        {
+          fileName,
+          fileType: this.getDesktopFileType(asset.type),
+        }
+      );
+
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      return new Blob([bytes], { type: asset.mimeType || 'image/png' });
+    } catch (error) {
+      console.warn('[AssetStorageService] Failed to read desktop asset blob:', error);
+      return null;
+    }
+  }
+
   async addDesktopLocalAssetFromPath(input: {
     path: string;
     type?: AssetType;
