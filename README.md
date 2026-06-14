@@ -40,17 +40,17 @@
 
 桌面应用支持 Windows、macOS 和 Linux 系统。
 
-**v1.0.3 版本下载：**
+**最新版本下载：**
 
 | 平台 | 架构 | 下载链接 |
 |------|------|---------|
-| Windows | x64 | [Opentu-Setup-v1.0.3.exe](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-Setup-v1.0.3.exe) |
-| macOS | ARM64 | [Opentu-macos-aarch64-v1.0.3.dmg](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-macos-aarch64-v1.0.3.dmg) |
-| macOS | x64 | [Opentu-macos-x86_64-v1.0.3.dmg](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-macos-x86_64-v1.0.3.dmg) |
-| Linux | AppImage | [Opentu-linux-x86_64-v1.0.3.AppImage](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-linux-x86_64-v1.0.3.AppImage) |
-| Linux | deb | [Opentu-linux-amd64-v1.0.3.deb](https://github.com/AiW520/opentu/releases/download/v1.0.3/Opentu-linux-amd64-v1.0.3.deb) |
+| Windows | x64 | [Opentu-Setup.exe](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-Setup.exe) |
+| macOS | ARM64 | [Opentu-macos-aarch64.dmg](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-macos-aarch64.dmg) |
+| macOS | x64 | [Opentu-macos-x86_64.dmg](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-macos-x86_64.dmg) |
+| Linux | AppImage | [Opentu-linux-x86_64.AppImage](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-x86_64.AppImage) |
+| Linux | deb | [Opentu-linux-amd64.deb](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-amd64.deb) |
 
-**访问所有版本：** [GitHub Releases](https://github.com/AiW520/opentu/releases)
+**访问所有版本：** [GitHub Releases](https://github.com/AITU-Copilot/opentu/releases)
 
 ### 安装路径设置
 
