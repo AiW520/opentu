@@ -87,6 +87,17 @@ export async function ensureBase64ForAI(
     const blob = await res.blob();
     return blobToBase64Under1MB(blob);
   }
+  // 处理虚拟 URL（素材库/缓存 URL）
+  if (isVirtualMediaUrl(value)) {
+    const imageDataFromCache = await unifiedCacheService.getImageForAI(value);
+    if (imageDataFromCache.type === 'base64') {
+      return imageDataFromCache.value;
+    }
+    const blob = await unifiedCacheService.getCachedBlob(value);
+    if (blob) {
+      return blobToBase64Under1MB(blob);
+    }
+  }
   return value;
 }
 
