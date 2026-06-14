@@ -1033,6 +1033,26 @@ class UnifiedCacheService {
       // 2. 通知 SW 删除 Cache API 中的条目
       await this.sendMessageToSW({ type: 'DELETE_CACHE', url });
 
+      // 3. 桌面环境：同时删除 Tauri 文件系统中的文件
+      if (isTauriRuntime()) {
+        const cacheUrl = isVirtualMediaUrl(url) ? normalizeVirtualMediaUrl(url) : url;
+        const fileName = this.getFileNameFromUrl(cacheUrl);
+        const fileType = this.getMediaTypeFromUrl(cacheUrl);
+        try {
+          await (window as any).__TAURI_INTERNALS__.invoke('delete_file', {
+            fileName,
+            fileType,
+          });
+          // console.log('[UnifiedCache] File deleted from Tauri filesystem:', fileName);
+        } catch (error) {
+          console.warn(
+            '[UnifiedCache] Failed to delete file from Tauri filesystem:',
+            fileName,
+            error
+          );
+        }
+      }
+
       this.notifyListeners();
       // console.log('[UnifiedCache] Cache deleted:', url);
     } catch (error) {
