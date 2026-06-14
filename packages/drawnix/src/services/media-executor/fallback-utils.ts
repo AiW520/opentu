@@ -32,8 +32,8 @@ import {
   shouldDownloadVideoContent,
 } from '../video-binding-utils';
 
-/** 参考图转 base64 时最大体积（1MB），避免请求体过大 */
-export const MAX_REFERENCE_IMAGE_BYTES = 1 * 1024 * 1024;
+/** 参考图转 base64 时最大体积（5MB），避免请求体过大 */
+export const MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 interface DesktopMediaFileResult {
   contentHash: string;
