@@ -25,6 +25,7 @@ import { normalizeImageDataUrl } from '@aitu/utils';
 import { AssetSource, AssetType } from '../types/asset.types';
 import { getInsertionPointFromSavedSelection, calculateImageDisplayDimensions } from '../utils/canvas-insertion-layout';
 import { isDesktopAssetUrl } from '../utils/desktop-asset-url';
+import { getSupportedImageFileMimeType } from './blob';
 
 export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
   const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
@@ -246,6 +247,12 @@ export const insertImage = async (
 
   const image = await loadHTMLImageElementFromBlob(imageFile);
   const imageName = getImageFileName(imageFile);
+  const imageMimeType =
+    getSupportedImageFileMimeType(imageFile) || imageFile.type || 'image/png';
+  const imageBlob =
+    imageFile.type === imageMimeType
+      ? imageFile
+      : imageFile.slice(0, imageFile.size, imageMimeType);
   let imageUrl: string;
 
   try {
@@ -254,8 +261,8 @@ export const insertImage = async (
       type: AssetType.IMAGE,
       source: AssetSource.LOCAL,
       name: imageName,
-      blob: imageFile,
-      mimeType: imageFile.type,
+      blob: imageBlob,
+      mimeType: imageMimeType,
     });
     imageUrl = asset.url;
   } catch {
@@ -263,7 +270,7 @@ export const insertImage = async (
       '../services/unified-cache-service'
     );
     const cached = await unifiedCacheService.cacheLocalMediaByContent(
-      imageFile,
+      imageBlob,
       'image',
       {
         source: 'clipboard',
