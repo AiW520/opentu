@@ -7,10 +7,10 @@
   "homepage": "https://opentu.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ljquan/aitu.git"
+    "url": "https://github.com/AiW520/opentu.git"
   },
   "bugs": {
-    "url": "https://github.com/ljquan/aitu/issues"
+    "url": "https://github.com/AiW520/opentu/issues"
   },
   "keywords": [
     "whiteboard",

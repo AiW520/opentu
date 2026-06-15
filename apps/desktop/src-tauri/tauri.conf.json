@@ -41,7 +41,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/ljquan/opentu/releases/latest/download/latest.json"
+        "https://github.com/AiW520/opentu/releases/latest/download/latest.json"
       ],
       "pubkey": ""
     }

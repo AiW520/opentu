@@ -35,6 +35,9 @@ import Menu from '../../menu/menu';
 import { useContext, useState, useCallback } from 'react';
 import { MenuContentPropsContext } from '../../menu/common';
 import { EVENT } from '../../../constants';
+import { openExternalUrl } from '../../../utils/open-external-url';
+
+const OPENTU_GITHUB_URL = 'https://github.com/AiW520/opentu';
 
 export const SaveToFile = () => {
   const board = useBoard();
@@ -251,7 +254,7 @@ export const GitHubLink = () => {
       icon={<GithubIcon />}
       data-track="toolbar_click_menu_github"
       onSelect={() => {
-        window.open('https://github.com/ljquan/aitu', '_blank');
+        void openExternalUrl(OPENTU_GITHUB_URL);
       }}
       aria-label={t('menu.github')}
     >
@@ -290,7 +293,7 @@ export const UserManual = () => {
       icon={<BookOpenIcon />}
       data-track="toolbar_click_menu_manual"
       onSelect={() => {
-        window.open('./user-manual/index.html', '_blank');
+        void openExternalUrl('./user-manual/index.html');
       }}
       aria-label={t('menu.userManual')}
     >
@@ -319,7 +322,7 @@ export const VersionInfo = () => {
             data-track="toolbar_click_menu_changelog"
             onClick={(e) => {
               e.stopPropagation();
-              window.open('./versions.html', '_blank');
+              void openExternalUrl('./versions.html');
             }}
           >
             {t('menu.changelog')}
@@ -329,7 +332,7 @@ export const VersionInfo = () => {
             data-track="toolbar_click_menu_more_versions"
             onClick={(e) => {
               e.stopPropagation();
-              window.open('https://release.opentu.ai/', '_blank');
+              void openExternalUrl('https://release.opentu.ai/');
             }}
           >
             {t('menu.more')}
