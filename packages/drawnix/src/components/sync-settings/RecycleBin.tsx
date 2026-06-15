@@ -16,6 +16,7 @@ import {
 import { syncEngine } from '../../services/github-sync';
 import { ConfirmDialog } from '../dialog/ConfirmDialog';
 import type { DeletedItems } from '../../services/github-sync/types';
+import { openExternalUrl } from '../../utils/open-external-url';
 
 /** 构建画板文件的 Gist URL */
 function getBoardGistUrl(gistId: string, boardId: string): string {
@@ -229,7 +230,9 @@ export function RecycleBin({ isConnected, onRefresh }: RecycleBinProps) {
                               variant="text"
                               size="small"
                               icon={<LinkIcon />}
-                              onClick={() => window.open(getBoardGistUrl(gistId, board.id), '_blank')}
+                              onClick={() => {
+                                void openExternalUrl(getBoardGistUrl(gistId, board.id));
+                              }}
                               title="在 GitHub 查看文件"
                             >
                               查看

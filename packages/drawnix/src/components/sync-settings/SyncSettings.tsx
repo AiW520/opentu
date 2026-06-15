@@ -31,6 +31,7 @@ import { RecycleBin } from './RecycleBin';
 import { ConfirmDialog, useConfirmDialog } from '../dialog/ConfirmDialog';
 import { LockOnIcon, LockOffIcon } from 'tdesign-icons-react';
 import { safeReload } from '../../utils/active-tasks';
+import { openExternalUrl } from '../../utils/open-external-url';
 import './sync-settings.scss';
 import { HoverTip } from '../shared';
 
@@ -429,7 +430,7 @@ export function SyncSettings({ visible, onClose }: SyncSettingsProps) {
   // 打开 Gist 页面
   const handleOpenGist = useCallback(() => {
     if (gistUrl) {
-      window.open(gistUrl, '_blank');
+      void openExternalUrl(gistUrl);
     }
   }, [gistUrl]);
 
@@ -697,7 +698,9 @@ export function SyncSettings({ visible, onClose }: SyncSettingsProps) {
                                 variant="text"
                                 size="small"
                                 icon={<LinkIcon />}
-                                onClick={() => window.open(gist.url, '_blank')}
+                                onClick={() => {
+                                  void openExternalUrl(gist.url);
+                                }}
                               />
                             </HoverTip>
                             <HoverTip content="删除">
