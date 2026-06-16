@@ -232,8 +232,29 @@ export const DialogTaskList: React.FC<DialogTaskListProps> = ({
           urls.length > 1 ? '多图已插入到白板' : '图片已插入到白板'
         );
       } else if (task.type === TaskType.VIDEO) {
-        await insertVideoFromUrl(board, task.result.url);
-        MessagePlugin.success('视频已插入到白板');
+        const urls = task.result.urls?.length
+          ? task.result.urls
+          : task.result.url
+          ? [task.result.url]
+          : [];
+        for (const [index, url] of urls.entries()) {
+          await insertVideoFromUrl(
+            board,
+            url,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            task.result.thumbnailUrls?.[index] ||
+              task.result.thumbnailUrl ||
+              task.result.previewImageUrl
+          );
+        }
+        MessagePlugin.success(
+          urls.length > 1 ? '多个视频已插入到白板' : '视频已插入到白板'
+        );
       }
     } catch (error) {
       console.error('Failed to insert to board:', error);

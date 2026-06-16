@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import classNames from 'classnames';
+import { stripVideoUrlMarker } from '../../utils/video-url';
 
 export interface VideoItem {
   url: string;
@@ -20,19 +21,42 @@ export const Video: React.FC<VideoProps> = (props: VideoProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoError, setVideoError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const hasPrimedPreviewRef = useRef(false);
 
   const { videoItem, isFocus = false, isSelected = false, readonly = false } = props;
   const { url: rawUrl, poster, videoType } = videoItem;
 
-  // 清理 URL 中的 #video 标识符（用于视频类型识别，但不影响实际播放）
-  const url = rawUrl?.replace('#video', '') || '';
+  // 清理 URL 中的视频标识符（用于类型识别，但不影响实际播放）
+  const url = stripVideoUrlMarker(rawUrl || '');
   
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
-      const handleLoadedData = () => {
+      setIsLoading(true);
+      setVideoError(false);
+      hasPrimedPreviewRef.current = false;
+
+      const primePausedPreviewFrame = () => {
+        if (poster || hasPrimedPreviewRef.current || !Number.isFinite(video.duration)) {
+          return;
+        }
+        hasPrimedPreviewRef.current = true;
+        const targetTime =
+          video.duration > 0.2 ? 0.1 : Math.max(0, video.duration / 2);
+        if (Math.abs(video.currentTime - targetTime) < 0.01) {
+          return;
+        }
+        try {
+          video.currentTime = targetTime;
+        } catch {
+          // Some signed/cross-origin videos can reject seeking; playback still works.
+        }
+      };
+
+      const handleReady = () => {
         setIsLoading(false);
         setVideoError(false);
+        primePausedPreviewFrame();
       };
       
       const handleError = () => {
@@ -40,16 +64,24 @@ export const Video: React.FC<VideoProps> = (props: VideoProps) => {
         setVideoError(true);
       };
 
-      video.addEventListener('loadeddata', handleLoadedData);
+      video.addEventListener('loadedmetadata', handleReady);
+      video.addEventListener('loadeddata', handleReady);
+      video.addEventListener('canplay', handleReady);
       video.addEventListener('error', handleError);
 
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        handleReady();
+      }
+
       return () => {
-        video.removeEventListener('loadeddata', handleLoadedData);
+        video.removeEventListener('loadedmetadata', handleReady);
+        video.removeEventListener('loadeddata', handleReady);
+        video.removeEventListener('canplay', handleReady);
         video.removeEventListener('error', handleError);
       };
     }
     return undefined;
-  }, [url]);
+  }, [poster, url]);
 
   const stopCanvasPropagation = (e: React.SyntheticEvent) => {
     if (readonly) {
@@ -146,7 +178,10 @@ export const Video: React.FC<VideoProps> = (props: VideoProps) => {
         controls={!readonly}
         muted
         playsInline
+        preload="auto"
         draggable={false}
+        // @ts-expect-error -- React types lack referrerPolicy on <video>
+        referrerPolicy="no-referrer"
         className={classNames('video-origin', {
           'video-origin--focus': isFocus,
           'video-origin--selected': isSelected,

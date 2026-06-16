@@ -610,10 +610,30 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           urls.length > 1 ? '多图已插入到白板' : '图片已插入到白板'
         );
       } else if (task.type === TaskType.VIDEO) {
-        // 插入视频到白板
-        await insertVideoFromUrl(board, taskResult.url);
+        const urls = taskResult.urls?.length
+          ? taskResult.urls
+          : taskResult.url
+          ? [taskResult.url]
+          : [];
+        for (const [index, url] of urls.entries()) {
+          await insertVideoFromUrl(
+            board,
+            url,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            taskResult.thumbnailUrls?.[index] ||
+              taskResult.thumbnailUrl ||
+              taskResult.previewImageUrl
+          );
+        }
         // console.log('Video inserted to board:', taskId);
-        MessagePlugin.success('视频已插入到白板');
+        MessagePlugin.success(
+          urls.length > 1 ? '多个视频已插入到白板' : '视频已插入到白板'
+        );
       } else if (task.type === TaskType.AUDIO) {
         if (isLyricsTask(task)) {
           const lyricsLabel =

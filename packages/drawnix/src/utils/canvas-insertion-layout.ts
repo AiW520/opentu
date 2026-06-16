@@ -383,7 +383,11 @@ function resolveAlignedX(
 
 function getSavedSelectionElements(board: PlaitBoard): PlaitElement[] {
   const appState = (board as any).appState;
-  const savedElementIds: string[] = Array.isArray(appState?.lastSelectedElementIds)
+  const savedElementIds: string[] = Array.isArray(
+    appState?.lastNonEmptySelectedElementIds
+  )
+    ? appState.lastNonEmptySelectedElementIds
+    : Array.isArray(appState?.lastSelectedElementIds)
     ? appState.lastSelectedElementIds
     : [];
 

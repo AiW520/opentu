@@ -1,10 +1,12 @@
 import {
   PlaitBoard,
   Point,
+  Transforms,
 } from '@plait/core';
 import { getInsertionPointForSelectedElements, getInsertionPointBelowBottommostElement, scrollToPointIfNeeded } from '../utils/selection-utils';
 import { analytics } from '../utils/posthog-analytics';
 import { getInsertionPointFromSavedSelection } from '../utils/canvas-insertion-layout';
+import { createVideoImageItem } from '../utils/video-url';
 
 /**
  * 获取视频真实尺寸的接口
@@ -200,7 +202,8 @@ export const insertVideoFromUrl = async (
   referenceDimensions?: { width: number; height: number },
   skipScroll?: boolean,
   skipCentering?: boolean,
-  lockReferenceDimensions?: boolean
+  lockReferenceDimensions?: boolean,
+  poster?: string
 ) => {
   if (!board) {
     throw new Error('Board is required for video insertion');
@@ -276,21 +279,16 @@ export const insertVideoFromUrl = async (
 
     // console.log('Inserting video element with display dimensions:', displayDimensions, 'at point:', insertionPoint);
 
-    // 直接使用原始URL，并添加 #video 标识符
-    // 这样刷新后视频仍然可以正常显示（只要原始URL有效）
-    // 如果URL已经有hash fragment（如merged-video），就不再添加#video
-    const videoWithFragment = videoUrl.includes('#') ? videoUrl : `${videoUrl}#video`;
-    const videoAsImageElement = {
-      url: videoWithFragment,
-      width: displayDimensions.width,
-      height: displayDimensions.height,
-      isVideo: true,
-      videoType: 'video',
-    };
+    const videoAsImageElement = createVideoImageItem(
+      videoUrl,
+      displayDimensions.width,
+      displayDimensions.height,
+      poster
+    );
 
     // console.log('[insertVideoFromUrl] Creating video as image element:', {
     //   originalUrl: videoUrl,
-    //   urlWithFragment: videoWithFragment,
+    //   urlWithFragment: videoAsImageElement.url,
     //   dimensions: displayDimensions,
     //   insertionPoint,
     //   isBlobUrl: videoUrl.startsWith('blob:')
@@ -298,7 +296,22 @@ export const insertVideoFromUrl = async (
 
     // 使用DrawTransforms插入视频元素
     const { DrawTransforms } = await import('@plait/draw');
+    const insertIndex = board.children.length;
     DrawTransforms.insertImage(board, videoAsImageElement, insertionPoint);
+    const insertedElement = board.children[insertIndex] as any;
+    if (insertedElement?.url === videoAsImageElement.url) {
+      Transforms.setNode(
+        board,
+        {
+          isVideo: true,
+          videoType: 'video',
+          width: displayDimensions.width,
+          height: displayDimensions.height,
+          ...(poster ? { poster } : {}),
+        },
+        [insertIndex]
+      );
+    }
 
     // 埋点：视频插入画布
     analytics.track('asset_insert_canvas', {

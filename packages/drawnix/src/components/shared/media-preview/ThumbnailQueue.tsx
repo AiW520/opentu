@@ -9,6 +9,7 @@ import { AudioCover } from '../AudioCover';
 import { RetryImage } from '../../retry-image';
 import { VideoPosterPreview } from '../VideoPosterPreview';
 import type { ThumbnailQueueProps, MediaItem } from './types';
+import { stripVideoUrlMarker } from '../../../utils/video-url';
 import './ThumbnailQueue.scss';
 
 const ThumbnailImage: React.FC<{
@@ -143,7 +144,9 @@ export const ThumbnailQueue: React.FC<ThumbnailQueueProps> = ({
       const isDragging = draggedIndex === index;
       const isVideo = item.type === 'video';
       const isAudio = item.type === 'audio';
-      const normalizedUrl = normalizeImageDataUrl(item.url);
+      const normalizedUrl = isVideo
+        ? stripVideoUrlMarker(item.url)
+        : normalizeImageDataUrl(item.url);
       const posterUrl = item.posterUrl ? normalizeImageDataUrl(item.posterUrl) : '';
       const thumbnailUrl = getThumbnailUrl(
         isAudio && posterUrl ? posterUrl : normalizedUrl,

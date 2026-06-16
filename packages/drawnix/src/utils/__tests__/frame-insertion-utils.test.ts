@@ -585,7 +585,7 @@ describe('frame-insertion-utils PPT helpers', () => {
 
     const result = await insertMediaIntoSelectedFrame(
       board,
-      'https://example.com/video.mp4',
+      'https://example.com/video?token=abc',
       'video',
       { width: 800, height: 600 }
     );
@@ -598,10 +598,37 @@ describe('frame-insertion-utils PPT helpers', () => {
       type: 'image',
       frameId: 'frame-1',
       isVideo: true,
+      videoType: 'video',
+      url: 'https://example.com/video?token=abc#video',
       points: [
         [240, 0],
         [1680, 1080],
       ],
+    });
+  });
+
+  it('keeps inserting into the last non-empty selected frame after focus clears selection', async () => {
+    const board = createBoard([createFrame()]);
+    board.appState = {
+      lastSelectedElementIds: [],
+      lastNonEmptySelectedElementIds: ['frame-1'],
+    };
+
+    const result = await insertMediaIntoSelectedFrame(
+      board,
+      'https://example.com/video.mp4',
+      'video',
+      { width: 1280, height: 720 }
+    );
+
+    expect(result).toMatchObject({
+      point: [0, 0],
+      size: { width: 1920, height: 1080 },
+    });
+    expect(board.children[1]).toMatchObject({
+      frameId: 'frame-1',
+      isVideo: true,
+      url: 'https://example.com/video.mp4#video',
     });
   });
 });

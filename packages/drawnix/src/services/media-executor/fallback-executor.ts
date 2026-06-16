@@ -113,6 +113,27 @@ function extractUrlsFromUploadedImages(
   return urls.length > 0 ? urls : undefined;
 }
 
+function normalizeReferenceImageUrls(
+  referenceImages: unknown,
+  uploadedImages: unknown
+): string[] | undefined {
+  const urls = new Set<string>();
+  const addUrl = (url: unknown) => {
+    if (typeof url !== 'string') return;
+    const trimmed = url.trim();
+    if (trimmed) {
+      urls.add(trimmed);
+    }
+  };
+
+  if (Array.isArray(referenceImages)) {
+    referenceImages.forEach(addUrl);
+  }
+  extractUrlsFromUploadedImages(uploadedImages)?.forEach(addUrl);
+
+  return urls.size > 0 ? Array.from(urls) : undefined;
+}
+
 function getStringParam(
   params: ImageGenerationParams,
   keys: string[]
@@ -189,10 +210,10 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       quality,
       count = 1,
     } = params;
-    const referenceImages =
-      (params.referenceImages && params.referenceImages.length > 0
-        ? params.referenceImages
-        : undefined) || extractUrlsFromUploadedImages(params.uploadedImages);
+    const referenceImages = normalizeReferenceImageUrls(
+      params.referenceImages,
+      params.uploadedImages
+    );
     const shouldUseEditSchema = isImageEditRequest(params, referenceImages);
     const invocationOptions = {
       preferredRequestSchema: shouldUseEditSchema
@@ -1281,11 +1302,22 @@ export class FallbackMediaExecutor implements IMediaExecutor {
    * 规范化 baseUrl，移除尾部 / 或 /v1，便于拼接 /v1/videos
    */
   private normalizeApiBase(url: string): string {
-    let base = url.replace(/\/+$/, '');
+    const trimmed = url.trim();
+    const safeUrl = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : 'https://api.tu-zi.com';
+    let base = safeUrl.replace(/\/+$/, '');
     if (base.endsWith('/v1')) {
       base = base.slice(0, -3);
     }
     return base;
+  }
+
+  private normalizeAbsoluteApiBase(url: string): string {
+    const trimmed = url.trim();
+    return /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : 'https://api.tu-zi.com/v1';
   }
 
   /**
@@ -1315,7 +1347,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
     return {
       imageConfig: {
         apiKey: imageRoute.apiKey,
-        baseUrl: imageRoute.baseUrl || 'https://api.tu-zi.com/v1',
+        baseUrl: this.normalizeAbsoluteApiBase(imageRoute.baseUrl),
         modelName: imageRoute.modelId,
         authType:
           imagePlan?.provider.authType || inferAuthTypeFromRoute(imageRoute),
@@ -1330,7 +1362,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       },
       textConfig: {
         apiKey: textRoute.apiKey,
-        baseUrl: textRoute.baseUrl || 'https://api.tu-zi.com/v1',
+        baseUrl: this.normalizeAbsoluteApiBase(textRoute.baseUrl),
         modelName: textRoute.modelId,
         authType:
           textPlan?.provider.authType || inferAuthTypeFromRoute(textRoute),
@@ -1344,9 +1376,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       videoConfig: {
         apiKey: videoRoute.apiKey,
         // 规范化 baseUrl，移除尾部 / 或 /v1，便于拼接 /v1/videos
-        baseUrl: this.normalizeApiBase(
-          videoRoute.baseUrl || 'https://api.tu-zi.com'
-        ),
+        baseUrl: this.normalizeApiBase(videoRoute.baseUrl),
         authType:
           videoPlan?.provider.authType || inferAuthTypeFromRoute(videoRoute),
         providerType:

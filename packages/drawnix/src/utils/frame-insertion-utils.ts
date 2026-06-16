@@ -16,6 +16,7 @@ import { DrawTransforms } from '@plait/draw';
 import { isFrameElement, type PlaitFrame } from '../types/frame.types';
 import { FrameTransforms } from '../plugins/with-frame';
 import { getImageRegion } from '../services/ppt/ppt-layout-engine';
+import { createVideoImageItem } from './video-url';
 import type {
   PPTFrameMeta,
   PPTSlideImageHistoryItem,
@@ -607,7 +608,10 @@ export function getSelectedInsertionFrame(board: PlaitBoard): PlaitFrame | null 
       : null;
   }
 
-  const savedElementIds = (board as any).appState?.lastSelectedElementIds;
+  const appState = (board as any).appState;
+  const savedElementIds = Array.isArray(appState?.lastNonEmptySelectedElementIds)
+    ? appState.lastNonEmptySelectedElementIds
+    : appState?.lastSelectedElementIds;
   if (!Array.isArray(savedElementIds) || savedElementIds.length !== 1) {
     return null;
   }
@@ -738,18 +742,9 @@ export async function insertMediaIntoFrame(
   const childrenCountBefore = board.children.length;
 
   if (mediaType === 'video') {
-    const videoWithFragment = mediaUrl.includes('#')
-      ? mediaUrl
-      : `${mediaUrl}#video`;
     DrawTransforms.insertImage(
       board,
-      {
-        url: videoWithFragment,
-        width: mediaWidth,
-        height: mediaHeight,
-        isVideo: true,
-        videoType: 'video',
-      } as any,
+      createVideoImageItem(mediaUrl, mediaWidth, mediaHeight) as any,
       insertionPoint
     );
   } else {
@@ -788,6 +783,18 @@ export async function insertMediaIntoFrame(
   if (board.children.length > childrenCountBefore) {
     const newElement = board.children[childrenCountBefore];
     if (newElement) {
+      if (mediaType === 'video') {
+        Transforms.setNode(
+          board,
+          {
+            isVideo: true,
+            videoType: 'video',
+            width: mediaWidth,
+            height: mediaHeight,
+          } as any,
+          [childrenCountBefore]
+        );
+      }
       if (
         mediaType === 'image' &&
         shouldLoadImageForContain &&

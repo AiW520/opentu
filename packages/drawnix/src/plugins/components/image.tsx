@@ -22,6 +22,7 @@ import {
   isOrdinary3DTransformImage,
   sanitizeImage3DTransform,
 } from '../../utils/image-3d-transform';
+import { isVideoLikeElement } from '../../utils/video-url';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -118,34 +119,6 @@ function setImage3DForeignObjectHidden(
     }
   };
 }
-
-// 检查是否为视频元素（通过URL标识、扩展名或元数据）
-const isVideoElement = (imageItem: any): boolean => {
-  // 检查是否有视频标识属性
-  if (imageItem.isVideo === true || imageItem.videoType) {
-    return true;
-  }
-
-  const url = imageItem.url || '';
-
-  // 检查 URL hash 标识符（用于 ObjectURL 的视频识别）
-  // 格式：blob:http://...#video 或 blob:http://...#merged-video-{timestamp}
-  if (url.includes('#video') || url.includes('#merged-video-')) {
-    return true;
-  }
-
-  // 检查URL扩展名（用于普通 URL 的视频识别）
-  const videoExtensions = [
-    '.mp4',
-    '.avi',
-    '.mov',
-    '.wmv',
-    '.flv',
-    '.webm',
-    '.mkv',
-  ];
-  return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
-};
 
 export const Image: React.FC<ImageProps> = (props: ImageProps) => {
   const currentImageUrlRef = useRef(props.imageItem.url);
@@ -274,7 +247,11 @@ export const Image: React.FC<ImageProps> = (props: ImageProps) => {
     elementData?.audioType === 'music-card' ||
     (typeof elementData?.audioUrl === 'string' &&
       elementData.audioUrl.length > 0);
-  const isVideo = isVideoElement(props.imageItem);
+  const videoElementData = isVideoLikeElement(elementData)
+    ? elementData
+    : props.imageItem;
+  const isVideo =
+    isVideoLikeElement(props.imageItem) || isVideoLikeElement(elementData);
   const shouldContainFrameImage =
     !isLegacyAudioElement &&
     !isVideo &&
@@ -525,11 +502,12 @@ export const Image: React.FC<ImageProps> = (props: ImageProps) => {
     return (
       <Video
         videoItem={{
-          url: props.imageItem.url,
-          width: props.imageItem.width,
-          height: props.imageItem.height,
-          videoType: (props.imageItem as any).videoType,
-          poster: (props.imageItem as any).poster,
+          url: videoElementData.url || props.imageItem.url,
+          width: videoElementData.width || props.imageItem.width,
+          height: videoElementData.height || props.imageItem.height,
+          videoType:
+            videoElementData.videoType || (props.imageItem as any).videoType,
+          poster: videoElementData.poster || (props.imageItem as any).poster,
         }}
         isFocus={props.isFocus}
         isSelected={(props as any).isSelected}

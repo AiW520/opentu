@@ -296,7 +296,17 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
         if (asset.type === AssetType.IMAGE) {
           await insertImageFromUrl(board, runtimeUrl);
         } else if (asset.type === AssetType.VIDEO) {
-          await insertVideoFromUrl(board, runtimeUrl);
+          await insertVideoFromUrl(
+            board,
+            runtimeUrl,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            asset.thumbnail
+          );
         } else if (asset.type === AssetType.AUDIO) {
           await insertAudioFromUrl(board, runtimeUrl, {
             title: asset.name,

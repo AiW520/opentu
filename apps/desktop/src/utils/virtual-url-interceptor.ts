@@ -8,7 +8,7 @@ const AI_GENERATED_AUDIO_URL_PREFIX = `${AI_GENERATED_URL_PREFIX}audio/`;
 let isInitialized = false;
 let fetchPatched = false;
 
-const objectUrls = new WeakMap<Element, string>();
+const objectUrls = new WeakMap<Element, Partial<Record<'src' | 'poster', string>>>();
 
 function normalizeVirtualMediaUrl(url: string): string {
   if (!url) return url;
@@ -129,7 +129,11 @@ function handleMediaElement(element: Element): void {
     void replaceElementUrl(element, src, 'src');
   }
 
-  if (poster && isVirtualMediaUrl(poster) && element instanceof HTMLVideoElement) {
+  if (
+    poster &&
+    isVirtualMediaUrl(poster) &&
+    element instanceof HTMLVideoElement
+  ) {
     void replaceElementUrl(element, poster, 'poster');
   }
 }
@@ -142,39 +146,61 @@ async function replaceElementUrl(
   const blob = await unifiedCacheService.getCachedBlob(url);
   if (!blob) return;
 
-  revokeElementObjectUrl(element);
+  revokeElementObjectUrl(element, attribute);
 
   const blobUrl = URL.createObjectURL(blob);
-  objectUrls.set(element, blobUrl);
+  objectUrls.set(element, {
+    ...objectUrls.get(element),
+    [attribute]: blobUrl,
+  });
   element.setAttribute(attribute, blobUrl);
 
   if (element instanceof HTMLImageElement) {
     const revokeLater = () => {
-      window.setTimeout(() => revokeElementObjectUrl(element), 10000);
+      window.setTimeout(() => revokeElementObjectUrl(element, attribute), 10000);
     };
     element.addEventListener('load', revokeLater, { once: true });
-    element.addEventListener('error', () => revokeElementObjectUrl(element), { once: true });
+    element.addEventListener('error', () => revokeElementObjectUrl(element, attribute), { once: true });
   } else if (element instanceof HTMLMediaElement) {
     element.load();
-    element.addEventListener('emptied', () => revokeElementObjectUrl(element), {
-      once: true,
-    });
-    element.addEventListener('error', () => revokeElementObjectUrl(element), { once: true });
   }
 }
 
-function revokeElementObjectUrl(element: Element): void {
-  const objectUrl = objectUrls.get(element);
-  if (objectUrl) {
-    URL.revokeObjectURL(objectUrl);
-    objectUrls.delete(element);
+function revokeElementObjectUrl(
+  element: Element,
+  attribute?: 'src' | 'poster'
+): void {
+  const urls = objectUrls.get(element);
+  if (urls) {
+    const entries = attribute
+      ? ([[attribute, urls[attribute]]] as Array<['src' | 'poster', string | undefined]>)
+      : (Object.entries(urls) as Array<['src' | 'poster', string | undefined]>);
+    for (const [key, objectUrl] of entries) {
+      if (!objectUrl) continue;
+      URL.revokeObjectURL(objectUrl);
+      delete urls[key];
+    }
+    if (!urls.src && !urls.poster) {
+      objectUrls.delete(element);
+    } else {
+      objectUrls.set(element, urls);
+    }
+  }
+
+  if (attribute) {
+    return;
   }
 
   element.querySelectorAll?.('img, video, audio, source').forEach((child) => {
-    const childUrl = objectUrls.get(child);
-    if (childUrl) {
-      URL.revokeObjectURL(childUrl);
-      objectUrls.delete(child);
+    const childUrls = objectUrls.get(child);
+    if (!childUrls) {
+      return;
     }
+    for (const objectUrl of Object.values(childUrls)) {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+    objectUrls.delete(child);
   });
 }

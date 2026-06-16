@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PlayCircleIcon } from 'tdesign-icons-react';
 import { useThumbnailUrl } from '../../hooks/useThumbnailUrl';
+import { stripVideoUrlMarker } from '../../utils/video-url';
 import './VideoPosterPreview.scss';
 
 const THUMBNAIL_PLACEHOLDER_SIZE = 1;
@@ -84,6 +85,7 @@ export interface VideoPosterPreviewProps {
   imageLoading?: 'lazy' | 'eager';
   activateVideoOnClick?: boolean;
   playOnActivate?: boolean;
+  useGeneratedPoster?: boolean;
   onClick?: React.MouseEventHandler<HTMLImageElement | HTMLVideoElement>;
   videoProps?: Omit<
     React.VideoHTMLAttributes<HTMLVideoElement>,
@@ -116,9 +118,11 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
   imageLoading = 'lazy',
   activateVideoOnClick = false,
   playOnActivate = false,
+  useGeneratedPoster = true,
   onClick,
   videoProps,
 }) => {
+  const mediaSrc = useMemo(() => stripVideoUrlMarker(src), [src]);
   const normalizedPoster = useMemo(
     () => (typeof poster === 'string' && poster.trim() ? poster.trim() : undefined),
     [poster]
@@ -128,15 +132,19 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
     [normalizedPoster]
   );
   const generatedPoster = useThumbnailUrl(
-    src,
+    useGeneratedPoster ? mediaSrc : undefined,
     'video',
     thumbnailSize
   );
   const [preferGeneratedPoster, setPreferGeneratedPoster] = useState(shouldIgnoreExplicitPoster);
-  const posterCandidate = preferGeneratedPoster ? generatedPoster : (normalizedPoster || generatedPoster);
+  const generatedPosterCandidate =
+    generatedPoster && generatedPoster !== mediaSrc ? generatedPoster : undefined;
+  const posterCandidate = preferGeneratedPoster
+    ? generatedPosterCandidate
+    : (normalizedPoster || generatedPosterCandidate);
   const hasExplicitPoster = Boolean(normalizedPoster && !preferGeneratedPoster);
   const canRetryGeneratedPoster = Boolean(
-    posterCandidate && posterCandidate === generatedPoster && posterCandidate !== src
+    posterCandidate && posterCandidate === generatedPoster && posterCandidate !== mediaSrc
   );
   const videoRef = useRef<HTMLVideoElement>(null);
   const activatedByClickRef = useRef(false);
@@ -144,7 +152,6 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
   const [resolvedPoster, setResolvedPoster] = useState<string | null>(() => getCachedResolvedPoster(posterCandidate));
   const [retryCount, setRetryCount] = useState(0);
   const [showVideo, setShowVideo] = useState(false);
-  const shouldRequireExplicitActivation = activateVideoOnClick;
 
   useEffect(() => {
     setPreferGeneratedPoster(shouldIgnoreExplicitPoster);
@@ -159,7 +166,7 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
       window.clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
     }
-  }, [src, posterCandidate, activateVideoOnClick, generatedPoster, normalizedPoster, thumbnailSize]);
+  }, [mediaSrc, posterCandidate, activateVideoOnClick, generatedPoster, normalizedPoster, thumbnailSize]);
 
   useEffect(() => {
     if (showVideo || (resolvedPoster && resolvedPoster === posterCandidate)) {
@@ -167,9 +174,7 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
     }
 
     if (!posterCandidate) {
-      if (!shouldRequireExplicitActivation) {
-        setShowVideo(true);
-      }
+      setShowVideo(true);
       return;
     }
 
@@ -181,9 +186,7 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
 
     const scheduleRetry = () => {
       if (!canRetryGeneratedPoster || retryCount >= MAX_THUMBNAIL_RETRIES) {
-        if (!shouldRequireExplicitActivation) {
-          setShowVideo(true);
-        }
+        setShowVideo(true);
         return;
       }
 
@@ -238,7 +241,7 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
       }
     };
   }, [
-    src,
+    mediaSrc,
     posterCandidate,
     retryCount,
     hasExplicitPoster,
@@ -246,7 +249,6 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
     showVideo,
     normalizedPoster,
     resolvedPoster,
-    shouldRequireExplicitActivation,
   ]);
 
   useEffect(() => {
@@ -327,10 +329,12 @@ export const VideoPosterPreview: React.FC<VideoPosterPreviewProps> = ({
   return renderPreviewWithOverlay(
     <video
       ref={videoRef}
-      src={src}
+      src={mediaSrc}
       poster={resolvedPoster || normalizedPoster}
       className={`video-poster-preview__media${className ? ` ${className}` : ''}`}
       playsInline
+      // @ts-expect-error -- React types lack referrerPolicy on <video>
+      referrerPolicy="no-referrer"
       {...videoProps}
       onClick={handleVideoClick}
     />,
