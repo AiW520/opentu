@@ -93,6 +93,14 @@ export const CACHE_CONSTANTS = {
   MAX_IMAGE_SIZE: 2 * 1024 * 1024, // 2MB
   /** 缓存满警告阈值 */
   QUOTA_WARNING_THRESHOLD: 0.9, // 90%
+  /** 最大缓存总大小（500MB），超过则触发 LRU 淘汰 */
+  MAX_TOTAL_CACHE_SIZE: 500 * 1024 * 1024,
+  /** 缓存过期时间（30天），超过则自动清理 */
+  MAX_CACHE_AGE: 30 * 24 * 60 * 60 * 1000,
+  /** 定期清理间隔（5分钟） */
+  CLEANUP_INTERVAL: 5 * 60 * 1000,
+  /** LRU 淘汰时单次批量删除数量 */
+  EVICTION_BATCH_SIZE: 50,
 } as const;
 
 /** 缓存状态（兼容旧 API） */
@@ -309,6 +317,8 @@ class UnifiedCacheService {
   private quotaExceededListeners: Set<() => void> = new Set();
   private cachedUrls: Set<string> = new Set();
   private desktopFileSaveQueue: Promise<void> = Promise.resolve();
+  private indexDBWriteQueue: Promise<void> = Promise.resolve();
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof indexedDB !== 'undefined') {
@@ -319,6 +329,8 @@ class UnifiedCacheService {
           await this.refreshCacheState();
           // 触发数据迁移
           this.migrateFromLegacyDBs();
+          // 启动定期清理任务
+          this.startPeriodicCleanup();
         })
         .catch((error) => {
           console.warn('[UnifiedCache] Failed to initialize database:', error);
@@ -486,6 +498,114 @@ class UnifiedCacheService {
   }
 
   /**
+   * 串行化 IndexedDB 写入，避免并发写入冲突
+   */
+  private enqueueIndexDBWrite<T>(task: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.indexDBWriteQueue = this.indexDBWriteQueue
+        .catch(() => undefined)
+        .then(() => task())
+        .then(resolve)
+        .catch(reject);
+    });
+  }
+
+  /**
+   * LRU 淘汰策略：当总缓存超过阈值时，删除最久未使用的缓存
+   * 返回被淘汰的条目数量
+   */
+  private async evictLRU(): Promise<number> {
+    try {
+      const totalSize = await this.getAccurateStorageUsage();
+      if (totalSize <= CACHE_CONSTANTS.MAX_TOTAL_CACHE_SIZE) {
+        return 0;
+      }
+
+      const allItems = await this.getAllCacheMetadata();
+      if (allItems.length === 0) return 0;
+
+      // 按 lastUsed 升序排序（最久未使用的在前面）
+      allItems.sort((a, b) => a.lastUsed - b.lastUsed);
+
+      const targets = allItems.slice(0, CACHE_CONSTANTS.EVICTION_BATCH_SIZE);
+      const urls = targets.map((item) => item.url);
+
+      await this.deleteCacheBatch(urls);
+
+      console.log(
+        `[UnifiedCache] LRU evicted ${targets.length} items, ` +
+        `freed ${this.formatSize(targets.reduce((s, i) => s + (i.size || 0), 0))}`
+      );
+
+      // 递归淘汰直到低于阈值（最多递归 5 次防止死循环）
+      const remainingSize = await this.getAccurateStorageUsage();
+      if (remainingSize > CACHE_CONSTANTS.MAX_TOTAL_CACHE_SIZE) {
+        return targets.length + await this.evictLRU();
+      }
+
+      return targets.length;
+    } catch (error) {
+      console.warn('[UnifiedCache] LRU eviction failed:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * 清理过期缓存（超过 MAX_CACHE_AGE 未使用的条目）
+   * 返回被清理的条目数量
+   */
+  private async cleanupExpiredCache(): Promise<number> {
+    try {
+      const now = Date.now();
+      const allItems = await this.getAllCacheMetadata();
+      const expired = allItems.filter(
+        (item) => now - item.lastUsed > CACHE_CONSTANTS.MAX_CACHE_AGE
+      );
+
+      if (expired.length === 0) return 0;
+
+      const urls = expired.map((item) => item.url);
+      await this.deleteCacheBatch(urls);
+
+      console.log(
+        `[UnifiedCache] Cleaned up ${expired.length} expired items, ` +
+        `freed ${this.formatSize(expired.reduce((s, i) => s + (i.size || 0), 0))}`
+      );
+
+      return expired.length;
+    } catch (error) {
+      console.warn('[UnifiedCache] Cleanup expired cache failed:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * 启动定期清理任务
+   */
+  private startPeriodicCleanup(): void {
+    if (this.cleanupTimer) return;
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupExpiredCache().catch((error) => {
+        console.warn('[UnifiedCache] Periodic cleanup error:', error);
+      });
+      // 清理后也检查一次 LRU 淘汰
+      this.evictLRU().catch((error) => {
+        console.warn('[UnifiedCache] Periodic LRU eviction error:', error);
+      });
+    }, CACHE_CONSTANTS.CLEANUP_INTERVAL);
+  }
+
+  /**
+   * 停止定期清理任务
+   */
+  public stopPeriodicCleanup(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+
+  /**
    * 更新最后使用时间
    */
   private async touch(url: string): Promise<void> {
@@ -580,6 +700,9 @@ class UnifiedCacheService {
       await this.putItem(item);
       this.cachedUrls.add(normalizedUrl);
       this.notifyListeners();
+
+      // 异步检查是否需要 LRU 淘汰
+      this.evictLRU().catch(() => {});
 
       // console.log('[UnifiedCache] Image metadata updated:', url);
     } catch (error) {
@@ -984,6 +1107,9 @@ class UnifiedCacheService {
       this.cachedUrls.add(normalizedUrl);
       this.notifyListeners();
 
+      // 异步检查是否需要 LRU 淘汰
+      this.evictLRU().catch(() => {});
+
       // console.log('[UnifiedCache] Image cached manually:', url);
       return true;
     } catch (error) {
@@ -1147,6 +1273,19 @@ class UnifiedCacheService {
   }
 
   /**
+   * 获取精确的存储使用情况（基于 IndexedDB 中记录的文件大小）
+   */
+  async getAccurateStorageUsage(): Promise<number> {
+    try {
+      const allItems = await this.getAllCacheMetadata();
+      return allItems.reduce((total, item) => total + (item.size || 0), 0);
+    } catch (error) {
+      console.error('[UnifiedCache] Failed to get accurate storage usage:', error);
+      return 0;
+    }
+  }
+
+  /**
    * 获取存储使用情况
    */
   async getStorageUsage(): Promise<StorageUsage> {
@@ -1262,6 +1401,9 @@ class UnifiedCacheService {
     };
     await this.putItem(item);
     this.cachedUrls.add(url);
+
+    // 异步检查是否需要 LRU 淘汰
+    this.evictLRU().catch(() => {});
   }
 
   // ==================== 兼容旧 API ====================
@@ -1377,7 +1519,7 @@ class UnifiedCacheService {
         console.warn('[UnifiedCache] caches API not available');
       }
 
-      // 2. 存储元数据到 IndexedDB
+      // 2. 存储元数据到 IndexedDB（使用写入队列避免并发冲突）
       const item: CachedMedia = {
         url: cacheUrl,
         type,
@@ -1389,9 +1531,16 @@ class UnifiedCacheService {
         metadata: normalizedOptions?.metadata || {},
       };
 
-      await this.putItem(item);
-      this.cachedUrls.add(cacheUrl);
-      this.notifyListeners();
+      await this.enqueueIndexDBWrite(async () => {
+        await this.putItem(item);
+        this.cachedUrls.add(cacheUrl);
+        this.notifyListeners();
+      });
+
+      // 3. 异步触发 LRU 淘汰检查（不阻塞主流程）
+      this.evictLRU().catch((error) => {
+        console.warn('[UnifiedCache] LRU eviction after cache failed:', error);
+      });
 
       // console.log('[UnifiedCache] Media cached from blob:', { url, type, size: blob.size });
       return cacheUrl;
