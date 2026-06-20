@@ -59,6 +59,7 @@ import {
   cacheRemoteUrl,
   cacheRemoteUrls,
 } from './fallback-utils';
+import { formatFriendlyError } from './error-classifier';
 import { resolveAdapterForInvocation } from '../model-adapters';
 import { GPT_IMAGE_EDIT_REQUEST_SCHEMAS } from '../model-adapters';
 import {
@@ -382,10 +383,11 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       });
     } catch (error: any) {
       const duration = Date.now() - startTime;
-      const errorMessage = error.message || 'Image generation failed';
+      const originalMessage = error.message || 'Image generation failed';
+      const friendlyMessage = formatFriendlyError(error, 'image');
       console.error(
         '[FallbackMediaExecutor] generateImage failed:',
-        errorMessage,
+        originalMessage,
         'taskId:',
         taskId,
         'duration:',
@@ -397,7 +399,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       const credentialErrorKind = classifyApiCredentialError(error);
       if (credentialErrorKind) {
         dispatchApiAuthError({
-          message: errorMessage,
+          message: friendlyMessage,
           source: 'image',
           reason: credentialErrorKind,
         });
@@ -406,11 +408,11 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       // 如果日志还未更新为失败，更新它
       failLLMApiLog(logId, {
         duration,
-        errorMessage,
+        errorMessage: originalMessage,
       });
       await taskStorageWriter.failTask(taskId, {
         code: 'IMAGE_GENERATION_ERROR',
-        message: errorMessage,
+        message: friendlyMessage,
       });
       throw error;
     }
@@ -539,13 +541,14 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       });
     } catch (error: any) {
       const duration = Date.now() - logStartTime;
-      const errorMessage = error.message || 'Async image generation failed';
+      const originalMessage = error.message || 'Async image generation failed';
+      const friendlyMessage = formatFriendlyError(error, 'async_image');
 
       // 检测认证错误，触发设置弹窗
       const credentialErrorKind = classifyApiCredentialError(error);
       if (credentialErrorKind) {
         dispatchApiAuthError({
-          message: errorMessage,
+          message: friendlyMessage,
           source: 'async-image',
           reason: credentialErrorKind,
         });
@@ -553,11 +556,11 @@ export class FallbackMediaExecutor implements IMediaExecutor {
 
       failLLMApiLog(logId, {
         duration,
-        errorMessage,
+        errorMessage: originalMessage,
       });
       await taskStorageWriter.failTask(taskId, {
         code: 'ASYNC_IMAGE_GENERATION_ERROR',
-        message: errorMessage,
+        message: friendlyMessage,
       });
       throw error;
     }
@@ -753,13 +756,14 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       }
     } catch (error: any) {
       const elapsedTime = Date.now() - startTime;
-      const errorMessage = error.message || 'Video generation failed';
+      const originalMessage = error.message || 'Video generation failed';
+      const friendlyMessage = formatFriendlyError(error, 'video');
 
       // 检测认证错误，触发设置弹窗
       const credentialErrorKind = classifyApiCredentialError(error);
       if (credentialErrorKind) {
         dispatchApiAuthError({
-          message: errorMessage,
+          message: friendlyMessage,
           source: 'video',
           reason: credentialErrorKind,
         });
@@ -767,11 +771,11 @@ export class FallbackMediaExecutor implements IMediaExecutor {
 
       failLLMApiLog(logId, {
         duration: elapsedTime,
-        errorMessage,
+        errorMessage: originalMessage,
       });
       await taskStorageWriter.failTask(taskId, {
         code: error.code || 'VIDEO_GENERATION_ERROR',
-        message: errorMessage,
+        message: friendlyMessage,
       });
       throw error;
     }
@@ -920,13 +924,14 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       };
     } catch (error: any) {
       const elapsedTime = Date.now() - startTime;
-      const errorMessage = error.message || 'AI analyze failed';
+      const originalMessage = error.message || 'AI analyze failed';
+      const friendlyMessage = formatFriendlyError(error, 'analyze');
 
       // 检测认证错误，触发设置弹窗
       const credentialErrorKind = classifyApiCredentialError(error);
       if (credentialErrorKind) {
         dispatchApiAuthError({
-          message: errorMessage,
+          message: friendlyMessage,
           source: 'ai-analyze',
           reason: credentialErrorKind,
         });
@@ -934,7 +939,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
 
       failLLMApiLog(logId, {
         duration: elapsedTime,
-        errorMessage,
+        errorMessage: originalMessage,
       });
       throw error;
     }
@@ -1082,9 +1087,10 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       };
     } catch (error: any) {
       if (taskId) {
+        const friendlyMessage = formatFriendlyError(error, 'text');
         await taskStorageWriter.failTask(taskId, {
           code: 'TEXT_GENERATION_FAILED',
-          message: error?.message || 'Text generation failed',
+          message: friendlyMessage,
         });
       }
       failLLMApiLog(logId, {

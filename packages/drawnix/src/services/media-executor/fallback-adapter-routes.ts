@@ -20,6 +20,7 @@ import {
   classifyApiCredentialError,
   dispatchApiAuthError,
 } from '../../utils/api-auth-error-event';
+import { formatFriendlyError } from './error-classifier';
 import { unifiedCacheService } from '../unified-cache-service';
 import {
   getAdapterContextFromSettings,
@@ -197,21 +198,22 @@ export async function executeImageViaAdapter(
     });
   } catch (error: any) {
     const duration = Date.now() - logStartTime;
-    const errorMessage = error.message || 'Image generation failed (adapter)';
+    const originalMessage = error.message || 'Image generation failed (adapter)';
+    const friendlyMessage = formatFriendlyError(error, 'image');
 
     const credentialErrorKind = classifyApiCredentialError(error);
     if (credentialErrorKind) {
       dispatchApiAuthError({
-        message: errorMessage,
+        message: friendlyMessage,
         source: 'image',
         reason: credentialErrorKind,
       });
     }
 
-    failLLMApiLog(logId, { duration, errorMessage });
+    failLLMApiLog(logId, { duration, errorMessage: originalMessage });
     await taskStorageWriter.failTask(taskId, {
       code: 'IMAGE_GENERATION_ERROR',
-      message: errorMessage,
+      message: friendlyMessage,
     });
     throw error;
   }
@@ -342,21 +344,22 @@ export async function executeVideoViaAdapter(
     });
   } catch (error: any) {
     const duration = Date.now() - logStartTime;
-    const errorMessage = error.message || 'Video generation failed (adapter)';
+    const originalMessage = error.message || 'Video generation failed (adapter)';
+    const friendlyMessage = formatFriendlyError(error, 'video');
 
     const credentialErrorKind = classifyApiCredentialError(error);
     if (credentialErrorKind) {
       dispatchApiAuthError({
-        message: errorMessage,
+        message: friendlyMessage,
         source: 'video',
         reason: credentialErrorKind,
       });
     }
 
-    failLLMApiLog(logId, { duration, errorMessage });
+    failLLMApiLog(logId, { duration, errorMessage: originalMessage });
     await taskStorageWriter.failTask(taskId, {
       code: error.code || 'VIDEO_GENERATION_ERROR',
-      message: errorMessage,
+      message: friendlyMessage,
     });
     throw error;
   }
