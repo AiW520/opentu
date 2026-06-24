@@ -29,8 +29,40 @@ Plain renderer-provided arbitrary paths must not be enough for destructive or ex
 ### Keep custom protocol constrained to media root
 `opentu-asset` remains the runtime display protocol, but it must only serve canonical files under the configured media root. Large file responses must be range-friendly. Full responses above the bounded threshold should either stream safely or return a clear failure that UI can avoid.
 
+### Do not assume `http://opentu-asset.localhost` is cross-platform
+On Windows, Tauri custom protocols are represented as `http://<scheme>.localhost`, while macOS and Linux use `<scheme>://localhost`. The implementation must not make renderer URLs uniformly HTTP unless the desktop runtime adds and owns a real loopback asset server or another documented cross-platform interception mechanism.
+
+The first implementation phase should preserve the existing platform-specific URL adapter and keep both URL forms accepted by detection and parsing helpers. A later cross-platform HTTP unification may be implemented only after the runtime owns the local server lifecycle, port binding, origin allow-list, range handling, and shutdown behavior.
+
+### Use bounded binary file writes for desktop payloads
+Renderer-to-Rust writes for large files must avoid converting `Uint8Array` chunks to JSON number arrays. The replacement path should use one of:
+- Tauri v2 channels or another supported binary-capable IPC path, or
+- a dialog-granted temporary file/stream handoff that never materializes large payloads as JSON arrays.
+
+The old `write_file_chunk_to_path` and `save_file` APIs may remain for small payload compatibility, but large desktop exports, cache writes, and download saves must route through the bounded binary path. Verification should include at least one 10 MB payload and assert the code path does not call `Array.from(chunk)` for the transfer.
+
 ### Prefer native desktop import for desktop uploads
 Desktop media-library upload should prefer the native picker so file paths are available and large files do not enter the renderer as full `File` blobs. Browser file input remains the fallback for web and unsupported desktop paths.
+
+### Treat desktop filesystem as durable cache truth
+In the desktop runtime, the configured media root is the durable source of truth for generated and imported media. Cache Storage may remain as a short-lived hot cache for immediate UI responsiveness and web parity, but it must not be the only path needed to recover generated assets after restart.
+
+Desktop reads should prefer:
+1. metadata/file path under media root or desktop asset URL,
+2. Cache Storage hot cache,
+3. bounded compatibility fallback for older records.
+
+Desktop writes should record metadata only after the durable filesystem write succeeds or should explicitly mark records as pending-durable-write until completion. Cache Storage quotas in WKWebView/WebKitGTK should be bounded lower than web defaults, and large video/audio payloads should avoid duplicate Cache Storage writes unless there is a measured UI need.
+
+### Migrate media directories to stable ASCII names
+New desktop media directories should use stable ASCII names (`images`, `videos`, `audio`, `ppt`, `text`, `archives`) to avoid Unicode normalization and locale problems across platforms. Existing localized directories must remain readable during migration.
+
+Migration should:
+- create the ASCII directory set on startup,
+- resolve reads from both new and legacy localized directories,
+- write new files to ASCII directories,
+- optionally move legacy files in a resumable, non-destructive step,
+- never delete legacy files until the migrated target exists and metadata points to the new path.
 
 ### Bounded AI materialization
 The UI may carry lightweight references such as virtual URLs or desktop asset URLs. Execution code is responsible for converting references into provider-compatible payloads. Conversion must:

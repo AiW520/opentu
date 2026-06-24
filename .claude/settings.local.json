@@ -15,11 +15,12 @@
       "Bash(git add:*)",
       "Bash(npx tsc:*)",
       "Bash(git push:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(cd \"D:\\\\\\\\工作\\\\\\\\opentu_new\")"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "playwright"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

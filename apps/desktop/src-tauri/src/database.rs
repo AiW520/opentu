@@ -3,6 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
+use crate::media_dirs::primary_media_subdirs;
+
 pub struct Database {
     pub conn: Connection,
     pub data_dir: PathBuf,
@@ -56,7 +58,7 @@ impl Database {
     }
 
     pub fn ensure_media_dirs(&self) -> Result<(), Box<dyn std::error::Error>> {
-        for subdir in ["图片", "视频", "音频", "PPT", "文本", "压缩包"] {
+        for subdir in primary_media_subdirs() {
             fs::create_dir_all(self.media_root.join(subdir))?;
         }
         Ok(())

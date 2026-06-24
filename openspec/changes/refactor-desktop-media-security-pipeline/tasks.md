@@ -11,6 +11,8 @@
 - [ ] 2.3 Clean up temporary files if frontend validation or metadata persistence fails.
 - [x] 2.4 Make `opentu-asset` image/video/audio serving range-friendly for large files.
 - [ ] 2.5 Add UI fallback messaging for local assets that cannot be previewed.
+- [x] 2.6 Preserve the existing platform-specific desktop asset URL adapter until a real cross-platform HTTP asset server exists.
+- [ ] 2.7 If cross-platform HTTP asset URLs are implemented, add a runtime-owned loopback asset server with range support, media-root enforcement, lifecycle management, and tests before changing renderer URL generation.
 
 ## 3. Memory-Bounded AI Reference Handling
 - [x] 3.1 Stop converting AI input uploads to base64 earlier than required when a stable local reference is available.
@@ -23,6 +25,11 @@
 - [x] 4.2 Implement the chosen desktop SW/cache/task policy.
 - [ ] 4.3 Align desktop cache recovery and task execution paths with that policy.
 - [x] 4.4 Handle updater configuration explicitly: signed updater or no updater permission.
+- [ ] 4.5 Replace large desktop writes that use `Array.from(Uint8Array)` with a bounded binary transfer path.
+- [ ] 4.6 Keep the JSON-number-array write API only for small compatibility payloads and document its size threshold.
+- [ ] 4.7 Prefer durable filesystem reads over Cache Storage for desktop generated/imported media recovery.
+- [ ] 4.8 Bound desktop Cache Storage usage separately from web defaults and avoid duplicate Cache Storage writes for large video/audio unless required.
+- [x] 4.9 Add startup migration for ASCII media subdirectories while keeping legacy localized directories readable.
 
 ## 5. Response Compatibility
 - [ ] 5.1 Preserve current GPT Image behavior: no unsupported default `response_format`.
@@ -35,3 +42,6 @@
 - [x] 6.3 Add Vitest tests for desktop/local asset URLs used as image references.
 - [x] 6.4 Run targeted Vitest and Cargo tests.
 - [ ] 6.5 Run a desktop smoke test covering import, preview, select from library, AI generation, export, and delete.
+- [ ] 6.6 Add a 10 MB desktop write benchmark or regression test proving the binary transfer path avoids JSON number arrays.
+- [x] 6.7 Add tests for ASCII media directory writes and legacy localized directory reads.
+- [ ] 6.8 Add tests for desktop cache recovery when Cache Storage is empty but durable media files exist.

@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::{media_dirs, AppState};
 use std::path::{Path, PathBuf};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
@@ -53,12 +53,16 @@ fn get_export_subdir(file_name: &str) -> PathBuf {
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .as_deref()
     {
-        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "svg") => PathBuf::from("图片"),
-        Some("mp4" | "webm" | "mov" | "m4v") => PathBuf::from("视频"),
-        Some("mp3" | "wav" | "ogg" | "m4a" | "aac" | "flac") => PathBuf::from("音频"),
-        Some("ppt" | "pptx") => PathBuf::from("PPT"),
-        Some("txt" | "md" | "json") => PathBuf::from("文本"),
-        Some("zip") => PathBuf::from("压缩包"),
-        _ => PathBuf::from("文本"),
+        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "svg") => {
+            PathBuf::from(media_dirs::media_subdir("image"))
+        }
+        Some("mp4" | "webm" | "mov" | "m4v") => PathBuf::from(media_dirs::media_subdir("video")),
+        Some("mp3" | "wav" | "ogg" | "m4a" | "aac" | "flac") => {
+            PathBuf::from(media_dirs::media_subdir("audio"))
+        }
+        Some("ppt" | "pptx") => PathBuf::from(media_dirs::media_subdir("ppt")),
+        Some("txt" | "md" | "json") => PathBuf::from(media_dirs::media_subdir("text")),
+        Some("zip") => PathBuf::from(media_dirs::media_subdir("archive")),
+        _ => PathBuf::from(media_dirs::media_subdir("text")),
     }
 }

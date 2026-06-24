@@ -44,11 +44,28 @@
 
 | 平台 | 架构 | 下载链接 |
 |------|------|---------|
-| Windows | x64 | [Opentu-Setup.exe](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-Setup.exe) |
-| macOS | ARM64 | [Opentu-macos-aarch64.dmg](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-macos-aarch64.dmg) |
-| macOS | x64 | [Opentu-macos-x86_64.dmg](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-macos-x86_64.dmg) |
-| Linux | AppImage | [Opentu-linux-x86_64.AppImage](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-x86_64.AppImage) |
-| Linux | deb | [Opentu-linux-amd64.deb](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-amd64.deb) |
+| Windows | x64 | [Opentu-windows-x86_64-setup.exe](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-windows-x86_64-setup.exe) / [.msi](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-windows-x86_64.msi) |
+| macOS | Apple Silicon | [Opentu-macos-aarch64.dmg](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-macos-aarch64.dmg) |
+| macOS | Intel | [Opentu-macos-x86_64.dmg](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-macos-x86_64.dmg) |
+| Linux | x86_64 AppImage | [Opentu-linux-x86_64.AppImage](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-x86_64.AppImage) |
+| Linux | x86_64 deb | [Opentu-linux-x86_64.deb](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-x86_64.deb) |
+| Linux | aarch64 AppImage | [Opentu-linux-aarch64.AppImage](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-aarch64.AppImage) |
+| Linux | aarch64 deb | [Opentu-linux-aarch64.deb](https://github.com/AITU-Copilot/opentu/releases/latest/download/Opentu-linux-aarch64.deb) |
+
+**macOS / Linux 一键安装（推荐）：**
+
+```bash
+curl -fsSL https://github.com/AITU-Copilot/opentu/releases/latest/download/install_opentu.sh | bash
+```
+
+或指定版本：
+
+```bash
+curl -fsSL https://github.com/AITU-Copilot/opentu/releases/download/v1.1.9/install_opentu.sh | OPENTU_TAG=v1.1.9 bash
+```
+
+> Linux AppImage 启动需要 `libfuse2` 与 `libwebkit2gtk-4.1`，多数发行版默认未安装。
+> macOS 未签名包首次启动可能被 Gatekeeper 拦截，可右键 → 打开，或执行 `xattr -dr com.apple.quarantine /Applications/Opentu.app`。
 
 **访问所有版本：** [GitHub Releases](https://github.com/AITU-Copilot/opentu/releases)
 

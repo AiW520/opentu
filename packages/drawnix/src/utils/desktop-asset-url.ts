@@ -11,6 +11,8 @@ function shouldUseHttpAssetProtocol(): boolean {
     return false;
   }
 
+  // Windows exposes Tauri custom protocols as http://<scheme>.localhost.
+  // Do not use HTTP on every platform until the runtime owns a loopback server.
   const platform =
     (navigator as Navigator & { userAgentData?: { platform?: string } })
       .userAgentData?.platform ||

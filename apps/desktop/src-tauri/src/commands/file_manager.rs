@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -5,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 
 use crate::database::Database;
+use crate::media_dirs;
 use crate::path_grants::canonical_existing_file;
 use crate::AppState;
 
@@ -101,10 +103,7 @@ pub async fn verify_file_accessible(
     file_type: Option<String>,
 ) -> Result<FileOperationResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let file_path = db
-        .media_root
-        .join(get_media_subdir(file_type.as_deref().unwrap_or("image")))
-        .join(sanitize_file_name(&file_name)?);
+    let file_path = resolve_media_path(&db.media_root, &file_name, file_type.as_deref())?;
 
     match fs::metadata(&file_path) {
         Ok(metadata) if metadata.is_file() => Ok(success_result(
@@ -133,31 +132,7 @@ pub async fn list_media_files(
     file_type: Option<String>,
 ) -> Result<Vec<MediaFileInfo>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let media_dir = db
-        .media_root
-        .join(get_media_subdir(file_type.as_deref().unwrap_or("image")));
-
-    let entries = fs::read_dir(&media_dir).map_err(|error| format!("无法读取目录: {}", error))?;
-    let mut files = Vec::new();
-
-    for entry in entries.flatten() {
-        if let Ok(metadata) = entry.metadata() {
-            if metadata.is_file() {
-                files.push(MediaFileInfo {
-                    name: entry.file_name().to_string_lossy().to_string(),
-                    path: entry.path().to_string_lossy().to_string(),
-                    size: metadata.len(),
-                    modified_at: metadata
-                        .modified()
-                        .ok()
-                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|duration| duration.as_secs()),
-                });
-            }
-        }
-    }
-
-    Ok(files)
+    list_media_files_internal(&db.media_root, file_type.as_deref())
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -257,10 +232,7 @@ fn delete_media_file_internal(
     file_name: &str,
     file_type: Option<&str>,
 ) -> Result<(), String> {
-    let file_path = db
-        .media_root
-        .join(get_media_subdir(file_type.unwrap_or("image")))
-        .join(sanitize_file_name(file_name)?);
+    let file_path = resolve_media_path(&db.media_root, file_name, file_type)?;
 
     if !file_path.exists() {
         return Err("文件不存在".to_string());
@@ -310,7 +282,7 @@ fn resolve_target_path(
         .to_string();
     let mut target_path = db
         .media_root
-        .join(get_media_subdir(file_type.unwrap_or("image")))
+        .join(media_dirs::media_subdir(file_type.unwrap_or("image")))
         .join(sanitize_file_name(&file_name)?);
 
     if target_path.exists() {
@@ -353,13 +325,132 @@ fn sanitize_file_name(file_name: &str) -> Result<String, String> {
         .ok_or_else(|| "无效文件名".to_string())
 }
 
-fn get_media_subdir(file_type: &str) -> &str {
-    match file_type.to_ascii_lowercase().as_str() {
-        "video" => "视频",
-        "audio" => "音频",
-        "ppt" | "presentation" => "PPT",
-        "text" | "markdown" | "json" => "文本",
-        "archive" | "zip" => "压缩包",
-        _ => "图片",
+fn resolve_media_path(
+    media_root: &Path,
+    file_name: &str,
+    file_type: Option<&str>,
+) -> Result<PathBuf, String> {
+    let safe_file_name = sanitize_file_name(file_name)?;
+    Ok(media_dirs::resolve_media_file_path(
+        media_root,
+        &safe_file_name,
+        file_type,
+    ))
+}
+
+fn list_media_files_internal(
+    media_root: &Path,
+    file_type: Option<&str>,
+) -> Result<Vec<MediaFileInfo>, String> {
+    let file_type = file_type.unwrap_or("image");
+    let mut files = Vec::new();
+    let mut seen_names = HashSet::new();
+
+    for subdir in media_dirs::media_subdirs_for_type(file_type) {
+        let media_dir = media_root.join(subdir);
+        if !media_dir.exists() {
+            continue;
+        }
+        let entries =
+            fs::read_dir(&media_dir).map_err(|error| format!("无法读取目录: {}", error))?;
+
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !seen_names.insert(name.clone()) {
+                        continue;
+                    }
+                    files.push(MediaFileInfo {
+                        name,
+                        path: entry.path().to_string_lossy().to_string(),
+                        size: metadata.len(),
+                        modified_at: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|duration| duration.as_secs()),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn temp_media_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "opentu-file-manager-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            chrono::Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn test_db(root: &Path) -> Database {
+        Database {
+            conn: Connection::open_in_memory().unwrap(),
+            data_dir: root.to_path_buf(),
+            media_root: root.to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn resolve_target_path_writes_new_files_to_ascii_subdir() {
+        let root = temp_media_root("target-ascii");
+        let source = root.join("source.png");
+        std::fs::write(&source, b"demo").unwrap();
+        let db = test_db(&root);
+
+        let target = resolve_target_path(&db, &source, Some("image"), None).unwrap();
+
+        assert_eq!(target, root.join("images").join("source.png"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_media_file_internal_reads_legacy_localized_subdir() {
+        let root = temp_media_root("delete-legacy");
+        let legacy_dir = root.join("图片");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        let legacy_file = legacy_dir.join("demo.png");
+        std::fs::write(&legacy_file, b"legacy").unwrap();
+        let db = test_db(&root);
+
+        delete_media_file_internal(&db, "demo.png", Some("image")).unwrap();
+
+        assert!(!legacy_file.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_media_files_internal_merges_ascii_and_legacy_subdirs() {
+        let root = temp_media_root("list-merged");
+        let ascii_dir = root.join("images");
+        let legacy_dir = root.join("图片");
+        std::fs::create_dir_all(&ascii_dir).unwrap();
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::write(ascii_dir.join("new.png"), b"new").unwrap();
+        std::fs::write(legacy_dir.join("old.png"), b"old").unwrap();
+
+        let files = list_media_files_internal(&root, Some("image")).unwrap();
+        let names = files
+            .into_iter()
+            .map(|file| file.name)
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(names.contains("new.png"));
+        assert!(names.contains("old.png"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

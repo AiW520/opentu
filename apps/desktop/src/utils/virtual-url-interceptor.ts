@@ -5,7 +5,6 @@ const CACHE_URL_PREFIX = '/__aitu_cache__/';
 const AI_GENERATED_URL_PREFIX = '/__aitu_generated__/';
 const AI_GENERATED_AUDIO_URL_PREFIX = `${AI_GENERATED_URL_PREFIX}audio/`;
 const MEDIA_ELEMENT_SELECTOR = 'img, video, audio, source';
-const FALLBACK_SCAN_INTERVAL_MS = 15000;
 const IMAGE_OBJECT_URL_REVOKE_DELAY_MS = 10000;
 const MISSING_BLOB_RETRY_DELAY_MS = 5000;
 const MAX_MISSING_BLOB_CACHE_SIZE = 256;
@@ -83,7 +82,11 @@ export function initializeVirtualUrlInterceptor(): void {
     attributeFilter: ['src', 'poster'],
   });
 
-  window.setInterval(() => scheduleFallbackScan(), FALLBACK_SCAN_INTERVAL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      scheduleFallbackScan();
+    }
+  });
 }
 
 function scheduleFallbackScan(): void {

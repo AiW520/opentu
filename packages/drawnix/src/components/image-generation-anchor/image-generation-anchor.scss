@@ -58,7 +58,7 @@
       rgba(251, 191, 36, 0.18),
       transparent 30%
     );
-  mix-blend-mode: multiply;
+  mix-blend-mode: normal;
   opacity: 0.78;
 }
 
@@ -689,7 +689,73 @@
 .image-generation-anchor--phase-submitted,
 .image-generation-anchor--phase-queued,
 .image-generation-anchor--phase-generating {
+  --anchor-border: rgba(245, 158, 11, 0.62);
+  background: radial-gradient(
+      circle at 16% 14%,
+      rgba(255, 217, 125, 0.82),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 84% 82%,
+      rgba(251, 191, 36, 0.34),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 249, 232, 0.99),
+      rgba(255, 230, 168, 0.97)
+    );
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.26),
+    0 18px 40px rgba(146, 64, 14, 0.14),
+    0 2px 6px rgba(255, 255, 255, 0.72) inset;
   animation: image-generation-anchor-card-pulse 2.6s ease-in-out infinite;
+}
+
+.image-generation-anchor--phase-submitted
+  .image-generation-anchor__surface,
+.image-generation-anchor--phase-queued
+  .image-generation-anchor__surface,
+.image-generation-anchor--phase-generating
+  .image-generation-anchor__surface {
+  outline: 1px solid rgba(180, 83, 9, 0.26);
+  outline-offset: -1px;
+}
+
+.image-generation-anchor--phase-submitted
+  .image-generation-anchor__surface-image,
+.image-generation-anchor--phase-queued
+  .image-generation-anchor__surface-image,
+.image-generation-anchor--phase-generating
+  .image-generation-anchor__surface-image {
+  background: radial-gradient(
+      circle at 58% 72%,
+      rgba(247, 190, 68, 0.34),
+      transparent 42%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 238, 184, 0.52),
+      rgba(250, 213, 128, 0.56)
+    );
+}
+
+.image-generation-anchor--phase-submitted
+  .image-generation-anchor__stack-slot,
+.image-generation-anchor--phase-queued
+  .image-generation-anchor__stack-slot,
+.image-generation-anchor--phase-generating
+  .image-generation-anchor__stack-slot {
+  border-color: rgba(245, 158, 11, 0.56);
+  background: radial-gradient(
+      circle at 28% 20%,
+      rgba(255, 248, 220, 0.9),
+      transparent 32%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 239, 191, 0.94),
+      rgba(251, 221, 146, 0.96)
+    );
 }
 
 .image-generation-anchor--phase-submitted

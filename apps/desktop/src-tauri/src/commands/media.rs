@@ -1,3 +1,4 @@
+use crate::media_dirs;
 use crate::path_grants::{canonical_existing_file, canonical_write_file};
 use crate::AppState;
 use base64::{engine::general_purpose, Engine as _};
@@ -19,7 +20,9 @@ pub fn save_file(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.media_root.clone()
     };
-    let media_dir = media_root.join(get_media_subdir(file_type.as_deref().unwrap_or("image")));
+    let media_dir = media_root.join(media_dirs::media_subdir(
+        file_type.as_deref().unwrap_or("image"),
+    ));
     fs::create_dir_all(&media_dir).map_err(|e| e.to_string())?;
 
     let file_path = media_dir.join(sanitize_file_name(&file_name)?);
@@ -290,7 +293,7 @@ pub async fn download_url_to_media_file(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.media_root.clone()
     };
-    let media_dir = media_root.join(get_media_subdir(&normalized_file_type));
+    let media_dir = media_root.join(media_dirs::media_subdir(&normalized_file_type));
     fs::create_dir_all(&media_dir).map_err(|e| format!("无法创建媒体目录: {}", e))?;
 
     let client = reqwest::Client::builder()
@@ -417,7 +420,9 @@ pub fn get_default_save_path(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.media_root.clone()
     };
-    let media_dir = media_root.join(get_media_subdir(file_type.as_deref().unwrap_or("image")));
+    let media_dir = media_root.join(media_dirs::media_subdir(
+        file_type.as_deref().unwrap_or("image"),
+    ));
     fs::create_dir_all(&media_dir).map_err(|e| e.to_string())?;
 
     Ok(media_dir
@@ -457,11 +462,11 @@ pub fn get_cached_media_file(
 pub fn read_local_file(base64_path: String) -> Result<String, String> {
     let path = base64_path;
     let path = Path::new(&path);
-    
+
     if !path.exists() {
         return Err(format!("文件不存在: {}", path.to_string_lossy()));
     }
-    
+
     let data = fs::read(path).map_err(|e| format!("读取文件失败: {}", e))?;
     Ok(general_purpose::STANDARD.encode(&data))
 }
@@ -499,7 +504,7 @@ pub fn import_local_asset(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.media_root.clone()
     };
-    let media_dir = media_root.join(get_media_subdir(&normalized_file_type));
+    let media_dir = media_root.join(media_dirs::media_subdir(&normalized_file_type));
     fs::create_dir_all(&media_dir).map_err(|e| e.to_string())?;
 
     let extension = resolve_extension(
@@ -562,11 +567,47 @@ pub fn handle_opentu_asset_protocol(
 }
 
 fn sanitize_file_name(file_name: &str) -> Result<String, String> {
-    Path::new(file_name)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .filter(|name| !name.trim().is_empty())
-        .ok_or_else(|| "Invalid file name".to_string())
+    let normalized = file_name.replace('\\', "/");
+    let raw_name = normalized
+        .rsplit('/')
+        .next()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "Invalid file name".to_string())?;
+
+    let sanitized: String = raw_name
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let sanitized = sanitized.trim_matches([' ', '.']).to_string();
+    if sanitized.is_empty() {
+        return Err("Invalid file name".to_string());
+    }
+
+    let stem = Path::new(&sanitized)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_ascii_uppercase())
+        .unwrap_or_else(|| sanitized.to_ascii_uppercase());
+    if is_windows_reserved_file_stem(&stem) {
+        return Ok(format!("_{}", sanitized));
+    }
+
+    Ok(sanitized)
+}
+
+fn is_windows_reserved_file_stem(stem: &str) -> bool {
+    matches!(stem, "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0')
 }
 
 fn validate_source_file(source_path: &str) -> Result<&Path, String> {
@@ -978,26 +1019,11 @@ fn resolve_media_file_path(
     file_type: Option<&str>,
 ) -> Result<PathBuf, String> {
     let safe_file_name = sanitize_file_name(file_name)?;
-
-    if let Some(file_type) = file_type {
-        let typed_path = media_root
-            .join(get_media_subdir(file_type))
-            .join(&safe_file_name);
-        if typed_path.exists() {
-            return Ok(typed_path);
-        }
-    }
-
-    for subdir in get_all_media_subdirs() {
-        let candidate = media_root.join(subdir).join(&safe_file_name);
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Ok(media_root
-        .join(get_media_subdir(file_type.unwrap_or("image")))
-        .join(safe_file_name))
+    Ok(media_dirs::resolve_media_file_path(
+        media_root,
+        &safe_file_name,
+        file_type,
+    ))
 }
 
 fn serve_opentu_asset(
@@ -1374,19 +1400,8 @@ fn asset_response_builder() -> tauri::http::response::Builder {
         .header("Cache-Control", "no-store")
 }
 
-fn get_all_media_subdirs() -> [&'static str; 6] {
-    ["图片", "视频", "音频", "PPT", "文本", "压缩包"]
-}
-
 fn get_media_subdir(file_type: &str) -> &str {
-    match file_type.to_ascii_lowercase().as_str() {
-        "video" => "视频",
-        "audio" => "音频",
-        "ppt" | "presentation" => "PPT",
-        "text" | "markdown" | "json" => "文本",
-        "archive" | "zip" => "压缩包",
-        _ => "图片",
-    }
+    media_dirs::media_subdir(file_type)
 }
 
 const COPY_BUFFER_BYTES: usize = 128 * 1024;
@@ -1454,6 +1469,83 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(content, b"unchanged");
+    }
+
+    #[test]
+    fn sanitize_file_name_removes_path_segments_and_invalid_chars() {
+        assert_eq!(
+            sanitize_file_name("../bad:name?.png").unwrap(),
+            "bad_name_.png"
+        );
+        assert_eq!(
+            sanitize_file_name(r"C:\media\demo.png").unwrap(),
+            "demo.png"
+        );
+    }
+
+    #[test]
+    fn sanitize_file_name_prefixes_windows_reserved_names() {
+        assert_eq!(sanitize_file_name("CON").unwrap(), "_CON");
+        assert_eq!(sanitize_file_name("aux.txt").unwrap(), "_aux.txt");
+        assert_eq!(sanitize_file_name("LPT1.png").unwrap(), "_LPT1.png");
+    }
+
+    #[test]
+    fn media_subdirs_use_ascii_primary_names() {
+        assert_eq!(get_media_subdir("image"), "images");
+        assert_eq!(get_media_subdir("video"), "videos");
+        assert_eq!(get_media_subdir("audio"), "audio");
+        assert_eq!(get_media_subdir("ppt"), "ppt");
+        assert_eq!(get_media_subdir("presentation"), "ppt");
+        assert_eq!(get_media_subdir("text"), "text");
+        assert_eq!(get_media_subdir("markdown"), "text");
+        assert_eq!(get_media_subdir("archive"), "archives");
+        assert_eq!(get_media_subdir("zip"), "archives");
+    }
+
+    #[test]
+    fn resolve_media_file_path_reads_ascii_before_legacy_for_typed_files() {
+        let root = temp_media_root("resolve-ascii-first");
+        let ascii_dir = root.join("images");
+        let legacy_dir = root.join("图片");
+        std::fs::create_dir_all(&ascii_dir).unwrap();
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::write(ascii_dir.join("demo.png"), b"ascii").unwrap();
+        std::fs::write(legacy_dir.join("demo.png"), b"legacy").unwrap();
+
+        let path = resolve_media_file_path(&root, "demo.png", Some("image")).unwrap();
+
+        assert_eq!(path, ascii_dir.join("demo.png"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_media_file_path_reads_legacy_localized_files() {
+        let root = temp_media_root("resolve-legacy");
+        let legacy_dir = root.join("图片");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::write(legacy_dir.join("demo.png"), b"legacy").unwrap();
+
+        let path = resolve_media_file_path(&root, "demo.png", Some("image")).unwrap();
+
+        assert_eq!(path, legacy_dir.join("demo.png"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_media_file_path_does_not_cross_type_before_typed_legacy() {
+        let root = temp_media_root("resolve-typed-legacy");
+        let image_dir = root.join("images");
+        let legacy_video_dir = root.join("视频");
+        std::fs::create_dir_all(&image_dir).unwrap();
+        std::fs::create_dir_all(&legacy_video_dir).unwrap();
+        std::fs::write(image_dir.join("clip.mp4"), b"wrong-type").unwrap();
+        std::fs::write(legacy_video_dir.join("clip.mp4"), b"video").unwrap();
+
+        let path = resolve_media_file_path(&root, "clip.mp4", Some("video")).unwrap();
+
+        assert_eq!(path, legacy_video_dir.join("clip.mp4"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

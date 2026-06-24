@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${OPENTU_REPO:-AITU-Copilot/opentu}"
+# 当脚本作为 Release Asset 上传时，CI 会把 DEFAULT_REPO 替换为实际发布仓库。
+# 通过 raw.githubusercontent.com 直接拉取的版本会保留这里的占位默认值，
+# 用户可以用 OPENTU_REPO=用户名/仓库名 显式覆盖。
+DEFAULT_REPO="AITU-Copilot/opentu"
+REPO="${OPENTU_REPO:-$DEFAULT_REPO}"
 TAG="${OPENTU_TAG:-latest}"
 TMP_DIR="$(mktemp -d)"
 
@@ -18,18 +22,27 @@ case "$OS" in
     case "$ARCH" in
       arm64|aarch64) FILE="Opentu-macos-aarch64.dmg" ;;
       x86_64)        FILE="Opentu-macos-x86_64.dmg" ;;
-      *)             echo "Unsupported macOS arch: $ARCH" >&2; exit 1 ;;
+      *)
+        echo "不支持的 macOS 架构: $ARCH" >&2
+        echo "请到 https://github.com/${REPO}/releases 手动下载。" >&2
+        exit 1
+        ;;
     esac
     ;;
   Linux)
     case "$ARCH" in
       x86_64|amd64)  FILE="Opentu-linux-x86_64.AppImage" ;;
       aarch64|arm64) FILE="Opentu-linux-aarch64.AppImage" ;;
-      *)             echo "Unsupported Linux arch: $ARCH" >&2; exit 1 ;;
+      *)
+        echo "不支持的 Linux 架构: $ARCH" >&2
+        echo "请到 https://github.com/${REPO}/releases 手动下载。" >&2
+        exit 1
+        ;;
     esac
     ;;
   *)
-    echo "Unsupported OS: $OS" >&2
+    echo "不支持的系统: $OS" >&2
+    echo "请到 https://github.com/${REPO}/releases 手动下载。" >&2
     exit 1
     ;;
 esac
@@ -40,8 +53,18 @@ else
   DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${FILE}"
 fi
 
-echo "Downloading $FILE ..."
-curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$FILE"
+echo "正在从 ${REPO} 下载 ${FILE} (${TAG}) ..."
+if ! curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$FILE"; then
+  echo "" >&2
+  echo "下载失败: $DOWNLOAD_URL" >&2
+  echo "" >&2
+  echo "请检查:" >&2
+  echo "  1. 标签 ${TAG} 是否在 https://github.com/${REPO}/releases 存在" >&2
+  echo "  2. 是否需要切换仓库: OPENTU_REPO=用户名/仓库名" >&2
+  echo "  3. 网络是否能访问 github.com" >&2
+  echo "" >&2
+  exit 1
+fi
 
 case "$(echo "$FILE" | tr '[:upper:]' '[:lower:]')" in
   *.dmg)
@@ -50,7 +73,7 @@ case "$(echo "$FILE" | tr '[:upper:]' '[:lower:]')" in
     app_path="$(find "$MOUNT_DIR" -name '*.app' -maxdepth 1 | head -n 1)"
     if [[ -z "${app_path:-}" ]]; then
       hdiutil detach "$MOUNT_DIR" -quiet || true
-      echo "No .app found in DMG" >&2
+      echo "DMG 中未找到 .app" >&2
       exit 1
     fi
     dest_dir="/Applications"
@@ -61,7 +84,11 @@ case "$(echo "$FILE" | tr '[:upper:]' '[:lower:]')" in
     ditto "$app_path" "$dest_dir/$app_name"
     hdiutil detach "$MOUNT_DIR" -quiet || true
     xattr -dr com.apple.quarantine "$dest_dir/$app_name" 2>/dev/null || true
-    echo "Installed to $dest_dir/$app_name"
+    echo "已安装到 $dest_dir/$app_name"
+    echo ""
+    echo "如果首次启动被 Gatekeeper 拦截，可以："
+    echo "  - 右键应用 → 打开 → 在弹窗里再次点击「打开」"
+    echo "  - 或执行: xattr -dr com.apple.quarantine \"$dest_dir/$app_name\""
     ;;
   *.appimage)
     install_root="$HOME/.local/share/opentu"
@@ -71,7 +98,16 @@ case "$(echo "$FILE" | tr '[:upper:]' '[:lower:]')" in
     mv "$TMP_DIR/$FILE" "$install_path"
     chmod +x "$install_path"
     ln -sf "$install_path" "$bin_root/opentu"
-    echo "Installed to $install_path"
-    echo "Symlink created at $bin_root/opentu"
+    echo "已安装到 $install_path"
+    echo "已创建符号链接 $bin_root/opentu"
+    echo ""
+    echo "AppImage 运行需要系统具备 FUSE 支持。如果启动报错:"
+    echo "  - Ubuntu/Debian: sudo apt install libfuse2"
+    echo "  - Fedora/RHEL:   sudo dnf install fuse fuse-libs"
+    echo "另外还需要 libwebkit2gtk-4.1，多数发行版默认未安装:"
+    echo "  - Ubuntu 22.04+: sudo apt install libwebkit2gtk-4.1-0"
+    echo "  - 老系统可能要自行编译或升级发行版"
+    echo ""
+    echo "确保 $bin_root 在 PATH 中后，可直接运行: opentu"
     ;;
 esac

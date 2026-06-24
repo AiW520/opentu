@@ -25,25 +25,39 @@ jobs:
 
           ### macOS / Linux 一键安装
 
+          推荐从 Release Asset 拉取脚本（脚本内置仓库地址，最稳定）：
+
           \`\`\`bash
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install_opentu.sh | bash
           \`\`\`
 
           或指定版本：
 
           \`\`\`bash
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | OPENTU_TAG=${{ github.ref_name }} bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/install_opentu.sh | OPENTU_TAG=${{ github.ref_name }} bash
+          \`\`\`
+
+          也可以从 raw 拉脚本（必须显式指定 \`OPENTU_REPO\`）：
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install_opentu.sh | OPENTU_REPO=${{ github.repository }} OPENTU_TAG=${{ github.ref_name }} bash
           \`\`\`
 
           ### Windows
 
-          下载下方 Assets 中的 \`.msi\` 安装包，双击安装即可。
+          下载下方 Assets 中的 \`Opentu-windows-x86_64-setup.exe\`（NSIS）或 \`Opentu-windows-x86_64.msi\`，双击安装即可。
 
           ### macOS 未签名包打开方式
 
           如果第一次打开时被系统拦截：
           1. 对应用点右键，选择\"打开\"，在弹窗里确认\"打开\"
           2. 或在终端执行：\`xattr -dr com.apple.quarantine \"/Applications/Opentu.app\"\`
+
+          ### Linux AppImage 系统依赖
+
+          AppImage 启动需要：
+          - \`libfuse2\`（Ubuntu/Debian: \`sudo apt install libfuse2\`）
+          - \`libwebkit2gtk-4.1\`（Ubuntu 22.04+ 默认仓库提供）
 
           ---
 
@@ -85,9 +99,19 @@ jobs:
           4. 也可在应用的素材库面板中直接预览和管理生成的资源
           "
 
-  build-macos-arm:
+  build-macos:
     needs: create-release
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: aarch64
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            arch: x86_64
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Install imagemagick
@@ -105,10 +129,11 @@ jobs:
         run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "apps/desktop/src-tauri -> target"
+          key: ${{ matrix.target }}
       - name: Build Desktop
         working-directory: apps/desktop
         env:
@@ -117,21 +142,23 @@ jobs:
           RUST_BACKTRACE: "1"
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
-          echo "Starting Tauri build..."
-          pnpm tauri build --target aarch64-apple-darwin --verbose 2>&1
+          echo "Starting Tauri build for ${{ matrix.target }}..."
+          pnpm tauri build --target ${{ matrix.target }} --verbose 2>&1
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
         run: |
-          BUNDLE="apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle"
+          BUNDLE="apps/desktop/src-tauri/target/${TARGET}/release/bundle"
           echo "Checking bundle directory: $BUNDLE"
           ls -la $BUNDLE
           if [ -d "$BUNDLE/dmg" ]; then
-            find "$BUNDLE/dmg" -name "*.dmg" -exec sh -c 'cp "$1" "Opentu-macos-aarch64.dmg" && gh release upload "$TAG" "Opentu-macos-aarch64.dmg" --clobber' _ {} \;
+            find "$BUNDLE/dmg" -name "*.dmg" -exec sh -c 'cp "$1" "Opentu-macos-${ARCH}.dmg" && gh release upload "$TAG" "Opentu-macos-${ARCH}.dmg" --clobber' _ {} \;
           fi
           if [ -d "$BUNDLE/macos" ]; then
-            find "$BUNDLE/macos" -name "*.tar.gz" -exec sh -c 'cp "$1" "Opentu-macos-aarch64.tar.gz" && gh release upload "$TAG" "Opentu-macos-aarch64.tar.gz" --clobber' _ {} \;
+            find "$BUNDLE/macos" -name "*.tar.gz" -exec sh -c 'cp "$1" "Opentu-macos-${ARCH}.tar.gz" && gh release upload "$TAG" "Opentu-macos-${ARCH}.tar.gz" --clobber' _ {} \;
           fi
 
   build-windows:
@@ -181,7 +208,17 @@ jobs:
 
   build-linux:
     needs: create-release
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -198,9 +235,12 @@ jobs:
           convert apps/desktop/src-tauri/icons/128x128.png -alpha on apps/desktop/src-tauri/icons/128x128.png
           convert apps/desktop/src-tauri/icons/128x128@2x.png -alpha on apps/desktop/src-tauri/icons/128x128@2x.png
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "apps/desktop/src-tauri -> target"
+          key: ${{ matrix.target }}
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build Desktop
@@ -210,35 +250,39 @@ jobs:
           RUST_BACKTRACE: "1"
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
-          echo "Starting build..."
-          pnpm tauri build --verbose 2>&1
+          echo "Starting build for ${{ matrix.target }}..."
+          pnpm tauri build --target ${{ matrix.target }} --verbose 2>&1
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
         run: |
-          BUNDLE="apps/desktop/src-tauri/target/release/bundle"
+          BUNDLE="apps/desktop/src-tauri/target/${TARGET}/release/bundle"
           echo "Checking bundle directory: $BUNDLE"
           ls -la $BUNDLE
           if [ -d "$BUNDLE/appimage" ]; then
-            find "$BUNDLE/appimage" -name "*.AppImage" -exec sh -c 'cp "$1" "Opentu-linux-x86_64.AppImage" && gh release upload "$TAG" "Opentu-linux-x86_64.AppImage" --clobber' _ {} \;
+            find "$BUNDLE/appimage" -name "*.AppImage" -exec sh -c 'cp "$1" "Opentu-linux-${ARCH}.AppImage" && gh release upload "$TAG" "Opentu-linux-${ARCH}.AppImage" --clobber' _ {} \;
           fi
           if [ -d "$BUNDLE/deb" ]; then
-            find "$BUNDLE/deb" -name "*.deb" -exec sh -c 'cp "$1" "Opentu-linux-x86_64.deb" && gh release upload "$TAG" "Opentu-linux-x86_64.deb" --clobber' _ {} \;
+            find "$BUNDLE/deb" -name "*.deb" -exec sh -c 'cp "$1" "Opentu-linux-${ARCH}.deb" && gh release upload "$TAG" "Opentu-linux-${ARCH}.deb" --clobber' _ {} \;
           fi
           if [ -d "$BUNDLE/rpm" ]; then
-            find "$BUNDLE/rpm" -name "*.rpm" -exec sh -c 'cp "$1" "Opentu-linux-x86_64.rpm" && gh release upload "$TAG" "Opentu-linux-x86_64.rpm" --clobber' _ {} \;
+            find "$BUNDLE/rpm" -name "*.rpm" -exec sh -c 'cp "$1" "Opentu-linux-${ARCH}.rpm" && gh release upload "$TAG" "Opentu-linux-${ARCH}.rpm" --clobber' _ {} \;
           fi
 
   upload-install-script:
-    needs: [build-macos-arm, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Upload install script
+      - name: Rewrite default repo and upload install script
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release upload "${{ github.ref_name }}" \
-            scripts/install_opentu.sh \
-            --clobber
+          # 把脚本里的 DEFAULT_REPO 替换成实际发布仓库，确保用户从 Release Asset 下载的脚本默认指向正确仓库
+          sed -i "s|^DEFAULT_REPO=.*|DEFAULT_REPO=\"${REPO}\"|" scripts/install_opentu.sh
+          gh release upload "$TAG" scripts/install_opentu.sh --clobber

@@ -1,5 +1,6 @@
 mod commands;
 mod database;
+mod media_dirs;
 mod path_grants;
 
 use database::Database;

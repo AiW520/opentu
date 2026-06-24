@@ -7,6 +7,7 @@ import {
 import { MIME_TYPES } from '../constants';
 
 type FILE_EXTENSION = Exclude<keyof typeof MIME_TYPES, 'binary'>;
+const DESKTOP_WRITE_CHUNK_BYTES = 1024 * 1024;
 
 function getErrorName(error: unknown): string {
   if (error && typeof error === 'object' && 'name' in error) {
@@ -58,6 +59,87 @@ function normalizeFileSystemError(error: unknown): never {
   throw normalized;
 }
 
+function isTauriEnvironment(): boolean {
+  return typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+}
+
+function tauriInvoke<T>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  return (window as any).__TAURI_INTERNALS__.invoke(command, args);
+}
+
+async function pickDesktopSavePath(fileName: string): Promise<string | null> {
+  return tauriInvoke<string | null>('pick_save_location', {
+    defaultName: fileName,
+  });
+}
+
+async function writeDesktopChunk(
+  savePath: string,
+  buffer: Uint8Array,
+  append: boolean
+): Promise<void> {
+  await tauriInvoke<void>('write_file_chunk_to_path', {
+    savePath,
+    buffer: Array.from(buffer),
+    append,
+  });
+}
+
+async function writeDesktopChunkSplit(
+  savePath: string,
+  buffer: Uint8Array,
+  initialAppend: boolean
+): Promise<boolean> {
+  let append = initialAppend;
+  for (
+    let offset = 0;
+    offset < buffer.byteLength;
+    offset += DESKTOP_WRITE_CHUNK_BYTES
+  ) {
+    await writeDesktopChunk(
+      savePath,
+      buffer.subarray(offset, offset + DESKTOP_WRITE_CHUNK_BYTES),
+      append
+    );
+    append = true;
+  }
+  return append;
+}
+
+async function writeBlobToDesktopPath(
+  savePath: string,
+  blob: Blob
+): Promise<void> {
+  if (blob.stream) {
+    const reader = blob.stream().getReader();
+    let append = false;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+        append = await writeDesktopChunkSplit(savePath, value, append);
+      }
+      if (!append) {
+        await writeDesktopChunk(savePath, new Uint8Array(), false);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return;
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (bytes.byteLength === 0) {
+    await writeDesktopChunk(savePath, bytes, false);
+    return;
+  }
+  await writeDesktopChunkSplit(savePath, bytes, false);
+}
+
 export const fileOpen = <M extends boolean | undefined = false>(opts: {
   extensions?: FILE_EXTENSION[];
   description: string;
@@ -103,11 +185,23 @@ export const fileSave = (
     fileHandle?: FileSystemHandle | null;
   }
 ) => {
+  const fileName = `${opts.name}.${opts.extension}`;
+  if (isTauriEnvironment()) {
+    return (async () => {
+      const savePath = await pickDesktopSavePath(fileName);
+      if (!savePath) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+      await writeBlobToDesktopPath(savePath, await blob);
+      return null;
+    })();
+  }
+
   try {
     return _fileSave(
       blob,
       {
-        fileName: `${opts.name}.${opts.extension}`,
+        fileName,
         description: opts.description,
         extensions: [`.${opts.extension}`],
       },

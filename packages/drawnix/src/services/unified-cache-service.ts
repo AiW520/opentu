@@ -17,6 +17,7 @@ import {
   isVirtualMediaUrl,
   normalizeVirtualMediaUrl,
 } from '../utils/virtual-media-url';
+import { convertLocalFilePathToAssetUrl } from '../utils/desktop-asset-url';
 import type {
   CacheWarning,
   CacheWarningReasonCode,
@@ -1760,11 +1761,20 @@ class UnifiedCacheService {
         (window as any).__TAURI_INTERNALS__
       ) {
         const fileName = this.getFileNameFromUrl(cacheUrl);
+        const fileType = this.getMediaTypeFromUrl(cacheUrl);
+        const assetBlob = await this.getTauriCachedBlobViaAssetUrl(
+          fileName,
+          fileType
+        );
+        if (assetBlob) {
+          return assetBlob;
+        }
+
         const base64Data = await (window as any).__TAURI_INTERNALS__.invoke(
           'get_cached_media_file',
           {
             fileName,
-            fileType: this.getMediaTypeFromUrl(cacheUrl),
+            fileType,
           }
         );
 
@@ -1796,6 +1806,33 @@ class UnifiedCacheService {
       return await response.blob();
     } catch (error) {
       console.error('[UnifiedCache] Failed to get cached blob:', error);
+      return null;
+    }
+  }
+
+  private async getTauriCachedBlobViaAssetUrl(
+    fileName: string,
+    fileType: CacheMediaType
+  ): Promise<Blob | null> {
+    try {
+      const filePath = await (window as any).__TAURI_INTERNALS__.invoke(
+        'get_file_path',
+        {
+          fileName,
+          fileType,
+        }
+      );
+      if (typeof filePath !== 'string' || !filePath) {
+        return null;
+      }
+
+      const response = await fetch(convertLocalFilePathToAssetUrl(filePath));
+      if (!response.ok) {
+        return null;
+      }
+
+      return await response.blob();
+    } catch {
       return null;
     }
   }

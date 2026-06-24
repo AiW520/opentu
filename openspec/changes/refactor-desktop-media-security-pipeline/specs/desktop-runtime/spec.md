@@ -51,6 +51,44 @@ The desktop asset protocol SHALL only serve files whose canonical paths are unde
 - **THEN** the protocol handler SHALL return partial content with correct range headers
 - **AND** memory usage SHALL be bounded by the requested range size
 
+### Requirement: Desktop Asset URLs Must Match Runtime Support
+The desktop runtime SHALL generate asset URLs only in forms that the current platform can actually serve.
+
+#### Scenario: Windows asset URL is generated
+- **GIVEN** the desktop runtime is Windows
+- **WHEN** the renderer creates a URL for a local media file
+- **THEN** the URL MAY use `http://opentu-asset.localhost`
+- **AND** the protocol handler SHALL resolve it through the same media-root checks as custom-scheme URLs
+
+#### Scenario: macOS or Linux asset URL is generated without loopback server
+- **GIVEN** the desktop runtime is macOS or Linux
+- **AND** no runtime-owned loopback asset server is active
+- **WHEN** the renderer creates a URL for a local media file
+- **THEN** the URL SHALL use the supported `opentu-asset://localhost` form
+- **AND** it SHALL NOT assume `http://opentu-asset.localhost` will be intercepted
+
+#### Scenario: Cross-platform HTTP asset URL is enabled
+- **GIVEN** a runtime-owned loopback asset server is active
+- **WHEN** the renderer creates a local media URL on any desktop platform
+- **THEN** the URL MAY use the documented HTTP origin
+- **AND** the server SHALL enforce media-root access checks and byte range semantics
+- **AND** the server SHALL shut down with the app
+
+### Requirement: Desktop File Writes Must Avoid JSON Array Inflation
+The desktop runtime SHALL provide a bounded binary transfer path for large renderer-to-filesystem writes.
+
+#### Scenario: Large desktop export is saved
+- **GIVEN** the renderer needs to save a 10 MB or larger payload to a dialog-granted path
+- **WHEN** the save operation transfers bytes to Rust
+- **THEN** the transfer SHALL NOT serialize the payload as a JSON array of numbers
+- **AND** memory usage SHALL remain bounded by the configured chunk or stream window
+
+#### Scenario: Small compatibility write is saved
+- **GIVEN** legacy renderer code calls the JSON-array write API with a payload below the documented threshold
+- **WHEN** the command executes
+- **THEN** the command MAY continue to accept the payload
+- **AND** larger payloads SHALL be routed to the binary transfer path or rejected with a clear error
+
 ### Requirement: Desktop Service Worker Policy Must Be Explicit
 The desktop runtime SHALL either bundle the required Service Worker contract or disable Service Worker registration with a documented fallback.
 
@@ -58,3 +96,18 @@ The desktop runtime SHALL either bundle the required Service Worker contract or 
 - **WHEN** the desktop renderer boots
 - **THEN** it SHALL NOT repeatedly attempt to register a missing `sw.js`
 - **AND** task/cache features SHALL use the configured desktop policy
+
+### Requirement: Desktop Media Directories Must Be Portable
+The desktop runtime SHALL write new media files into stable ASCII subdirectories while preserving read compatibility with legacy localized subdirectories.
+
+#### Scenario: New image is saved
+- **GIVEN** the desktop runtime saves a new image under the media root
+- **WHEN** it chooses the target subdirectory
+- **THEN** it SHALL use the ASCII `images` directory
+- **AND** the UI may continue to display localized labels independently from the filesystem name
+
+#### Scenario: Existing localized media is read
+- **GIVEN** an existing installation has image files under the legacy localized image directory
+- **WHEN** the user previews or references that media
+- **THEN** the desktop runtime SHALL still find and serve the file
+- **AND** migration SHALL NOT require deleting the legacy file first

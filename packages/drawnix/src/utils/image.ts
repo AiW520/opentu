@@ -1,7 +1,7 @@
 import { getSelectedElements, PlaitBoard } from '@plait/core';
-import { base64ToBlob, download } from '@aitu/utils';
+import { base64ToBlob } from '@aitu/utils';
 import { boardToImage } from './common';
-import { fileOpen, isFileSystemAbortError } from '../data/filesystem';
+import { fileOpen, fileSave, isFileSystemAbortError } from '../data/filesystem';
 import { IMAGE_MIME_TYPES } from '../constants';
 import { insertImage } from '../data/image';
 import { MessagePlugin } from './message-plugin';
@@ -75,11 +75,17 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
 
       if (image) {
         const ext = isTransparent ? 'png' : 'jpg';
-        const pngImage = base64ToBlob(image);
-        const imageName = `drawnix-${new Date().getTime()}.${ext}`;
-        download(pngImage, imageName);
+        const imageBlob = base64ToBlob(image);
+        await fileSave(imageBlob, {
+          name: `drawnix-${new Date().getTime()}`,
+          extension: ext,
+          description: isTransparent ? 'PNG image' : 'JPEG image',
+        });
       }
     } catch (error) {
+      if (isFileSystemAbortError(error)) {
+        return;
+      }
       console.warn('[ImageExport] Failed to export image:', error);
       MessagePlugin.error('导出图片失败，请稍后重试');
     }

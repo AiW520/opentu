@@ -7,6 +7,7 @@
 import { CryptoUtils } from './crypto-utils';
 import { DRAWNIX_SETTINGS_KEY } from '../constants/storage';
 import { configIndexedDBWriter } from './config-indexeddb-writer';
+import { isTauriEnvironment } from './tauri-env';
 import type { GeminiConfig } from './gemini-api/types';
 import type { VideoAPIConfig } from './config-indexeddb-writer';
 import type { ProviderPricingCache } from './model-pricing-types';
@@ -1364,6 +1365,7 @@ class SettingsManager {
    */
   private async syncToIndexedDB(): Promise<void> {
     if (typeof window === 'undefined') return;
+    if (isTauriEnvironment()) return;
 
     try {
       const imageRoute = this.resolveInvocationRoute('image');

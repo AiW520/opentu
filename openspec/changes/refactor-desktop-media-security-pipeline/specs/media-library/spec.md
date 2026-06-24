@@ -39,6 +39,28 @@ The media library SHALL preview large desktop assets without requiring an unboun
 - **THEN** the preview SHALL either load through a bounded protocol path or show a clear preview-unavailable state
 - **AND** it SHALL NOT repeatedly request a full response that is known to fail
 
+### Requirement: Desktop Media Cache Must Prefer Durable Files
+The media library SHALL treat the desktop media filesystem as the durable source for generated and imported media, using Cache Storage only as bounded hot cache.
+
+#### Scenario: Desktop restarts with empty Cache Storage
+- **GIVEN** a generated desktop media asset has metadata and a durable file under the media root
+- **AND** browser Cache Storage has been cleared or is unavailable
+- **WHEN** the user opens the media library
+- **THEN** the asset SHALL still be previewable or retrievable through the desktop media file path
+- **AND** the system SHALL NOT report the asset as lost solely because Cache Storage missed
+
+#### Scenario: Large desktop video is cached
+- **GIVEN** the desktop runtime receives a large generated video
+- **WHEN** the media is persisted
+- **THEN** the durable filesystem write SHALL be the required persistence path
+- **AND** Cache Storage duplication SHALL be skipped or bounded by the desktop hot-cache policy
+
+#### Scenario: Recently generated desktop image is displayed
+- **GIVEN** a generated image was just written or is still completing durable persistence
+- **WHEN** the UI needs an immediate preview
+- **THEN** the system MAY use Cache Storage or an object URL as a temporary hot path
+- **AND** the metadata SHALL distinguish pending durable writes from completed durable files
+
 ### Requirement: AI Input Local Images Must Avoid Early Base64 Inflation
 The AI input bar SHALL avoid converting local images to base64 before submission when a stable local or virtual reference can be retained.
 

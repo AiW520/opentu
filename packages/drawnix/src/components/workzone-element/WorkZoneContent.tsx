@@ -137,24 +137,19 @@ export const WorkZoneContent: React.FC<WorkZoneContentProps> = ({
           }
         }
 
-        // 尝试通过 SW claim
-        const { swChannelClient } = await import(
-          '../../services/sw-channel/client'
-        );
-
-        // 快速检查 SW 是否可用（不再等待 5 秒）
-        if (!swChannelClient.isInitialized()) {
+        const syncFromMainThreadWorkflow = async (
+          missingMessage = '工作流已丢失，请重试'
+        ): Promise<boolean> => {
           const resumed =
             await workflowSubmissionService.resumeWorkflowWithFallback(
               workflowId
             );
           if (resumed) {
-            // 工作流已恢复，事件会通过 fallback engine 发送
-            return;
+            return true;
           }
 
-          // 恢复失败，检查本地缓存状态
           const localWorkflow =
+            (await workflowSubmissionService.queryWorkflowStatus(workflowId)) ||
             workflowSubmissionService.getWorkflow(workflowId);
           if (localWorkflow) {
             const status = localWorkflow.status;
@@ -168,18 +163,41 @@ export const WorkZoneContent: React.FC<WorkZoneContentProps> = ({
                 status === 'completed' ? 'completed' : 'failed',
                 localWorkflow.error
               );
+              return true;
             }
-          } else {
-            onWorkflowStateChange?.(
-              workflowId,
-              'failed',
-              '工作流已丢失，请重试'
-            );
+            if (status === 'running' || status === 'pending') {
+              return true;
+            }
           }
+
+          onWorkflowStateChange?.(workflowId, 'failed', missingMessage);
+          return false;
+        };
+
+        // 尝试通过 SW claim
+        const { swChannelClient } = await import(
+          '../../services/sw-channel/client'
+        );
+        const claimWorkflow = (
+          swChannelClient as typeof swChannelClient & {
+            claimWorkflow?: (workflowId: string) => Promise<{
+              success: boolean;
+              workflow?: { status?: string; error?: string };
+              error?: string;
+            }>;
+          }
+        ).claimWorkflow;
+
+        // 快速检查 SW 是否可用（不再等待 5 秒）
+        if (
+          !swChannelClient.isInitialized() ||
+          typeof claimWorkflow !== 'function'
+        ) {
+          await syncFromMainThreadWorkflow();
           return;
         }
 
-        const result = await (swChannelClient as any).claimWorkflow(workflowId);
+        const result = await claimWorkflow.call(swChannelClient, workflowId);
 
         if (result.success) {
           // 如果 SW 中的工作流已经是终态，通知 UI 更新
@@ -195,35 +213,18 @@ export const WorkZoneContent: React.FC<WorkZoneContentProps> = ({
               result.workflow?.error
             );
           }
-        } else {
-          // 工作流不存在或 claim 失败
-          // 检查本地缓存
-          const localWorkflow =
-            workflowSubmissionService.getWorkflow(workflowId);
-          if (
-            localWorkflow &&
-            (localWorkflow.status === 'running' ||
-              localWorkflow.status === 'pending')
-          ) {
-            // 本地有运行中的工作流，可能是降级模式
-            // 不标记为失败，让它继续运行
-            return;
-          }
-          const resumed =
-            await workflowSubmissionService.resumeWorkflowWithFallback(
-              workflowId
-            );
-          if (resumed) {
-            return;
-          }
+          return;
+        }
 
-          onWorkflowStateChange?.(
-            workflowId,
-            'failed',
-            result.error || '工作流已丢失，请重试'
-          );
+        // 工作流不存在或 claim 失败，回退到主线程恢复/本地状态查询
+        const recovered = await syncFromMainThreadWorkflow(
+          result.error || '工作流已丢失，请重试'
+        );
+        if (recovered) {
+          return;
         }
       } catch (error) {
+        claimedWorkflows.delete(workflowId);
         onWorkflowStateChange?.(workflowId, 'failed', '恢复工作流失败，请重试');
       }
     })();

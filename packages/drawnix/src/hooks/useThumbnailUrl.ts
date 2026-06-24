@@ -312,16 +312,13 @@ async function ensureThumbnailImpl(
     );
     if (!thumbnailSource) return;
     
-    // 通过 swChannelClient 通知 SW 生成预览图
-    if (swChannelClient.isInitialized()) {
-      await swChannelClient.generateThumbnail(
-        normalizedUrl,
-        type,
-        thumbnailSource.arrayBuffer,
-        thumbnailSource.mimeType,
-        [size]
-      );
-    }
+    await swChannelClient.generateThumbnail(
+      normalizedUrl,
+      type,
+      thumbnailSource.arrayBuffer,
+      thumbnailSource.mimeType,
+      [size]
+    );
   }
 }
 
