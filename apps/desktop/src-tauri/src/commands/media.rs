@@ -1400,6 +1400,7 @@ fn asset_response_builder() -> tauri::http::response::Builder {
         .header("Cache-Control", "no-store")
 }
 
+#[allow(dead_code)]
 fn get_media_subdir(file_type: &str) -> &str {
     media_dirs::media_subdir(file_type)
 }
