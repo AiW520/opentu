@@ -73,6 +73,7 @@ export type DrawnixState = {
   toolSettingsVersion?: number;
   linkState?: LinkState | null;
   lastSelectedElementIds?: string[]; // 最近选中的元素IDs,用于AI生成插入位置计算
+  lastNonEmptySelectedElementIds?: string[]; // 最近一次非空选中元素IDs,用于弹窗交互后插入到原目标
 };
 
 export const DrawnixContext = createContext<{

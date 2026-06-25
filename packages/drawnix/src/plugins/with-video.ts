@@ -1,4 +1,9 @@
 import { PlaitBoard, Transforms } from '@plait/core';
+import {
+  isVideoLikeElement,
+  markVideoUrl,
+  stripVideoUrlMarker,
+} from '../utils/video-url';
 
 /**
  * 为 PlaitBoard 添加视频支持的插件
@@ -26,10 +31,13 @@ export const withVideo = (board: PlaitBoard) => {
             const imageElement = {
               ...videoElement,
               type: 'image', // 改为image类型，通过URL后缀识别为视频
+              url:
+                typeof videoElement.url === 'string'
+                  ? markVideoUrl(videoElement.url)
+                  : videoElement.url,
+              isVideo: true,
+              videoType: videoElement.videoType || 'video',
             };
-            
-            // 移除可能存在的poster字段
-            delete (imageElement as any).poster;
             
             // console.log('Converting video element to image+identifier:', {
             //   from: videoElement,
@@ -58,26 +66,7 @@ export const withVideo = (board: PlaitBoard) => {
  * 通过URL标识符、扩展名或元数据判断
  */
 export function isVideoElement(element: any): boolean {
-  if (!element || !element.url) {
-    return false;
-  }
-
-  // 检查是否有视频标识属性
-  if (element.isVideo === true || element.videoType) {
-    return true;
-  }
-
-  const url = element.url.toLowerCase();
-
-  // 检查 URL hash 标识符（用于 ObjectURL 的视频识别）
-  // 格式：blob:http://...#video
-  if (url.includes('#video')) {
-    return true;
-  }
-
-  // 检查URL扩展名（用于普通 URL 的视频识别）
-  const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv', '.wmv'];
-  return videoExtensions.some(ext => url.includes(ext));
+  return isVideoLikeElement(element);
 }
 
 /**
@@ -91,7 +80,7 @@ export function handleVideoElementClick(element: any, event: MouseEvent) {
     
     // 在新窗口打开视频
     if (element.url) {
-      window.open(element.url, '_blank');
+      window.open(stripVideoUrlMarker(element.url), '_blank');
       return true;
     }
   }

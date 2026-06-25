@@ -26,6 +26,9 @@ const isLocalDev =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1');
+const isTauriRuntime =
+  typeof window !== 'undefined' &&
+  !!(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 const swQueryParam =
   typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('sw')
@@ -34,7 +37,7 @@ const isServiceWorkerExplicitlyDisabled = swQueryParam === '0';
 const hasServiceWorkerSupport =
   typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
 const shouldUseServiceWorker =
-  hasServiceWorkerSupport && !isServiceWorkerExplicitlyDisabled;
+  hasServiceWorkerSupport && !isServiceWorkerExplicitlyDisabled && !isTauriRuntime;
 
 // ===== 控制台日志捕获（尽早初始化，确保默认 console 被改写） =====
 // 必须在其他业务代码之前执行，否则后续工具（如 rrweb）可能先改写 console 导致捕获失效
@@ -341,7 +344,7 @@ if (typeof window !== 'undefined') {
 
 if (
   hasServiceWorkerSupport &&
-  isServiceWorkerExplicitlyDisabled
+  (isServiceWorkerExplicitlyDisabled || isTauriRuntime)
 ) {
   cleanupDisabledServiceWorker();
 }

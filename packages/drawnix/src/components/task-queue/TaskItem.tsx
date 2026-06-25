@@ -37,6 +37,7 @@ import {
   getLyricsTitle,
   isLyricsResult,
 } from '../../utils/lyrics-task-utils';
+import { stripVideoUrlMarker } from '../../utils/video-url';
 import { VideoPosterPreview } from '../shared/VideoPosterPreview';
 import './task-queue.scss';
 import './task-progress-overlay.scss';
@@ -370,6 +371,10 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(
         ? undefined
         : task.result?.previewImageUrl
       : mediaUrl;
+    const resultLinkUrl =
+      task.type === TaskType.VIDEO && task.result?.url
+        ? stripVideoUrlMarker(task.result.url)
+        : task.result?.url;
 
     // 获取预览图URL（任务列表使用小尺寸）
     const thumbnailUrl = useThumbnailUrl(
@@ -655,10 +660,11 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(
                           poster={task.result?.previewImageUrl}
                           alt={displayPrompt || '视频预览'}
                           thumbnailSize="small"
+                          useGeneratedPoster={Boolean(task.result?.previewImageUrl)}
                           videoProps={{
                             muted: true,
                             playsInline: true,
-                            preload: 'metadata',
+                            preload: 'auto',
                           }}
                         />
                         {/* 视频播放按钮覆盖层 */}
@@ -811,9 +817,9 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(
                       {audioDurationLabel}
                     </span>
                   )}
-                  {isCompleted && task.result?.url && !isLyricsTask && (
+                  {isCompleted && resultLinkUrl && !isLyricsTask && (
                     <a
-                      href={task.result.url}
+                      href={resultLinkUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="task-item__link"

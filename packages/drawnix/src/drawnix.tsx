@@ -835,7 +835,12 @@ export const Drawnix: React.FC<DrawnixProps> = ({
 
         // 更新lastSelectedElementIds（包括清空的情况）
         // console.log('Selection changed, saving element IDs:', elementIds);
-        updateAppState({ lastSelectedElementIds: elementIds });
+        updateAppState({
+          lastSelectedElementIds: elementIds,
+          ...(elementIds.length > 0
+            ? { lastNonEmptySelectedElementIds: elementIds }
+            : {}),
+        });
       }
 
       // 调用外部的onSelectionChange回调

@@ -118,6 +118,13 @@ function normalizeNullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function normalizeProviderBaseUrl(value: unknown): string {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : DEFAULT_SETTINGS.gemini.baseUrl;
+}
+
 export function createModelRef(
   profileId?: string | null,
   modelId?: string | null
@@ -1828,10 +1835,13 @@ class SettingsManager {
     const profileModels = profile
       ? this.getSelectedModelsForProfile(profile.id, routeType)
       : [];
-    const normalizedLegacyBaseUrl =
-      this.settings.gemini.baseUrl?.trim() || DEFAULT_SETTINGS.gemini.baseUrl;
+    const normalizedLegacyBaseUrl = normalizeProviderBaseUrl(
+      this.settings.gemini.baseUrl
+    );
     const normalizedLegacyApiKey = this.settings.gemini.apiKey?.trim() || '';
-    const normalizedProfileBaseUrl = profile?.baseUrl?.trim() || '';
+    const normalizedProfileBaseUrl = profile?.baseUrl
+      ? normalizeProviderBaseUrl(profile.baseUrl)
+      : '';
     const normalizedProfileApiKey = profile?.apiKey?.trim() || '';
     const fallbackModelId =
       profileModels[0]?.id || this.getLegacyModelId(routeType);

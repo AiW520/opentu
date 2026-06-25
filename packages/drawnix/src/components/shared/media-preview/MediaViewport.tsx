@@ -23,6 +23,7 @@ import { AudioCover } from '../AudioCover';
 import { RetryImage } from '../../retry-image';
 import type { MediaViewportProps, MediaViewportRef } from './types';
 import { HoverPopover } from './HoverPopover';
+import { stripVideoUrlMarker } from '../../../utils/video-url';
 import './MediaViewport.scss';
 
 // 稳定的默认值
@@ -212,7 +213,11 @@ export const MediaViewport = forwardRef<MediaViewportRef, MediaViewportProps>(({
   const showPrompt =
     Boolean(promptText) && (isMediaHovered || isPromptHovered) && !isToolbarHovered;
   const mediaUrl = item
-    ? (isVideo || isAudio ? item.url : normalizeImageDataUrl(item.url))
+    ? (isVideo
+        ? stripVideoUrlMarker(item.url)
+        : isAudio
+        ? item.url
+        : normalizeImageDataUrl(item.url))
     : '';
   const posterUrl = item?.posterUrl ? normalizeImageDataUrl(item.posterUrl) : '';
   const mediaIdentity = item ? `${item.type}:${item.id || item.url}` : 'empty';

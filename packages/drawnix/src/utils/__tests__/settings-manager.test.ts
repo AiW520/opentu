@@ -258,6 +258,28 @@ describe('settings-manager', () => {
     });
   });
 
+  it('falls back to absolute provider base URL when stored baseUrl is relative', async () => {
+    mockSettingsManagerDeps();
+
+    localStorage.setItem(
+      DRAWNIX_SETTINGS_KEY,
+      JSON.stringify({
+        gemini: {
+          apiKey: 'legacy-key',
+          baseUrl: '/v1',
+          videoModelName: 'veo3',
+        },
+      })
+    );
+
+    const { resolveInvocationRoute, TUZI_PROVIDER_DEFAULT_BASE_URL } =
+      await import('../settings-manager');
+
+    expect(resolveInvocationRoute('video', 'veo3').baseUrl).toBe(
+      TUZI_PROVIDER_DEFAULT_BASE_URL
+    );
+  });
+
   it('migrates legacy default Tuzi GPT Image compatibility only once', async () => {
     mockSettingsManagerDeps();
 

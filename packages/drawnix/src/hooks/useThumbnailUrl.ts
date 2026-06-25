@@ -16,6 +16,7 @@ const thumbnailCheckCache = new Map<string, number>();
 const CACHE_TTL = 5 * 60 * 1000;
 // 缓存上限
 const MAX_CACHE_SIZE = 500;
+const MAX_THUMBNAIL_SOURCE_BYTES = 20 * 1024 * 1024;
 
 // 待检查队列和处理状态
 const pendingChecks = new Set<string>();
@@ -64,6 +65,66 @@ function getImageCache(): Promise<Cache> {
   return imageCachePromise;
 }
 
+async function readResponseArrayBufferWithinLimit(
+  response: Response,
+  maxBytes: number
+): Promise<{ arrayBuffer: ArrayBuffer; mimeType: string } | null> {
+  const contentLength = Number(response.headers.get('content-length') || 0);
+  if (contentLength > maxBytes) {
+    return null;
+  }
+
+  const mimeType = response.headers.get('content-type') || '';
+  if (!response.body) {
+    const blob = await response.blob();
+    if (blob.size > maxBytes) {
+      return null;
+    }
+    return {
+      arrayBuffer: await blob.arrayBuffer(),
+      mimeType: blob.type || mimeType,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let isReading = true;
+  try {
+    while (isReading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        isReading = false;
+        break;
+      }
+      if (!value) {
+        continue;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return {
+    arrayBuffer: bytes.buffer,
+    mimeType,
+  };
+}
+
 function getThumbnailCheckKey(originalUrl: string, size: 'small' | 'large'): string {
   return `${originalUrl}|${size}`;
 }
@@ -91,10 +152,8 @@ function shouldBypassThumbnailForUrl(
     originalUrl.startsWith('data:') ||
     originalUrl.startsWith('blob:') ||
     isDesktopAssetUrl(originalUrl) ||
-    (
-      type !== 'video' &&
-      (originalUrl.startsWith('http://') || originalUrl.startsWith('https://'))
-    )
+    originalUrl.startsWith('http://') ||
+    originalUrl.startsWith('https://')
   );
 }
 
@@ -224,16 +283,19 @@ async function ensureThumbnailImpl(
   }
   
   if (cachedResponse) {
-    const blob = await cachedResponse.blob();
+    const thumbnailSource = await readResponseArrayBufferWithinLimit(
+      cachedResponse,
+      MAX_THUMBNAIL_SOURCE_BYTES
+    );
+    if (!thumbnailSource) return;
     
     // 通过 swChannelClient 通知 SW 生成预览图
     if (swChannelClient.isInitialized()) {
-      const arrayBuffer = await blob.arrayBuffer();
       await swChannelClient.generateThumbnail(
         normalizedUrl,
         type,
-        arrayBuffer,
-        blob.type,
+        thumbnailSource.arrayBuffer,
+        thumbnailSource.mimeType,
         [size]
       );
     }
