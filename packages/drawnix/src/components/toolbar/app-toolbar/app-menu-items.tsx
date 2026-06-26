@@ -31,6 +31,7 @@ import MenuItem from '../../menu/menu-item';
 import { saveAsImage } from '../../../utils/image';
 import { useDrawnix } from '../../../hooks/use-drawnix';
 import { useI18n } from '../../../i18n';
+import { useLatestRelease } from '../../../hooks/useLatestRelease';
 import Menu from '../../menu/menu';
 import { useContext, useState, useCallback } from 'react';
 import { MenuContentPropsContext } from '../../menu/common';
@@ -314,6 +315,7 @@ export const VersionInfo = () => {
   const { t } = useI18n();
   // 从 HTML meta 标签获取版本号
   const version = document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '0.0.0';
+  const latest = useLatestRelease(version);
 
   const openExternalUrl = (url: string) => {
     const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
@@ -323,7 +325,7 @@ export const VersionInfo = () => {
       window.open(url, '_blank');
     }
   };
-  
+
   return (
     <MenuItem
       data-track="toolbar_click_menu_version"
@@ -333,6 +335,39 @@ export const VersionInfo = () => {
       <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
         <span style={{ color: '#666' }}>{t('menu.version')}：{version}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {latest && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 8px',
+                borderRadius: 999,
+                background: 'rgba(243, 156, 18, 0.16)',
+                color: '#b7791f',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+              data-track="toolbar_click_menu_update_available"
+              title={t('menu.updateAvailable').replace('{version}', latest.tag)}
+              onClick={(e) => {
+                e.stopPropagation();
+                openExternalUrl(latest.url);
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: '#f39c12',
+                  display: 'inline-block',
+                }}
+              />
+              {t('menu.updateAvailableLabel')} {latest.tag}
+            </span>
+          )}
           <span
             style={{ color: '#1890ff', cursor: 'pointer' }}
             data-track="toolbar_click_menu_changelog"

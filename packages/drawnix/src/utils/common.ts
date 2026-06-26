@@ -174,9 +174,31 @@ function shouldFallbackToTransparentImage(input: RequestInfo | URL): boolean {
   if (!url) {
     return false;
   }
-  return normalizeImageUrlCandidates(url).some((candidate) =>
-    toImageFallbackUrlRefs.has(candidate)
-  );
+  const candidates = normalizeImageUrlCandidates(url);
+  if (candidates.some((candidate) => toImageFallbackUrlRefs.has(candidate))) {
+    return true;
+  }
+  // 桌面端虚拟 URL（/__aitu_cache__/、/__aitu_generated__/、/asset-library/）
+  // 和 opentu-asset:// 资源协议在 toImage 内部 fetch 时无法正确响应，
+  // 这里把它们一并视为可降级，避免单张图加载失败导致整张导出抛错。
+  return candidates.some((candidate) => {
+    if (
+      candidate.startsWith('opentu-asset://') ||
+      candidate.includes('opentu-asset.localhost')
+    ) {
+      return true;
+    }
+    try {
+      const path = new URL(candidate, 'http://drawnix.local').pathname;
+      return (
+        path.startsWith('/__aitu_cache__/') ||
+        path.startsWith('/__aitu_generated__/') ||
+        path.startsWith('/asset-library/')
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 function createTransparentPngResponse(): Response {

@@ -88,6 +88,8 @@ export interface Translations {
   'menu.commandPalette': string;
   'menu.userManual': string;
   'menu.changelog': string;
+  'menu.updateAvailable': string;
+  'menu.updateAvailableLabel': string;
   'menu.cleanInvalidLinks': string;
   'menu.cleanInvalidLinks.scanning': string;
   'menu.cleanInvalidLinks.success': string;
@@ -281,6 +283,8 @@ const translations: Record<Language, Translations> = {
     'menu.commandPalette': '快捷命令',
     'menu.userManual': '用户手册',
     'menu.changelog': '日志',
+    'menu.updateAvailable': '发现新版本 {version}，点击查看',
+    'menu.updateAvailableLabel': '新版本',
     'menu.cleanInvalidLinks': '清除失效媒体',
     'menu.cleanInvalidLinks.scanning': '正在扫描失效媒体...',
     'menu.cleanInvalidLinks.success': '已清除 {count} 个失效媒体',
@@ -471,6 +475,8 @@ const translations: Record<Language, Translations> = {
     'menu.commandPalette': 'Commands',
     'menu.userManual': 'User Manual',
     'menu.changelog': 'Log',
+    'menu.updateAvailable': 'New version {version} available, click to view',
+    'menu.updateAvailableLabel': 'Update',
     'menu.cleanInvalidLinks': 'Clean Invalid Media',
     'menu.cleanInvalidLinks.scanning': 'Scanning invalid media...',
     'menu.cleanInvalidLinks.success': 'Cleaned {count} invalid media',

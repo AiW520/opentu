@@ -2,7 +2,30 @@ import '../../web/src/utils/permissions-policy-fix';
 import { isTauriEnvironment } from './utils/tauri-api';
 import { initializeVirtualUrlInterceptor } from './utils/virtual-url-interceptor';
 
+declare const __APP_VERSION__: string;
+
 const DESKTOP_WRITE_CHUNK_BYTES = 1024 * 1024;
+
+// index.html 中的 `%__APP_VERSION__%` 占位符 Vite 不会替换，
+// 这里在引导阶段把构建时注入的版本号写回 meta，供菜单读取。
+function injectAppVersionMeta() {
+  if (typeof document === 'undefined') return;
+  const version =
+    typeof __APP_VERSION__ === 'string' && __APP_VERSION__
+      ? __APP_VERSION__
+      : '0.0.0';
+  const meta = document.querySelector('meta[name="app-version"]');
+  if (meta) {
+    meta.setAttribute('content', version);
+  } else {
+    const created = document.createElement('meta');
+    created.setAttribute('name', 'app-version');
+    created.setAttribute('content', version);
+    document.head.appendChild(created);
+  }
+}
+
+injectAppVersionMeta();
 
 function updateBootProgress(progress: number) {
   const fill = document.getElementById('boot-progress-fill');

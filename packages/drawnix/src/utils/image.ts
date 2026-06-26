@@ -73,21 +73,29 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
         fillStyle: isTransparent ? 'transparent' : 'white',
       });
 
-      if (image) {
-        const ext = isTransparent ? 'png' : 'jpg';
-        const imageBlob = base64ToBlob(image);
-        await fileSave(imageBlob, {
-          name: `drawnix-${new Date().getTime()}`,
-          extension: ext,
-          description: isTransparent ? 'PNG image' : 'JPEG image',
-        });
+      if (!image) {
+        console.warn('[ImageExport] boardToImage returned empty');
+        MessagePlugin.error('画布渲染失败，请稍后重试');
+        return;
       }
+
+      const ext = isTransparent ? 'png' : 'jpg';
+      const imageBlob = base64ToBlob(image);
+      await fileSave(imageBlob, {
+        name: `drawnix-${new Date().getTime()}`,
+        extension: ext,
+        description: isTransparent ? 'PNG image' : 'JPEG image',
+      });
     } catch (error) {
       if (isFileSystemAbortError(error)) {
         return;
       }
-      console.warn('[ImageExport] Failed to export image:', error);
-      MessagePlugin.error('导出图片失败，请稍后重试');
+      console.error('[ImageExport] Failed to export image:', error);
+      const message =
+        error instanceof Error && error.message
+          ? `导出图片失败：${error.message}`
+          : '导出图片失败，请稍后重试';
+      MessagePlugin.error(message);
     }
   })();
 };
