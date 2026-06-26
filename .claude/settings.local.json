@@ -16,7 +16,8 @@
       "Bash(npx tsc:*)",
       "Bash(git push:*)",
       "Bash(npx eslint:*)",
-      "Bash(cd \"D:\\\\\\\\工作\\\\\\\\opentu_new\")"
+      "Bash(cd \"D:\\\\\\\\工作\\\\\\\\opentu_new\")",
+      "Bash(python -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/desktop-release.yml','r',encoding='utf-8'\\)\\)\")"
     ]
   },
   "enableAllProjectMcpServers": true,
