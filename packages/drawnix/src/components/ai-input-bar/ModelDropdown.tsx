@@ -16,6 +16,7 @@ import React, {
   useMemo,
 } from 'react';
 import { copyToClipboard } from '../../utils/runtime-helpers';
+import { openExternalUrl } from '../../utils/open-external-url';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Copy, ExternalLink, Plus, Search, X } from 'lucide-react';
 import { MessagePlugin } from 'tdesign-react';
@@ -682,7 +683,9 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
           key: 'open-docs',
           label: language === 'zh' ? '查看模型文档' : 'View model docs',
           icon: <ExternalLink size={14} />,
-          onSelect: () => window.open(docsUrl, '_blank', 'noopener'),
+          onSelect: () => {
+            void openExternalUrl(docsUrl);
+          },
         });
       }
       return items;
