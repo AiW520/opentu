@@ -3,9 +3,16 @@ import { base64ToBlob, download } from '@aitu/utils';
 import { boardToImage } from './common';
 import { fileOpen, isFileSystemAbortError } from '../data/filesystem';
 import { IMAGE_MIME_TYPES } from '../constants';
-import { insertImage } from '../data/image';
+import { insertImage, insertImageFromUrl } from '../data/image';
 import { MessagePlugin } from './message-plugin';
 import { getImageNaturalSize } from './image-natural-size';
+import { assetStorageService } from '../services/asset-storage-service';
+import { AssetType } from '../types/asset.types';
+import { getAssetRuntimeUrl, isTauriEnvironment } from './desktop-asset-url';
+import {
+  getImageMimeTypeFromFileName,
+  getSupportedImageFileMimeType,
+} from '../data/blob';
 
 export { getImageNaturalSize } from './image-natural-size';
 
@@ -88,13 +95,44 @@ export const saveAsImage = (board: PlaitBoard, isTransparent: boolean) => {
 
 export const addImage = async (board: PlaitBoard) => {
   try {
+    if (isTauriEnvironment()) {
+      await assetStorageService.initialize();
+      const files = await assetStorageService.pickDesktopMediaFiles();
+      const imageFile = files.find((file) => {
+        const mimeType =
+          file.mimeType || getImageMimeTypeFromFileName(file.name) || '';
+        return file.fileType === 'image' || mimeType.startsWith('image/');
+      });
+
+      if (!imageFile) {
+        return;
+      }
+
+      const asset = await assetStorageService.addDesktopLocalAssetFromPath({
+        path: imageFile.path,
+        type: AssetType.IMAGE,
+        name: imageFile.name,
+        mimeType:
+          imageFile.mimeType ||
+          getImageMimeTypeFromFileName(imageFile.name) ||
+          'image/png',
+      });
+      await insertImageFromUrl(board, getAssetRuntimeUrl(asset));
+      return;
+    }
+
     const imageFile = await fileOpen({
       description: 'Image',
       extensions: Object.keys(
         IMAGE_MIME_TYPES
       ) as (keyof typeof IMAGE_MIME_TYPES)[],
     });
-    insertImage(board, imageFile);
+    const imageMimeType = getSupportedImageFileMimeType(imageFile);
+    const normalizedImageFile =
+      imageMimeType && imageFile.type !== imageMimeType
+        ? new File([imageFile], imageFile.name, { type: imageMimeType })
+        : imageFile;
+    insertImage(board, normalizedImageFile);
   } catch (error) {
     if (isFileSystemAbortError(error)) {
       return;

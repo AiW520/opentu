@@ -7,9 +7,11 @@ import {
   type FilterState,
 } from '../../types/asset.types';
 import {
+  getAssetType,
   filterAssets,
   isInternalLibraryExcludedCache,
   matchesAssetSearchQuery,
+  validateMimeType,
 } from '../asset-utils';
 
 function createAsset(overrides: Partial<Asset> = {}): Asset {
@@ -120,5 +122,12 @@ describe('asset-utils', () => {
         metadata: { source: 'AI_GENERATED' },
       })
     ).toBe(false);
+  });
+
+  it('accepts locally inferred image MIME types used by file uploads', () => {
+    expect(validateMimeType('image/avif').valid).toBe(true);
+    expect(validateMimeType('image/bmp').valid).toBe(true);
+    expect(validateMimeType('image/jfif').valid).toBe(true);
+    expect(getAssetType('image/jfif')).toBe(AssetType.IMAGE);
   });
 });
