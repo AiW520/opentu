@@ -852,40 +852,6 @@ export class SWChannelClient {
   }
 
   // ============================================================================
-  // CDN 相关方法
-  // ============================================================================
-
-  /**
-   * 获取 CDN 状态
-   */
-  async getCDNStatus(): Promise<{ status: Record<string, unknown> }> {
-    return callWithDefault(this.channel, 'cdn:getStatus', undefined, {
-      status: {},
-    });
-  }
-
-  /**
-   * 重置 CDN 状态
-   */
-  async resetCDNStatus(): Promise<TaskOperationResult> {
-    return callOperation(
-      this.channel,
-      'cdn:resetStatus',
-      undefined,
-      'Reset CDN status failed'
-    );
-  }
-
-  /**
-   * CDN 健康检查
-   */
-  async cdnHealthCheck(): Promise<{ results: Record<string, unknown> }> {
-    return callWithDefault(this.channel, 'cdn:healthCheck', undefined, {
-      results: {},
-    });
-  }
-
-  // ============================================================================
   // 升级相关方法
   // ============================================================================
 

@@ -95,7 +95,7 @@ export interface TaskInvocationBindingSnapshot {
   responseSchema?: string;
   submitPath?: string;
   pollPathTemplate?: string;
-  baseUrlStrategy?: 'preserve' | 'trim-v1';
+  baseUrlStrategy?: 'preserve' | 'trim-v1' | 'ensure-v1';
   metadata?: Record<string, unknown>;
 }
 
@@ -395,6 +395,10 @@ export interface Task {
   progress?: number;
   /** Remote task ID from API (e.g., videoId for video generation) */
   remoteId?: string;
+  /** Stable client request identifier persisted before async submission */
+  clientRequestId?: string;
+  /** Whether the provider accepted the client request identifier for recovery */
+  requestIdRecoverable?: boolean;
   /** Provider/model route snapshot used to resume async tasks with the original supplier */
   invocationRoute?: TaskInvocationRouteSnapshot;
   /** Current execution phase for recovery support */

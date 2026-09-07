@@ -21,6 +21,9 @@ import { providerTransport } from '../provider-routing/provider-transport';
 import {
   downloadVideoContentToLocalUrl,
   extractInlineVideoUrl,
+  extractVideoFailureMessage,
+  formatVideoHttpError,
+  resolveVideoBaseUrlStrategy,
   resolveVideoPollPath,
   resolveVideoSubmission,
   shouldDownloadVideoContent,
@@ -56,8 +59,7 @@ export async function submitVideoGeneration(
   signal?: AbortSignal
 ): Promise<string> {
   const fetchFn = config.fetchImpl || fetch;
-  const baseUrl = normalizeApiBase(config.baseUrl);
-  const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
+  const providerContext = buildProviderContextFromApiConfig(config);
   const model = params.model || config.defaultModel || 'veo3';
   // seconds can come from duration (number/string) or explicit seconds
   const secondsParam = params.duration ?? (params as any).seconds;
@@ -103,24 +105,37 @@ export async function submitVideoGeneration(
     }
   }
 
+  const submitPath = '/v1/videos';
   const response = await providerTransport.send(providerContext, {
-    path: '/v1/videos',
-    baseUrlStrategy: config.binding?.baseUrlStrategy,
+    path: submitPath,
+    baseUrlStrategy: resolveVideoBaseUrlStrategy(
+      providerContext,
+      submitPath,
+      config.binding
+    ),
     method: 'POST',
     body: formData,
+    requestId: params.requestId,
     signal,
     fetcher: fetchFn,
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Video submission failed: ${response.status} - ${errorText}`);
+    throw new Error(
+      formatVideoHttpError('submit', response.status, errorText, response.url)
+    );
   }
 
   const data = await response.json();
 
   if (data.status === 'failed') {
-    throw new VideoGenerationFailedError(parseErrorMessage(data.error) || '视频生成失败');
+    throw new VideoGenerationFailedError(
+      extractVideoFailureMessage(
+        data,
+        parseErrorMessage(data.error) || '视频生成失败'
+      )
+    );
   }
 
   if (!data.id) {
@@ -144,19 +159,30 @@ export async function queryVideoStatus(
   signal?: AbortSignal
 ): Promise<VideoStatusResponse> {
   const fetchFn = config.fetchImpl || fetch;
-  const baseUrl = normalizeApiBase(config.baseUrl);
-  const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
+  const providerContext = buildProviderContextFromApiConfig(config);
 
+  const pollPath = resolveVideoPollPath(
+    videoId,
+    config.binding,
+    config.params
+  );
   const response = await providerTransport.send(providerContext, {
-    path: resolveVideoPollPath(videoId, config.binding, config.params),
-    baseUrlStrategy: config.binding?.baseUrlStrategy,
+    path: pollPath,
+    baseUrlStrategy: resolveVideoBaseUrlStrategy(
+      providerContext,
+      pollPath,
+      config.binding
+    ),
     method: 'GET',
     signal,
     fetcher: fetchFn,
   });
 
   if (!response.ok) {
-    throw new Error(`Video status query failed: ${response.status}`);
+    const errorText = await response.text();
+    throw new Error(
+      formatVideoHttpError('query', response.status, errorText, response.url)
+    );
   }
 
   return response.json();
@@ -181,8 +207,7 @@ export async function pollVideoUntilComplete(
     interval = 5000,
   } = options;
   const fetchFn = config.fetchImpl || fetch;
-  const baseUrl = normalizeApiBase(config.baseUrl);
-  const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
+  const providerContext = buildProviderContextFromApiConfig(config);
 
   let attempts = 0;
   let consecutiveErrors = 0;
@@ -194,9 +219,18 @@ export async function pollVideoUntilComplete(
     }
 
     try {
+      const pollPath = resolveVideoPollPath(
+        videoId,
+        config.binding,
+        config.params
+      );
       const response = await providerTransport.send(providerContext, {
-        path: resolveVideoPollPath(videoId, config.binding, config.params),
-        baseUrlStrategy: config.binding?.baseUrlStrategy,
+        path: pollPath,
+        baseUrlStrategy: resolveVideoBaseUrlStrategy(
+          providerContext,
+          pollPath,
+          config.binding
+        ),
         signal,
         fetcher: fetchFn,
       });
@@ -239,7 +273,12 @@ export async function pollVideoUntilComplete(
 
       // 检查失败状态 - 业务失败不应重试
       if (status === 'failed' || status === 'error') {
-        throw new VideoGenerationFailedError(parseErrorMessage(data.error) || '视频生成失败');
+        throw new VideoGenerationFailedError(
+          extractVideoFailureMessage(
+            data,
+            parseErrorMessage(data.error) || '视频生成失败'
+          )
+        );
       }
 
       // 等待下一次轮询
@@ -287,14 +326,14 @@ export async function generateVideo(
   params: VideoGenerationParams,
   config: VideoApiConfig,
   options: PollingOptions = {},
-  onRemoteId?: (remoteId: string) => void
+  onRemoteId?: (remoteId: string) => void | Promise<void>
 ): Promise<VideoGenerationResult> {
   const { signal } = options;
 
   // 提交任务
   options.onProgress?.(5);
   const remoteId = await submitVideoGeneration(params, config, signal);
-  onRemoteId?.(remoteId);
+  await onRemoteId?.(remoteId);
 
   // 轮询等待完成
   const result = await pollVideoUntilComplete(remoteId, config, options);

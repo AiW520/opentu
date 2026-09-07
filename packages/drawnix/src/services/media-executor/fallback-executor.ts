@@ -17,7 +17,11 @@ import type {
   GeminiConfig,
   VideoAPIConfig,
 } from './types';
-import { Task, TaskStatus } from '../../types/task.types';
+import {
+  Task,
+  TaskExecutionPhase,
+  TaskStatus,
+} from '../../types/task.types';
 import { taskStorageWriter } from './task-storage-writer';
 import { taskStorageReader } from '../task-storage-reader';
 import {
@@ -25,11 +29,16 @@ import {
   type ModelRef,
 } from '../../utils/settings-manager';
 import {
+  canAttachProviderRequestIdHeader,
   providerTransport,
   resolveInvocationPlanFromRoute,
   type ProviderAuthStrategy,
   type ResolvedProviderContext,
 } from '../provider-routing';
+import {
+  generateClientRequestId,
+  recoverAsyncSubmissionByRequestId,
+} from '../async-task-recovery';
 import {
   startLLMApiLog,
   completeLLMApiLog,
@@ -48,7 +57,11 @@ import {
 } from '../../utils/api-auth-error-event';
 import { extractTextContent, parseToolCalls } from '../agent/tool-parser';
 import { unifiedCacheService } from '../unified-cache-service';
-import { submitVideoGeneration } from '../media-api';
+import {
+  submitVideoGeneration,
+  recoverImageByRequestId,
+} from '../media-api';
+import { emitImageRequestIdDebugLog } from '../media-api/request-id-debug';
 import {
   extractPromptFromMessages,
   buildImageRequestBody,
@@ -73,7 +86,11 @@ import {
   shouldUseStrictTaskInvocationRoute,
 } from '../task-invocation-route';
 import { normalizeLlmTextContent } from '../../utils/llm-json-extractor';
-
+import { asyncImageAPIService } from '../async-image-api-service';
+import {
+  audioAPIService,
+  extractAudioGenerationResult,
+} from '../audio-api-service';
 function inferAuthTypeFromRoute(
   route: ReturnType<typeof resolveInvocationRoute>
 ): ProviderAuthStrategy {
@@ -98,6 +115,22 @@ function buildProviderContext(config: {
       authType: config.authType || 'bearer',
       extraHeaders: config.extraHeaders,
     }
+  );
+}
+
+function generateRequestIdForImage(): string {
+  const g = globalThis as { crypto?: { randomUUID?: () => string } };
+  if (typeof g.crypto?.randomUUID === 'function') {
+    return g.crypto.randomUUID();
+  }
+  return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isTimeoutErrorForRecover(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' ||
+      /Request timeout|请求超时/.test(error.message))
   );
 }
 
@@ -336,11 +369,26 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       );
     }
 
+    const imageProviderContext = buildProviderContext(config.imageConfig);
+    const requestId = canAttachProviderRequestIdHeader(imageProviderContext, {
+      path: '/images/generations',
+    })
+      ? generateRequestIdForImage()
+      : undefined;
+    if (requestId) {
+      emitImageRequestIdDebugLog(requestId, {
+        model: modelName,
+        endpoint: '/images/generations',
+        source: 'fallbackExecutor',
+      });
+    }
+
     // 开始记录 LLM API 调用
     const logId = startLLMApiLog({
       endpoint: '/images/generations',
       model: modelName,
       taskType: 'image',
+      requestId,
       prompt,
       hasReferenceImages: !!referenceImages && referenceImages.length > 0,
       referenceImageCount: referenceImages?.length,
@@ -375,10 +423,11 @@ export class FallbackMediaExecutor implements IMediaExecutor {
 
       options?.onProgress?.({ progress: 10, phase: 'submitting' });
 
-      // 直接调用 API
-      const response = await providerTransport.send(
-        buildProviderContext(config.imageConfig),
-        {
+      let result;
+      let httpStatus = 200;
+      try {
+        // 直接调用 API
+        const response = await providerTransport.send(imageProviderContext, {
           path: '/images/generations',
           method: 'POST',
           headers: {
@@ -387,37 +436,66 @@ export class FallbackMediaExecutor implements IMediaExecutor {
           body: JSON.stringify(requestBody),
           signal: options?.signal,
           timeoutMs: IMAGE_GENERATION_TIMEOUT_MS,
-        }
-      );
-
-      if (!response.ok) {
-        const duration = Date.now() - startTime;
-        const errorBody = await response
-          .text()
-          .catch(
-            () => `HTTP ${response.status} ${response.statusText || 'Error'}`
-          );
-        failLLMApiLog(logId, {
-          httpStatus: response.status,
-          duration,
-          errorMessage: errorBody.substring(0, 500),
+          requestId,
         });
-        throw new Error(
-          `Image generation failed: ${response.status} - ${errorBody.substring(
-            0,
-            200
-          )}`
-        );
+
+        if (!response.ok) {
+          const duration = Date.now() - startTime;
+          const errorBody = await response
+            .text()
+            .catch(
+              () => `HTTP ${response.status} ${response.statusText || 'Error'}`
+            );
+          failLLMApiLog(logId, {
+            httpStatus: response.status,
+            duration,
+            errorMessage: errorBody.substring(0, 500),
+          });
+          throw new Error(
+            `Image generation failed: ${response.status} - ${errorBody.substring(
+              0,
+              200
+            )}`
+          );
+        }
+
+        options?.onProgress?.({ progress: 80, phase: 'downloading' });
+
+        const data = await response.json();
+        result = parseImageResponse(data);
+        httpStatus = response.status;
+      } catch (sendError) {
+        // 超时兜底：尝试通过 /log/get-request 找回已经生成成功的结果
+        if (isTimeoutErrorForRecover(sendError) && requestId) {
+          console.warn(
+            `[FallbackMediaExecutor] 生图请求超时，尝试通过 X-Request-Id 找回: ${requestId}`
+          );
+          try {
+            result = await recoverImageByRequestId(
+              requestId,
+              config.imageConfig,
+              options?.signal
+            );
+            console.info(
+              `[FallbackMediaExecutor] ✅ 通过 X-Request-Id 找回结果成功: ${requestId}`
+            );
+          } catch (recoverError) {
+            console.error(
+              `[FallbackMediaExecutor] ❌ 通过 X-Request-Id 找回结果失败: ${requestId}`,
+              recoverError
+            );
+            // 找回失败，抛出原始超时错误交给外层 catch 处理
+            throw sendError;
+          }
+        } else {
+          throw sendError;
+        }
       }
 
-      options?.onProgress?.({ progress: 80, phase: 'downloading' });
-
-      const data = await response.json();
-      const result = parseImageResponse(data);
       const duration = Date.now() - startTime;
-      // 记录成功
+      // 记录成功（找回场景也走这里）
       completeLLMApiLog(logId, {
-        httpStatus: response.status,
+        httpStatus,
         duration,
         resultType: 'image',
         resultCount: 1,
@@ -498,6 +576,22 @@ export class FallbackMediaExecutor implements IMediaExecutor {
     startTime?: number
   ): Promise<void> {
     const logStartTime = startTime || Date.now();
+    const invocationRoute = createTaskInvocationRouteSnapshot(
+      'image',
+      params.modelRef || params.model
+    );
+    const providerContext = buildProviderContext(config.imageConfig);
+    const clientRequestId = generateClientRequestId();
+    const requestIdRecoverable = canAttachProviderRequestIdHeader(
+      providerContext,
+      { path: '/videos' }
+    );
+    await taskStorageWriter.prepareAsyncSubmission(
+      taskId,
+      clientRequestId,
+      invocationRoute,
+      requestIdRecoverable
+    );
 
     // 开始记录 LLM API 调用
     const logId = startLLMApiLog({
@@ -542,6 +636,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
           size: params.size,
           referenceImages: processedImages,
           maskImage: processedMaskImage,
+          requestId: requestIdRecoverable ? clientRequestId : undefined,
         },
         config.imageConfig,
         {
@@ -556,10 +651,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
             await taskStorageWriter.updateRemoteId(
               taskId,
               remoteId,
-              createTaskInvocationRouteSnapshot(
-                'image',
-                params.modelRef || params.model
-              )
+              invocationRoute
             );
           },
           signal: options?.signal,
@@ -646,6 +738,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       modelRef || model
     );
     const config = this.getConfig({ videoModel: modelRef || model });
+    const videoProviderContext = buildProviderContext(config.videoConfig);
     const startTime = Date.now();
     const durationEncodedInModel = (m?: string | null) =>
       Boolean(m && m.startsWith('sora-2-'));
@@ -661,6 +754,19 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       model,
       modelRef || null
     );
+    const clientRequestId = generateClientRequestId();
+    const requestIdRecoverable =
+      videoAdapter?.id === 'gemini-video-adapter' &&
+      canAttachProviderRequestIdHeader(videoProviderContext, {
+        path: '/videos',
+        baseUrlStrategy: config.videoConfig.binding?.baseUrlStrategy,
+      });
+    await taskStorageWriter.prepareAsyncSubmission(
+      taskId,
+      clientRequestId,
+      invocationRoute,
+      requestIdRecoverable
+    );
     if (videoAdapter && videoAdapter.kind === 'video') {
       return executeVideoViaAdapter(
         taskId,
@@ -673,7 +779,10 @@ export class FallbackMediaExecutor implements IMediaExecutor {
           duration,
           referenceImages: params.referenceImages,
           inputReference: params.inputReference,
-          params: params.params,
+          params: {
+            ...params.params,
+            requestId: requestIdRecoverable ? clientRequestId : undefined,
+          },
         },
         options,
         startTime
@@ -736,6 +845,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
           duration: secondsToSend,
           referenceImages,
           params: params.params,
+          requestId: requestIdRecoverable ? clientRequestId : undefined,
         },
         videoApiConfig,
         options?.signal
@@ -1209,33 +1319,49 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         );
       }
 
-      // 筛选出有 remoteId 的视频任务
-      const videoTasks = pendingTasks.filter(
-        (t) =>
-          t.type === 'video' && t.remoteId && t.status === TaskStatus.PROCESSING
+      const resumableTasks = pendingTasks.filter(
+        (task) =>
+          task.status === TaskStatus.PROCESSING &&
+          ((!!task.remoteId &&
+            (task.type === 'video' ||
+              task.type === 'audio' ||
+              task.type === 'image')) ||
+            (task.executionPhase === 'submitting' &&
+              !!task.clientRequestId &&
+              task.requestIdRecoverable === true))
       );
 
       // 日志：列出所有处理中的任务及其筛选结果
       for (const t of pendingTasks) {
-        const isVideo = t.type === 'video';
         const hasRemoteId = !!t.remoteId;
-        const willResume = isVideo && hasRemoteId;
+        const canRecoverSubmission =
+          t.executionPhase === 'submitting' &&
+          !!t.clientRequestId &&
+          t.requestIdRecoverable === true;
+        const willResume =
+          (hasRemoteId &&
+            (t.type === 'video' ||
+              t.type === 'audio' ||
+              t.type === 'image')) ||
+          canRecoverSubmission;
         console.warn(
           `[FallbackMediaExecutor]   task=${t.id} type=${t.type} remoteId=${
             t.remoteId || 'none'
-          } → ${willResume ? 'RESUME' : 'SKIP'}${
-            !isVideo ? ' (not video)' : ''
-          }${!hasRemoteId ? ' (no remoteId)' : ''}`
+          } requestId=${t.clientRequestId || 'none'} → ${
+            willResume ? 'RESUME' : 'SKIP'
+          }${!hasRemoteId && !canRecoverSubmission ? ' (no recovery credentials)' : ''}`
         );
       }
 
-      if (videoTasks.length === 0) {
-        console.warn('[FallbackMediaExecutor] No video tasks to resume');
+      if (resumableTasks.length === 0) {
+        console.warn('[FallbackMediaExecutor] No async media tasks to resume');
         return;
       }
       // 并行恢复
       await Promise.all(
-        videoTasks.map((task) => this.resumeVideoTask(task, onTaskUpdate))
+        resumableTasks.map((task) =>
+          this.resumeMediaTask(task, onTaskUpdate)
+        )
       );
     } catch (error) {
       console.error(
@@ -1243,6 +1369,250 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         error
       );
     }
+  }
+
+  private async resumeMediaTask(
+    task: Task,
+    onTaskUpdate?: (
+      taskId: string,
+      status: TaskStatus,
+      updates?: Partial<Task>
+    ) => void
+  ): Promise<void> {
+    if (this.pollingTasks.has(task.id)) {
+      return;
+    }
+
+    let currentTask = task;
+    if (!currentTask.remoteId) {
+      currentTask = await this.recoverSubmittingTask(currentTask, onTaskUpdate);
+      if (!currentTask.remoteId) {
+        return;
+      }
+    }
+
+    if (currentTask.type === 'video') {
+      return this.resumeVideoTask(currentTask, onTaskUpdate);
+    }
+    if (currentTask.type === 'image') {
+      return this.resumeImageTask(currentTask, onTaskUpdate);
+    }
+    if (currentTask.type === 'audio') {
+      return this.resumeAudioTask(currentTask, onTaskUpdate);
+    }
+  }
+
+  private async recoverSubmittingTask(
+    task: Task,
+    onTaskUpdate?: (
+      taskId: string,
+      status: TaskStatus,
+      updates?: Partial<Task>
+    ) => void
+  ): Promise<Task> {
+    const requestId = task.clientRequestId;
+    if (!requestId || !task.requestIdRecoverable) {
+      return task;
+    }
+
+    try {
+      const operation =
+        task.type === 'video'
+          ? 'video'
+          : task.type === 'audio'
+          ? 'audio'
+          : 'image';
+      const recovered = await recoverAsyncSubmissionByRequestId(
+        operation,
+        resolveLegacyTaskInvocationRouteModel(operation, task),
+        requestId,
+        { bindingId: task.invocationRoute?.binding?.id }
+      );
+
+      if (recovered.url) {
+        const format =
+          task.type === 'video' ? 'mp4' : task.type === 'audio' ? 'mp3' : 'png';
+        const cachedUrl = await cacheRemoteUrl(
+          recovered.url,
+          task.id,
+          operation,
+          format
+        );
+        const result = { url: cachedUrl, format, size: 0 };
+        await taskStorageWriter.completeTask(task.id, result);
+        onTaskUpdate?.(task.id, TaskStatus.COMPLETED, {
+          result,
+          progress: 100,
+          completedAt: Date.now(),
+          executionPhase: undefined,
+        });
+        return { ...task, status: TaskStatus.COMPLETED, result };
+      }
+
+      if (recovered.remoteId && recovered.remoteId !== requestId) {
+        await taskStorageWriter.updateRemoteId(
+          task.id,
+          recovered.remoteId,
+          task.invocationRoute
+        );
+        const updatedTask: Task = {
+          ...task,
+          remoteId: recovered.remoteId,
+          executionPhase: TaskExecutionPhase.POLLING,
+        };
+        onTaskUpdate?.(task.id, TaskStatus.PROCESSING, {
+          remoteId: recovered.remoteId,
+          executionPhase: TaskExecutionPhase.POLLING,
+        });
+        return updatedTask;
+      }
+
+      throw new Error('供应商查询未返回可恢复的任务 ID 或结果');
+    } catch (error) {
+      const errorInfo = {
+        code: 'SUBMISSION_RECOVERY_UNAVAILABLE',
+        message:
+          '任务可能已提交，但无法安全自动找回。请确认供应商任务后再手动重试，以免重复扣费。',
+        details: {
+          originalError:
+            error instanceof Error ? error.message : String(error),
+          timestamp: Date.now(),
+        },
+      };
+      await taskStorageWriter.failTask(task.id, errorInfo);
+      onTaskUpdate?.(task.id, TaskStatus.FAILED, { error: errorInfo });
+      return { ...task, status: TaskStatus.FAILED, error: errorInfo };
+    }
+  }
+
+  private async resumeImageTask(
+    task: Task,
+    onTaskUpdate?: (
+      taskId: string,
+      status: TaskStatus,
+      updates?: Partial<Task>
+    ) => void
+  ): Promise<void> {
+    if (this.pollingTasks.has(task.id)) return;
+    const routeModel = resolveLegacyTaskInvocationRouteModel('image', task);
+    this.pollingTasks.add(task.id);
+    try {
+      if (shouldUseStrictTaskInvocationRoute(task)) {
+        assertTaskInvocationRouteAvailable('image', task);
+      }
+      const response = await asyncImageAPIService.resumePolling(task.remoteId!, {
+        routeModel,
+        onProgress: (progress) =>
+          onTaskUpdate?.(task.id, TaskStatus.PROCESSING, { progress }),
+      });
+      const extracted = asyncImageAPIService.extractUrlAndFormat(response);
+      const cachedUrl = await cacheRemoteUrl(
+        extracted.url,
+        task.id,
+        'image',
+        extracted.format || 'png'
+      );
+      const result = {
+        url: cachedUrl,
+        format: extracted.format || 'png',
+        size: 0,
+      };
+      await taskStorageWriter.completeTask(task.id, result);
+      onTaskUpdate?.(task.id, TaskStatus.COMPLETED, {
+        result,
+        progress: 100,
+        completedAt: Date.now(),
+        executionPhase: undefined,
+      });
+    } catch (error: any) {
+      await this.failResumedTask(task, error, onTaskUpdate);
+    } finally {
+      this.pollingTasks.delete(task.id);
+    }
+  }
+
+  private async resumeAudioTask(
+    task: Task,
+    onTaskUpdate?: (
+      taskId: string,
+      status: TaskStatus,
+      updates?: Partial<Task>
+    ) => void
+  ): Promise<void> {
+    if (this.pollingTasks.has(task.id)) return;
+    const routeModel = resolveLegacyTaskInvocationRouteModel('audio', task);
+    this.pollingTasks.add(task.id);
+    try {
+      if (shouldUseStrictTaskInvocationRoute(task)) {
+        assertTaskInvocationRouteAvailable('audio', task);
+      }
+      const response = await audioAPIService.resumePolling(task.remoteId!, {
+        routeModel,
+        onProgress: (progress) =>
+          onTaskUpdate?.(task.id, TaskStatus.PROCESSING, { progress }),
+      });
+      const extracted = extractAudioGenerationResult(response);
+      const format =
+        extracted.format ||
+        (extracted.resultKind === 'lyrics' ? 'lyrics' : 'mp3');
+      const cachedUrl =
+        format === 'lyrics'
+          ? extracted.url
+          : await cacheRemoteUrl(
+              extracted.url,
+              task.id,
+              'audio',
+              format
+            );
+      const result = {
+        url: cachedUrl,
+        urls: extracted.urls,
+        format,
+        size: 0,
+        resultKind: extracted.resultKind,
+        duration:
+          typeof extracted.duration === 'number'
+            ? extracted.duration
+            : undefined,
+        previewImageUrl: extracted.imageUrl,
+        title: extracted.title,
+        lyricsText: extracted.lyricsText,
+        lyricsTitle: extracted.lyricsTitle,
+        lyricsTags: extracted.lyricsTags,
+        providerTaskId: extracted.providerTaskId || task.remoteId,
+        primaryClipId: extracted.primaryClipId,
+        clipIds: extracted.clipIds,
+        clips: extracted.clips,
+      };
+      await taskStorageWriter.completeTask(task.id, result);
+      onTaskUpdate?.(task.id, TaskStatus.COMPLETED, {
+        result,
+        progress: 100,
+        completedAt: Date.now(),
+        executionPhase: undefined,
+      });
+    } catch (error: any) {
+      await this.failResumedTask(task, error, onTaskUpdate);
+    } finally {
+      this.pollingTasks.delete(task.id);
+    }
+  }
+
+  private async failResumedTask(
+    task: Task,
+    error: any,
+    onTaskUpdate?: (
+      taskId: string,
+      status: TaskStatus,
+      updates?: Partial<Task>
+    ) => void
+  ): Promise<void> {
+    const errorInfo = {
+      code: error?.code || 'RESUME_FAILED',
+      message: error?.message || 'Failed to resume task',
+    };
+    await taskStorageWriter.failTask(task.id, errorInfo).catch(() => undefined);
+    onTaskUpdate?.(task.id, TaskStatus.FAILED, { error: errorInfo });
   }
 
   /**
@@ -1357,17 +1727,6 @@ export class FallbackMediaExecutor implements IMediaExecutor {
   }
 
   /**
-   * 规范化 baseUrl，移除尾部 / 或 /v1，便于拼接 /v1/videos
-   */
-  private normalizeApiBase(url: string): string {
-    let base = url.replace(/\/+$/, '');
-    if (base.endsWith('/v1')) {
-      base = base.slice(0, -3);
-    }
-    return base;
-  }
-
-  /**
    * 获取 API 配置
    */
   private getConfig(models?: {
@@ -1422,10 +1781,10 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       },
       videoConfig: {
         apiKey: videoRoute.apiKey,
-        // 规范化 baseUrl，移除尾部 / 或 /v1，便于拼接 /v1/videos
-        baseUrl: this.normalizeApiBase(
-          videoRoute.baseUrl || 'https://api.tu-zi.com'
-        ),
+        // Keep the configured version segment. ProviderTransport collapses a
+        // duplicate /v1 at the join boundary, while preserving `/v1` here is
+        // required to repair legacy Vite proxy settings in production.
+        baseUrl: videoRoute.baseUrl || 'https://api.tu-zi.com/v1',
         authType:
           videoPlan?.provider.authType || inferAuthTypeFromRoute(videoRoute),
         providerType:

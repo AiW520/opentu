@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildTuziGPTImageRequestBody,
+  tuziGPTImageAdapter,
+} from '../model-adapters/tuzi-gpt-image-adapter';
 
 const mocks = vi.hoisted(() => ({
   sendAdapterRequest: vi.fn(),
@@ -7,11 +11,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../model-adapters/context', () => ({
   sendAdapterRequest: mocks.sendAdapterRequest,
 }));
-
-import {
-  buildTuziGPTImageRequestBody,
-  tuziGPTImageAdapter,
-} from '../model-adapters/tuzi-gpt-image-adapter';
 
 describe('tuzi GPT image adapter', () => {
   afterEach(() => {
@@ -98,6 +97,7 @@ describe('tuzi GPT image adapter', () => {
     expect(mocks.sendAdapterRequest).toHaveBeenCalledTimes(1);
     const request = mocks.sendAdapterRequest.mock.calls[0]?.[1];
     expect(request.path).toBe('/images/generations');
+    expect(request.baseUrlStrategy).toBe('ensure-v1');
     expect(JSON.parse(request.body)).toMatchObject({
       size: '1360x768',
       quality: 'high',
@@ -152,6 +152,7 @@ describe('tuzi GPT image adapter', () => {
 
     const request = mocks.sendAdapterRequest.mock.calls[0]?.[1];
     expect(request.path).toBe('/images/generations');
+    expect(request.baseUrlStrategy).toBe('ensure-v1');
     expect(JSON.parse(request.body)).toEqual({
       model: 'gpt-image-2',
       prompt: 'Edit this image',
@@ -162,7 +163,7 @@ describe('tuzi GPT image adapter', () => {
     });
   });
 
-  it('preserves explicit GPT Image pixel size for Tuzi edit requests', async () => {
+  it('repairs legacy Tuzi edit bindings to the JSON generations endpoint', async () => {
     mocks.sendAdapterRequest.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -199,7 +200,8 @@ describe('tuzi GPT image adapter', () => {
     );
 
     const request = mocks.sendAdapterRequest.mock.calls[0]?.[1];
-    expect(request.path).toBe('/images/edits');
+    expect(request.path).toBe('/images/generations');
+    expect(request.baseUrlStrategy).toBe('ensure-v1');
     expect(JSON.parse(request.body)).toMatchObject({
       model: 'gpt-image-2',
       prompt: 'Continue this PPT slide style',
@@ -207,5 +209,43 @@ describe('tuzi GPT image adapter', () => {
       image: ['data:image/png;base64,source'],
     });
     expect(JSON.parse(request.body).response_format).toBeUndefined();
+  });
+
+  it('includes the final endpoint when a 404 response has no JSON error', async () => {
+    mocks.sendAdapterRequest.mockResolvedValue({
+      ok: false,
+      status: 404,
+      url: 'https://api.tu-zi.com/v1/v1/images/generations?token=hidden',
+      text: async () => '<!doctype html><title>Not Found</title>',
+    });
+
+    await expect(
+      tuziGPTImageAdapter.generateImage(
+        {
+          baseUrl: 'https://api.tu-zi.com/v1',
+          apiKey: 'test-key',
+          authType: 'bearer',
+          binding: {
+            id: 'binding',
+            profileId: 'tuzi',
+            modelId: 'gpt-image-2',
+            operation: 'image',
+            protocol: 'openai.images.generations',
+            requestSchema: 'tuzi.image.gpt-generation-json',
+            responseSchema: 'openai.image.data',
+            submitPath: '/v1/images/generations',
+            priority: 10,
+            confidence: 'high',
+            source: 'manual',
+          },
+        },
+        {
+          model: 'gpt-image-2',
+          prompt: 'Draw a clean product photo',
+        }
+      )
+    ).rejects.toThrow(
+      'Tuzi GPT Image request failed: 404 (api.tu-zi.com/v1/v1/images/generations)'
+    );
   });
 });

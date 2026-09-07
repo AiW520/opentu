@@ -9,6 +9,7 @@ import {
   OFFICIAL_GPT_IMAGE_EDIT_REQUEST_SCHEMA,
   TUZI_GPT_IMAGE_EDIT_REQUEST_SCHEMA,
 } from '../model-adapters/image-request-schemas';
+import { isTuziCompatibleBaseUrl } from './tuzi-api-endpoints';
 import { inferAllBindingHintsFromEndpoints } from './endpoint-binding-inference';
 import type { ProviderModelBinding, ProviderProfileSnapshot } from './types';
 
@@ -207,22 +208,7 @@ function isTuziProfile(profile: ProviderProfileSnapshot): boolean {
 }
 
 function isTuziBaseUrl(baseUrl: string): boolean {
-  const normalizedBaseUrl = baseUrl.trim().toLowerCase();
-  if (!normalizedBaseUrl) {
-    return false;
-  }
-
-  try {
-    const url = new URL(
-      /^[a-z][a-z\d+\-.]*:\/\//i.test(normalizedBaseUrl)
-        ? normalizedBaseUrl
-        : `https://${normalizedBaseUrl}`
-    );
-    const hostname = url.hostname.toLowerCase();
-    return hostname === 'tu-zi.com' || hostname.endsWith('.tu-zi.com');
-  } catch {
-    return false;
-  }
+  return isTuziCompatibleBaseUrl(baseUrl);
 }
 
 function normalizeImageApiCompatibilityMode(
@@ -691,6 +677,9 @@ function inferVideoBindings(
         responseSchema: 'openai.async.task',
         submitPath: '/videos',
         pollPathTemplate: '/videos/{taskId}',
+        baseUrlStrategy: isTuziProviderProfile(profile)
+          ? 'ensure-v1'
+          : undefined,
         metadata:
           isSoraModel(model) && isOfficialOpenAIProfile(profile)
             ? {

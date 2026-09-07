@@ -12,7 +12,7 @@ import {
   getStaticModelConfig,
   setRuntimeModelConfigs,
 } from '../constants/model-config';
-import { normalizeApiBase } from '../services/media-api/utils';
+import { normalizeModelApiBaseUrl } from './provider-base-url';
 import {
   LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
   providerCatalogsSettings,
@@ -23,8 +23,12 @@ import {
   type ModelRef,
   type ProviderProfile,
 } from './settings-manager';
-import { applySunoAliasPresentation, isSunoLikeModelId } from './suno-model-aliases';
+import {
+  applySunoAliasPresentation,
+  isSunoLikeModelId,
+} from './suno-model-aliases';
 import { sortModelsByDisplayPriority } from './model-sort';
+import { isTrustedTuziApiBaseUrl } from '../services/provider-routing/tuzi-api-endpoints';
 
 const LEGACY_CACHE_KEY = 'drawnix-runtime-model-discovery';
 
@@ -85,18 +89,7 @@ function hashString(input: string): string {
   return Math.abs(hash >>> 0).toString(16);
 }
 
-export function normalizeModelApiBaseUrl(baseUrl: string): string {
-  const trimmed = (baseUrl || '').trim();
-  const fallback = 'https://api.tu-zi.com/v1';
-  if (!trimmed) return fallback;
-
-  let normalized = trimmed.replace(/\/+$/, '');
-  normalized = normalized.replace(/\/models$/i, '');
-  if (!/\/v1$/i.test(normalized)) {
-    normalized = `${normalizeApiBase(normalized)}/v1`;
-  }
-  return normalized;
-}
+export { normalizeModelApiBaseUrl } from './provider-base-url';
 
 function buildDiscoverySignature(baseUrl: string, apiKey: string): string {
   return `${normalizeModelApiBaseUrl(baseUrl)}::${hashString(apiKey.trim())}`;
@@ -134,6 +127,80 @@ function extractDiscoveryErrorMessage(
   }
 }
 
+async function fetchRemoteModelList(
+  baseUrl: string,
+  apiKey: string
+): Promise<string> {
+  const response = await fetch(`${baseUrl}/models`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      extractDiscoveryErrorMessage(
+        rawText,
+        `获取模型列表失败: HTTP ${response.status}`
+      )
+    );
+  }
+
+  return rawText;
+}
+
+function buildModelDiscoveryBaseUrls(
+  primaryBaseUrl: string,
+  fallbackBaseUrls: string[] = []
+): string[] {
+  const urls = new Map<string, string>();
+  const allowFallback = isTrustedTuziApiBaseUrl(primaryBaseUrl);
+
+  [
+    primaryBaseUrl,
+    ...(allowFallback
+      ? fallbackBaseUrls.filter((url) => isTrustedTuziApiBaseUrl(url))
+      : []),
+  ].forEach((url) => {
+    const normalized = normalizeModelApiBaseUrl(url);
+    if (normalized && !urls.has(normalized)) {
+      urls.set(normalized, normalized);
+    }
+  });
+
+  return Array.from(urls.values());
+}
+
+async function fetchRemoteModelListWithFallback(
+  primaryBaseUrl: string,
+  apiKey: string,
+  fallbackBaseUrls: string[] = []
+): Promise<string> {
+  const baseUrls = buildModelDiscoveryBaseUrls(
+    primaryBaseUrl,
+    fallbackBaseUrls
+  );
+  let lastFetchError: unknown = null;
+
+  for (let index = 0; index < baseUrls.length; index += 1) {
+    try {
+      return await fetchRemoteModelList(baseUrls[index], apiKey);
+    } catch (error) {
+      if (error instanceof Error && !/failed to fetch/i.test(error.message)) {
+        throw error;
+      }
+      lastFetchError = error;
+    }
+  }
+
+  const message =
+    lastFetchError instanceof Error
+      ? lastFetchError.message
+      : 'Failed to fetch';
+  throw new Error(`获取模型列表失败: ${message}`);
+}
+
 type InferencePattern = string | RegExp;
 
 function matchesPattern(value: string, pattern: InferencePattern): boolean {
@@ -157,7 +224,8 @@ function hasAnyEndpointHint(
 }
 
 function inferModelTypeFromCategory(category?: unknown): ModelType | null {
-  const normalized = typeof category === 'string' ? category.trim().toLowerCase() : '';
+  const normalized =
+    typeof category === 'string' ? category.trim().toLowerCase() : '';
   if (!normalized) return null;
 
   if (
@@ -1461,7 +1529,8 @@ class RuntimeModelDiscoveryStore {
   async discover(
     profileId = LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
     baseUrl: string,
-    apiKey: string
+    apiKey: string,
+    fallbackBaseUrls: string[] = []
   ): Promise<ModelConfig[]> {
     const trimmedApiKey = apiKey.trim();
     if (!trimmedApiKey) {
@@ -1484,21 +1553,11 @@ class RuntimeModelDiscoveryStore {
       false
     );
 
-    const response = await fetch(`${normalizedBaseUrl}/models`, {
-      headers: {
-        Authorization: `Bearer ${trimmedApiKey}`,
-      },
-    });
-
-    const rawText = await response.text();
-    if (!response.ok) {
-      throw new Error(
-        extractDiscoveryErrorMessage(
-          rawText,
-          `获取模型列表失败: HTTP ${response.status}`
-        )
-      );
-    }
+    const rawText = await fetchRemoteModelListWithFallback(
+      normalizedBaseUrl,
+      trimmedApiKey,
+      fallbackBaseUrls
+    );
 
     let parsed: unknown;
     try {

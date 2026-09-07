@@ -93,9 +93,7 @@ export function shouldDebugCanvasInsertion(): boolean {
   }
 
   try {
-    const isDev =
-      typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
-    return isDev || window.localStorage?.getItem(CANVAS_INSERTION_DEBUG_FLAG) === '1';
+    return window.localStorage?.getItem(CANVAS_INSERTION_DEBUG_FLAG) === '1';
   } catch {
     return false;
   }

@@ -221,7 +221,7 @@ import { generateImageAsync as sharedGenerateImageAsync } from '../media-api';
  */
 interface AsyncImageOptions {
   onProgress: (progress: number) => void;
-  onSubmitted?: (remoteId: string) => void;
+  onSubmitted?: (remoteId: string) => void | Promise<void>;
   signal?: AbortSignal;
 }
 
@@ -236,6 +236,7 @@ export async function generateAsyncImage(
     size?: string;
     referenceImages?: string[];
     maskImage?: string;
+    requestId?: string;
   },
   config: GeminiConfig,
   options: AsyncImageOptions
@@ -247,6 +248,7 @@ export async function generateAsyncImage(
       size: params.size,
       referenceImages: params.referenceImages,
       maskImage: params.maskImage,
+      requestId: params.requestId,
     },
     {
       apiKey: config.apiKey,
@@ -273,8 +275,9 @@ export async function generateAsyncImage(
 /**
  * 收敛任务结果里的媒体 URL。
  * - data URL / 原始 base64：落到本地 Cache Storage，并返回稳定虚拟路径
- * - 远程音频 URL：主动缓存到本地稳定路径，避免签名链接过期后无法播放
- * - 其他 http/https：保留原始远程 URL，交给既有 SW 请求拦截链路处理，避免把远程素材误判成本地素材
+ * - 远程视频 URL：主动缓存到本地稳定路径，避免 CORS、Referer 校验或签名过期导致画布无法播放
+ * - 远程音频 URL：主动缓存，但保持原 URL 作为播放地址
+ * - 远程图片 URL：默认保留原始 URL，需要时可显式要求本地化
  */
 export async function cacheRemoteUrl(
   remoteUrl: string,
@@ -285,6 +288,7 @@ export async function cacheRemoteUrl(
   options?: {
     source?: 'AI_GENERATED' | 'PLAYBACK_CACHE';
     forceRemoteCache?: boolean;
+    returnLocalCacheUrl?: boolean;
     extraMetadata?: Record<string, unknown>;
   }
 ): Promise<string> {
@@ -300,14 +304,25 @@ export async function cacheRemoteUrl(
     normalizedUrl.startsWith('http://') ||
     normalizedUrl.startsWith('https://')
   ) {
-    if (mediaType !== 'audio' && !options?.forceRemoteCache) {
+    const shouldCacheRemote =
+      mediaType === 'audio' ||
+      mediaType === 'video' ||
+      options?.forceRemoteCache;
+    if (!shouldCacheRemote) {
       return normalizedUrl;
     }
 
     try {
       const cacheSource = options?.source || 'AI_GENERATED';
-      if (await unifiedCacheService.isCached(normalizedUrl)) {
-        return normalizedUrl;
+      const suffix = index !== undefined ? `_${index}` : '';
+      const returnLocalCacheUrl =
+        options?.returnLocalCacheUrl ?? mediaType === 'video';
+      const cacheTargetUrl = returnLocalCacheUrl
+        ? `/__aitu_cache__/${mediaType}/${taskId}${suffix}.${format}`
+        : normalizedUrl;
+
+      if (await unifiedCacheService.isCached(cacheTargetUrl)) {
+        return cacheTargetUrl;
       }
 
       const response = await fetch(normalizedUrl, {
@@ -324,8 +339,8 @@ export async function cacheRemoteUrl(
         return normalizedUrl;
       }
 
-      await unifiedCacheService.cacheMediaFromBlob(
-        normalizedUrl,
+      const cacheUrl = await unifiedCacheService.cacheMediaFromBlob(
+        cacheTargetUrl,
         blob,
         mediaType,
         {
@@ -334,7 +349,7 @@ export async function cacheRemoteUrl(
           ...options?.extraMetadata,
         }
       );
-      return normalizedUrl;
+      return returnLocalCacheUrl && cacheUrl ? cacheUrl : normalizedUrl;
     } catch (error) {
       console.warn(
         '[cacheRemoteUrl] Remote media cache failed, using original URL:',

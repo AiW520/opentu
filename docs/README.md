@@ -14,9 +14,8 @@
 
 - [版本控制](./VERSION_CONTROL.md)：版本号、发布流程和缓存策略。
 - [版本更新策略](./VERSION_UPDATE_STRATEGY.md)：版本文件、changelog 与发布验证。
-- [NPM CDN 部署](./NPM_CDN_DEPLOY.md)：npm 包与 CDN 发布链路。
-- [CDN 部署](./CDN_DEPLOYMENT.md)：混合部署、CDN 回退与线上排查。
 - [Cloudflare Pages 部署](./CFPAGE-DEPLOY.md)：静态托管配置。
+- [CDN 方案下线经验](./CDN_TO_SELF_HOSTED_LESSONS.md)：为什么放弃 jsDelivr/npm 发布，全量转自建服务器直发。
 
 ## UI 与品牌
 

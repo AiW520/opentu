@@ -45,6 +45,7 @@ export {
   generateImageSync,
   generateImageAsync,
   resumeAsyncImagePolling,
+  recoverImageByRequestId,
 } from './image-api';
 
 // 视频 API 导出

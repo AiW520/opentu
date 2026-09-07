@@ -439,11 +439,6 @@ export class SWChannelManager {
         this.handleDebugGetCacheStats(),
       [RPC_METHODS.DEBUG_EXPORT_LOGS]: async () => this.handleDebugExportLogs(),
 
-      // CDN
-      [RPC_METHODS.CDN_GET_STATUS]: async () => this.handleCDNGetStatus(),
-      [RPC_METHODS.CDN_RESET_STATUS]: async () => this.handleCDNResetStatus(),
-      [RPC_METHODS.CDN_HEALTH_CHECK]: async () => this.handleCDNHealthCheck(),
-
       // Upgrade
       [RPC_METHODS.UPGRADE_GET_STATUS]: async () =>
         this.handleUpgradeGetStatus(),
@@ -1061,41 +1056,6 @@ export class SWChannelManager {
         consoleLogs: [],
         postmessageLogs: [],
       };
-    }
-  }
-
-  // ============================================================================
-  // CDN RPC 处理器
-  // ============================================================================
-
-  private async handleCDNGetStatus(): Promise<{ status: unknown }> {
-    try {
-      return { status: getSwRuntimeBridge().getCDNStatusReport?.() || {} };
-    } catch {
-      return { status: {} };
-    }
-  }
-
-  private async handleCDNResetStatus(): Promise<{ success: boolean }> {
-    try {
-      getSwRuntimeBridge().resetCDNStatus?.();
-      return { success: true };
-    } catch {
-      return { success: false };
-    }
-  }
-
-  private async handleCDNHealthCheck(): Promise<{
-    results: Record<string, unknown>;
-  }> {
-    try {
-      const runtime = getSwRuntimeBridge();
-      const results = runtime.performHealthCheck
-        ? await runtime.performHealthCheck(runtime.getAppVersion?.() || 'unknown')
-        : new Map<string, unknown>();
-      return { results: Object.fromEntries(results) };
-    } catch {
-      return { results: {} };
     }
   }
 

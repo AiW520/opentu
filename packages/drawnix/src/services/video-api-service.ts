@@ -26,6 +26,9 @@ import {
 import {
   downloadVideoContentToLocalUrl,
   extractInlineVideoUrl,
+  extractVideoFailureMessage,
+  formatVideoHttpError,
+  resolveVideoBaseUrlStrategy,
   resolveVideoPollPath,
   resolveVideoSubmission,
   shouldDownloadVideoContent,
@@ -43,6 +46,7 @@ export interface VideoGenerationParams {
   seconds?: string;
   size?: string;
   params?: Record<string, unknown>;
+  requestId?: string;
   // Multiple images support for different models
   inputReferences?: UploadedVideoImage[];
   // Legacy single image support (for backward compatibility)
@@ -94,7 +98,7 @@ interface PollingOptions {
   interval?: number; // Polling interval in ms (default: 5000)
   maxAttempts?: number; // Max polling attempts (default: 1080 = 90min at 5s interval)
   onProgress?: (progress: number, status: string) => void;
-  onSubmitted?: (videoId: string) => void; // Callback when video is submitted (for saving remoteId)
+  onSubmitted?: (videoId: string) => void | Promise<void>; // Persistence barrier before polling
   routeModel?: string | ModelRef | null;
   params?: Record<string, unknown>;
 }
@@ -286,25 +290,35 @@ class VideoAPIService {
     // console.log('[VideoAPI] FormData entries:', formDataEntries);
     // console.log('[VideoAPI] Sending request to:', `${this.baseUrl}/v1/videos`);
 
+    const submitPath = '/videos';
     const response = await providerTransport.send(providerContext, {
-      path: '/videos',
-      baseUrlStrategy: binding?.baseUrlStrategy,
+      path: submitPath,
+      baseUrlStrategy: resolveVideoBaseUrlStrategy(
+        providerContext,
+        submitPath,
+        binding
+      ),
       method: 'POST',
       body: formData,
+      requestId: params.requestId,
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[VideoAPI] Submit failed:', response.status, errorText);
+      const errorMessage = formatVideoHttpError(
+        'submit',
+        response.status,
+        errorText,
+        response.url
+      );
+      console.error('[VideoAPI] Submit failed:', errorMessage);
       const duration = Date.now() - startTime;
       failLLMApiLog(logId, {
         httpStatus: response.status,
         duration,
-        errorMessage: errorText.substring(0, 500),
+        errorMessage,
       });
-      const error = new Error(
-        `视频生成提交失败: ${response.status} - ${errorText}`
-      );
+      const error = new Error(errorMessage);
       (error as any).apiErrorBody = errorText;
       (error as any).httpStatus = response.status;
       throw error;
@@ -359,18 +373,27 @@ class VideoAPIService {
       throw new Error('API Key 未配置');
     }
 
+    const pollPath = resolveVideoPollPath(videoId, binding, params);
     const response = await providerTransport.send(providerContext, {
-      path: resolveVideoPollPath(videoId, binding, params),
-      baseUrlStrategy: binding?.baseUrlStrategy,
+      path: pollPath,
+      baseUrlStrategy: resolveVideoBaseUrlStrategy(
+        providerContext,
+        pollPath,
+        binding
+      ),
       method: 'GET',
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[VideoAPI] Query failed:', response.status, errorText);
-      const error = new Error(
-        `视频状态查询失败: ${response.status} - ${errorText}`
+      const errorMessage = formatVideoHttpError(
+        'query',
+        response.status,
+        errorText,
+        response.url
       );
+      console.error('[VideoAPI] Query failed:', errorMessage);
+      const error = new Error(errorMessage);
       (error as any).apiErrorBody = errorText;
       (error as any).httpStatus = response.status;
       throw error;
@@ -403,7 +426,7 @@ class VideoAPIService {
 
     // Notify that video has been submitted (for saving remoteId)
     if (onSubmitted) {
-      onSubmitted(submitResponse.id);
+      await onSubmitted(submitResponse.id);
     }
 
     // Report initial progress
@@ -413,17 +436,11 @@ class VideoAPIService {
 
     // Check if submission already failed (e.g., content policy violation)
     if (submitResponse.status === 'failed') {
-      let errorMessage = '视频生成失败';
-      if (submitResponse.error) {
-        if (typeof submitResponse.error === 'string') {
-          errorMessage = submitResponse.error;
-        } else if (typeof submitResponse.error === 'object') {
-          errorMessage =
-            (submitResponse.error as any).message ||
-            JSON.stringify(submitResponse.error);
-        }
-      }
-      throw new Error(errorMessage);
+      throw new Error(
+        extractVideoFailureMessage(
+          submitResponse as unknown as Record<string, any>
+        )
+      );
     }
 
     // Continue with polling
@@ -551,20 +568,11 @@ class VideoAPIService {
         }
 
         if (status.status === 'failed') {
-          // Handle error - extract message if error is an object
-          let errorMessage = '视频生成失败';
-          if (status.error) {
-            if (typeof status.error === 'string') {
-              errorMessage = status.error;
-            } else if (typeof status.error === 'object') {
-              // Error is an object, extract message
-              errorMessage =
-                (status.error as any).message || JSON.stringify(status.error);
-            }
-          }
           // Mark as business failure so it won't be retried
           isBusinessFailure = true;
-          throw new Error(errorMessage);
+          throw new Error(
+            extractVideoFailureMessage(status as unknown as Record<string, any>)
+          );
         }
       } catch (err: any) {
         // 业务失败（API 返回 status: failed）不应重试，直接抛出

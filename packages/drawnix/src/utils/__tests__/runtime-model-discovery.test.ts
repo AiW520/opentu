@@ -66,7 +66,9 @@ describe('runtime-model-discovery', () => {
   });
 
   it('主流最新静态模型可被初始选择器解析', async () => {
-    const { getStaticModelConfig } = await import('../../constants/model-config');
+    const { getStaticModelConfig } = await import(
+      '../../constants/model-config'
+    );
 
     expect(getStaticModelConfig('gpt-5.1')?.type).toBe('text');
     expect(getStaticModelConfig('claude-sonnet-4-6')?.type).toBe('text');
@@ -134,14 +136,19 @@ describe('runtime-model-discovery', () => {
       },
     }));
 
-    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
 
     const result = runtimeModelDiscovery.applySelection('provider-text', [
       'model-b',
       'model-c',
     ]);
 
-    expect(result.models.map((model) => model.id)).toEqual(['model-b', 'model-c']);
+    expect(result.models.map((model) => model.id)).toEqual([
+      'model-b',
+      'model-c',
+    ]);
     expect(result.addedModelIds).toEqual(['model-c']);
     expect(result.removedModelIds).toEqual(['model-a']);
   });
@@ -193,7 +200,9 @@ describe('runtime-model-discovery', () => {
       },
     }));
 
-    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
     const state = runtimeModelDiscovery.getState('provider-happyhorse');
 
     expect(state.discoveredModels[0]).toMatchObject({
@@ -247,7 +256,9 @@ describe('runtime-model-discovery', () => {
       },
     }));
 
-    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
 
     const models = await runtimeModelDiscovery.discover(
       'provider-happyhorse',
@@ -315,7 +326,9 @@ describe('runtime-model-discovery', () => {
       },
     }));
 
-    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
 
     const models = await runtimeModelDiscovery.discover(
       'provider-video',
@@ -325,6 +338,146 @@ describe('runtime-model-discovery', () => {
 
     expect(models.map((model) => model.vendor)).toEqual(['GEMINI', 'GEMINI']);
     expect(models.map((model) => model.type)).toEqual(['video', 'video']);
+  });
+
+  it('主端点浏览器 fetch 失败时会尝试 tuzi-api 候选端点获取模型', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'https://apisz.ourzhishi.top/v1/models') {
+        throw new TypeError('Failed to fetch');
+      }
+
+      if (url === 'https://api.tu-zi.com/v1/models') {
+        return {
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              data: [
+                {
+                  id: 'gpt-image-2',
+                  owned_by: 'openai',
+                  category: '生图',
+                },
+              ],
+            }),
+        };
+      }
+
+      throw new Error(`Unexpected url: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [
+          {
+            id: 'provider-tuzi',
+            name: 'Tuzi',
+            enabled: true,
+          },
+        ],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
+
+    const models = await runtimeModelDiscovery.discover(
+      'provider-tuzi',
+      'https://apisz.ourzhishi.top/v1',
+      'test-key',
+      ['https://api.tu-zi.com']
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://apisz.ourzhishi.top/v1/models',
+      expect.any(Object)
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://api.tu-zi.com/v1/models',
+      expect.any(Object)
+    );
+    expect(models[0]).toMatchObject({
+      id: 'gpt-image-2',
+      type: 'image',
+    });
+  });
+
+  it('非 tuzi-api 主端点失败时不会把 API Key 发送到 tuzi-api 候选端点', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'https://api.openai.com/v1/models') {
+        throw new TypeError('Failed to fetch');
+      }
+      throw new Error(`Unexpected url: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
+
+    await expect(
+      runtimeModelDiscovery.discover(
+        'provider-openai',
+        'https://api.openai.com/v1',
+        'openai-secret',
+        ['https://api.tu-zi.com']
+      )
+    ).rejects.toThrow('Failed to fetch');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer openai-secret' },
+      })
+    );
   });
 
   it('不会把 OpenAI 自有 omni 模型误归类为 Gemini', async () => {
@@ -375,7 +528,9 @@ describe('runtime-model-discovery', () => {
       },
     }));
 
-    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
 
     const models = await runtimeModelDiscovery.discover(
       'provider-openai',
@@ -450,7 +605,9 @@ describe('runtime-model-discovery', () => {
       },
     }));
 
-    const { runtimeModelDiscovery } = await import('../runtime-model-discovery');
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
 
     const models = await runtimeModelDiscovery.discover(
       'provider-openai',
@@ -459,17 +616,17 @@ describe('runtime-model-discovery', () => {
     );
 
     expect(models).toHaveLength(2);
-    expect(models.find((model) => model.id === 'gpt-4o-image-async')).toMatchObject(
-      {
-        type: 'image',
-        vendor: 'GPT',
-      }
-    );
-    expect(models.find((model) => model.id === 'research-video-preview')).toMatchObject(
-      {
-        type: 'text',
-        vendor: 'GPT',
-      }
-    );
+    expect(
+      models.find((model) => model.id === 'gpt-4o-image-async')
+    ).toMatchObject({
+      type: 'image',
+      vendor: 'GPT',
+    });
+    expect(
+      models.find((model) => model.id === 'research-video-preview')
+    ).toMatchObject({
+      type: 'text',
+      vendor: 'GPT',
+    });
   });
 });

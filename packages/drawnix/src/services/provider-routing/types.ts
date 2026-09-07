@@ -27,7 +27,7 @@ export type ProviderBindingConfidence = 'high' | 'medium' | 'low';
 export type ProviderBindingSource = 'discovered' | 'template' | 'manual';
 
 export type ProviderAuthStrategy = 'bearer' | 'header' | 'query' | 'custom';
-export type ProviderBaseUrlStrategy = 'preserve' | 'trim-v1';
+export type ProviderBaseUrlStrategy = 'preserve' | 'trim-v1' | 'ensure-v1';
 export type ProviderVideoDurationMode = 'request-param' | 'model-alias';
 export type ProviderVideoResultMode = 'inline-url' | 'download-content';
 export type ProviderTextImageInputMode =
@@ -181,6 +181,11 @@ export interface ProviderTransportRequest {
   timeoutMs?: number;
   credentials?: RequestCredentials;
   fetcher?: typeof fetch;
+  /**
+   * Tuzi 同源请求会将其写入 X-Request-Id，用于超时兜底找回。
+   * 其他供应商或跨域请求会忽略该字段，避免触发 CORS 预检失败。
+   */
+  requestId?: string;
 }
 
 export interface PreparedProviderTransportRequest {

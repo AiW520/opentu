@@ -8,7 +8,9 @@ import type { VideoModelConfig } from '../types/video.types';
 import type { ModelRef } from '../utils/settings-manager';
 import { providerTransport } from './provider-routing/provider-transport';
 import { resolveInvocationPlanFromRoute } from './provider-routing/settings-repository';
+import { isTuziCompatibleBaseUrl } from './provider-routing/tuzi-api-endpoints';
 import type {
+  ProviderBaseUrlStrategy,
   ProviderModelBinding,
   ProviderVideoBindingMetadata,
   ResolvedProviderContext,
@@ -29,6 +31,80 @@ const KLING_CAMERA_PARAM_IDS = new Set([
   'camera_roll',
   'camera_zoom',
 ]);
+
+const VIDEO_API_PATH_PATTERN = /^\/(?:v1\/)?videos(?:\/|$)/i;
+const HTML_RESPONSE_PATTERN = /^\s*(?:<!doctype\s+html|<html\b)/i;
+
+export function resolveVideoBaseUrlStrategy(
+  provider: ResolvedProviderContext,
+  requestPath: string,
+  binding?: ProviderModelBinding | null
+): ProviderBaseUrlStrategy | undefined {
+  if (binding?.baseUrlStrategy) {
+    return binding.baseUrlStrategy;
+  }
+
+  // Older persisted bindings did not record ensure-v1. Tuzi serves its
+  // OpenAI-compatible video API under /v1/videos; requesting /videos hits the
+  // hosted frontend and returns a Netlify HTML 404 page instead.
+  if (
+    isTuziCompatibleBaseUrl(provider.baseUrl) &&
+    VIDEO_API_PATH_PATTERN.test(requestPath)
+  ) {
+    return 'ensure-v1';
+  }
+
+  return undefined;
+}
+
+export function formatVideoHttpError(
+  operation: 'submit' | 'query',
+  status: number,
+  responseBody: string,
+  responseUrl?: string
+): string {
+  const prefix =
+    operation === 'submit' ? '视频生成提交失败' : '视频状态查询失败';
+  const body = responseBody.trim();
+  let endpoint = '';
+  if (responseUrl) {
+    try {
+      const parsed = new URL(responseUrl);
+      endpoint = `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      endpoint = responseUrl.split(/[?#]/, 1)[0];
+    }
+  }
+  const endpointSuffix = endpoint ? `（请求地址：${endpoint}）` : '';
+
+  if (HTML_RESPONSE_PATTERN.test(body)) {
+    return `${prefix}: ${status} - 视频 API 端点返回了网页，请检查供应商地址和 /v1 路径配置${endpointSuffix}`;
+  }
+
+  if (body) {
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      const nestedError =
+        parsed.error && typeof parsed.error === 'object'
+          ? (parsed.error as Record<string, unknown>)
+          : undefined;
+      const message =
+        (typeof parsed.message === 'string' && parsed.message) ||
+        (typeof parsed.error === 'string' && parsed.error) ||
+        (typeof nestedError?.message === 'string' && nestedError.message);
+      if (message) {
+        return `${prefix}: ${status} - ${message}`;
+      }
+    } catch {
+      // Fall through to a bounded plain-text preview.
+    }
+  }
+
+  const preview = body.replace(/\s+/g, ' ').slice(0, 300);
+  return preview
+    ? `${prefix}: ${status} - ${preview}${endpointSuffix}`
+    : `${prefix}: ${status}${endpointSuffix}`;
+}
 
 function normalizeStringParams(
   params?: Record<string, unknown> | null
@@ -471,6 +547,45 @@ export function extractInlineVideoUrl(
   payload: Record<string, any> | null | undefined
 ): string | undefined {
   return payload?.video_url || payload?.url || payload?.output?.url;
+}
+
+function isPlayableVideoUrl(value: string): boolean {
+  return /^(?:https?:|blob:|data:|\/)/i.test(value.trim());
+}
+
+/**
+ * Some compatible video providers put the useful failure reason in
+ * `video_url` while returning only `task failed` in `error.message`.
+ */
+export function extractVideoFailureMessage(
+  payload: Record<string, any> | null | undefined,
+  fallback = '视频生成失败'
+): string {
+  if (!payload) return fallback;
+
+  const videoUrlMessage =
+    typeof payload.video_url === 'string' &&
+    payload.video_url.trim() &&
+    !isPlayableVideoUrl(payload.video_url)
+      ? payload.video_url.trim()
+      : undefined;
+  if (videoUrlMessage) return videoUrlMessage;
+
+  const error = payload.error;
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (
+    error &&
+    typeof error === 'object' &&
+    typeof error.message === 'string' &&
+    error.message.trim()
+  ) {
+    return error.message.trim();
+  }
+  if (typeof payload.message === 'string' && payload.message.trim()) {
+    return payload.message.trim();
+  }
+
+  return fallback;
 }
 
 function resolveTemplatePath(

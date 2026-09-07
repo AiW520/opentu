@@ -1,3 +1,88 @@
+## 1.0.4 (2026-07-18)
+
+### 🚀 Features
+
+- 完善图片请求 ID 找回与失败重试体验 ([071d3986](https://github.com/ljquan/aitu/commit/071d3986))
+
+### 🩹 Fixes
+
+- 下线 jsDelivr/npm CDN 发布方案，改用自建服务器直发 ([b0631900](https://github.com/ljquan/aitu/commit/b0631900))
+- preserve remote media cache URL contract ([d4541c8c](https://github.com/ljquan/aitu/commit/d4541c8c))
+
+### 🔧 Chores
+
+- 发布v1.0.3并完成多项优化修复 ([4fd3488e](https://github.com/ljquan/aitu/commit/4fd3488e))
+- 修复 tuzi-api 端点路由兜底 ([fe000ed1](https://github.com/ljquan/aitu/commit/fe000ed1))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+- gongchengtu <1817063960@qq.com>
+- liangkaijun <2290804689@qq.com>
+- 水滴鱼 <shuidiyu@shuidiyudeMacBook-Neo.local>
+
+## 1.0.3 (2026-07-18)
+
+### 🔧 Chores
+
+- bump version to 1.0.1 ([bdb82fb5](https://github.com/ljquan/aitu/commit/bdb82fb5))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 1.0.2 (2026-07-18)
+
+### 🚀 Features
+
+- 完善图片请求 ID 找回与失败重试体验 ([071d3986](https://github.com/ljquan/aitu/commit/071d3986))
+
+### 🩹 Fixes
+
+- preserve remote media cache URL contract ([d4541c8c](https://github.com/ljquan/aitu/commit/d4541c8c))
+
+### 🔧 Chores
+
+- bump version to 1.0.1 ([551cf9fc](https://github.com/ljquan/aitu/commit/551cf9fc))
+- 修复 tuzi-api 端点路由兜底 ([fe000ed1](https://github.com/ljquan/aitu/commit/fe000ed1))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+- gongchengtu <1817063960@qq.com>
+- liangkaijun <2290804689@qq.com>
+- 水滴鱼 <shuidiyu@shuidiyudeMacBook-Neo.local>
+
+## 1.0.1 (2026-06-11)
+
+### 🚀 Features
+
+- reply to workflow image results ([0124290c](https://github.com/ljquan/aitu/commit/0124290c))
+
+### 🩹 Fixes
+
+- 支持无分界线拼图智能拆图 ([3677c2b7](https://github.com/ljquan/aitu/commit/3677c2b7))
+
+### 🔧 Chores
+
+- 同步 1.0.0 前端版本元数据 ([6b10d071](https://github.com/ljquan/aitu/commit/6b10d071))
+- bump version to 1.0.0 ([938067d9](https://github.com/ljquan/aitu/commit/938067d9))
+- bump version to 0.9.11 ([350b1eee](https://github.com/ljquan/aitu/commit/350b1eee))
+- bump version to 0.9.10 ([e2e514cc](https://github.com/ljquan/aitu/commit/e2e514cc))
+- 修复 PR190 合并阻塞问题 ([b23a6018](https://github.com/ljquan/aitu/commit/b23a6018))
+- 修复 CI pnpm 缺失导致构建失败 ([5bc123bd](https://github.com/ljquan/aitu/commit/5bc123bd))
+- Disable CDN entry asset rewrites ([65fa9150](https://github.com/ljquan/aitu/commit/65fa9150))
+- 修复 PR185 硬边界拆图误判风险 ([efb2b64f](https://github.com/ljquan/aitu/commit/efb2b64f))
+- 修复 PR188 文本内容数组归一化 ([0f845b33](https://github.com/ljquan/aitu/commit/0f845b33))
+- 修复多图生成 JSON 解析和默认模型迁移 ([624cb9ea](https://github.com/ljquan/aitu/commit/624cb9ea))
+- 修复首帧生图窗口复用状态 ([e07097a8](https://github.com/ljquan/aitu/commit/e07097a8))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+- 水滴鱼 <shuidiyu@shuidiyudeMacBook-Neo.local>
+- SaulgoodMan-C <271131037+SaulgoodMan-C@users.noreply.github.com>
+
 ## 1.0.0 (2026-05-26)
 
 ### 🩹 Fixes

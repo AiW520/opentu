@@ -34,6 +34,7 @@ export interface LLMApiLog {
   endpoint: string;
   model: string;
   taskType: 'image' | 'video' | 'audio' | 'chat' | 'character' | 'other';
+  requestId?: string;
   prompt?: string;
   requestBody?: string;
   hasReferenceImages?: boolean;
@@ -145,6 +146,7 @@ export function startLLMApiLog(params: {
   endpoint: string;
   model: string;
   taskType: LLMApiLog['taskType'];
+  requestId?: string;
   prompt?: string;
   requestBody?: string;
   hasReferenceImages?: boolean;
@@ -161,6 +163,7 @@ export function startLLMApiLog(params: {
     endpoint: params.endpoint,
     model: params.model,
     taskType: params.taskType,
+    requestId: params.requestId,
     prompt: params.prompt ? truncate(params.prompt, 2000) : undefined,
     requestBody: params.requestBody ? sanitizeRequestBody(params.requestBody) : undefined,
     hasReferenceImages: params.hasReferenceImages,
@@ -234,6 +237,23 @@ export function updateLLMApiLogMetadata(
     if (params.httpStatus) log.httpStatus = params.httpStatus;
 
     // 更新 IndexedDB
+    saveLogToDB(log);
+  }
+}
+
+/**
+ * 补写 LLM API 日志的 requestId 字段（Fallback 版本）
+ * 用于 adapter 路径：sendAdapterRequest 内部生成 requestId 后，
+ * caller 再通过此接口回填到已创建的日志上。
+ */
+export function updateLLMApiLogRequestId(
+  logId: string,
+  requestId: string
+): void {
+  if (!requestId) return;
+  const log = memoryLogs.find((l) => l.id === logId);
+  if (log) {
+    log.requestId = requestId;
     saveLogToDB(log);
   }
 }

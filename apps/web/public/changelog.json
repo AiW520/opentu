@@ -1,6 +1,72 @@
 {
   "versions": [
     {
+      "version": "1.0.4",
+      "date": "2026-07-18",
+      "changes": {
+        "features": [
+          "完善图片请求 ID 找回与失败重试体验"
+        ],
+        "fixes": [
+          "下线 jsDelivr/npm CDN 发布方案，改用自建服务器直发",
+          "preserve remote media cache URL contract"
+        ],
+        "improvements": [
+          "发布v1.0.3并完成多项优化修复",
+          "修复 tuzi-api 端点路由兜底"
+        ]
+      },
+      "type": "patch",
+      "highlights": "完善图片请求 ID 找回与失败重试体验"
+    },
+    {
+      "version": "1.0.3",
+      "date": "2026-07-18",
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
+      "version": "1.0.2",
+      "date": "2026-07-18",
+      "changes": {
+        "features": [
+          "完善图片请求 ID 找回与失败重试体验"
+        ],
+        "fixes": [
+          "preserve remote media cache URL contract"
+        ],
+        "improvements": [
+          "修复 tuzi-api 端点路由兜底"
+        ]
+      },
+      "type": "patch",
+      "highlights": "完善图片请求 ID 找回与失败重试体验"
+    },
+    {
+      "version": "1.0.1",
+      "date": "2026-06-11",
+      "changes": {
+        "features": [
+          "reply to workflow image results"
+        ],
+        "fixes": [
+          "支持无分界线拼图智能拆图"
+        ],
+        "improvements": [
+          "同步 1.0.0 前端版本元数据",
+          "修复 PR190 合并阻塞问题",
+          "修复 CI pnpm 缺失导致构建失败",
+          "Disable CDN entry asset rewrites",
+          "修复 PR185 硬边界拆图误判风险",
+          "修复 PR188 文本内容数组归一化",
+          "修复多图生成 JSON 解析和默认模型迁移",
+          "修复首帧生图窗口复用状态"
+        ]
+      },
+      "type": "patch",
+      "highlights": "reply to workflow image results"
+    },
+    {
       "version": "1.0.0",
       "date": "2026-05-26",
       "changes": {
@@ -755,60 +821,6 @@
       },
       "type": "patch",
       "highlights": "支持多供应商分组的模型健康状态显示"
-    },
-    {
-      "version": "0.6.59",
-      "date": "2026-04-23",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "增强错误上下文收集并修复资源错误跟踪",
-          "修正 SW 静态资源版本命中与启动页提示",
-          "统一 PostHog 版本上下文",
-          "老用户沿用旧版壳并修正图层锁定失效路径",
-          "将 SW 升级切换改为整包 ready 后再接管",
-          "恢复 Gemini 图片模型的 generateContent 路由策略"
-        ],
-        "improvements": [
-          "更新版本号至0.6.55并刷新构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "增强错误上下文收集并修复资源错误跟踪"
-    },
-    {
-      "version": "0.6.57",
-      "date": "2026-04-23",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "老用户沿用旧版壳并修正图层锁定失效路径"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "老用户沿用旧版壳并修正图层锁定失效路径"
-    },
-    {
-      "version": "0.6.56",
-      "date": "2026-04-23",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "将 SW 升级切换改为整包 ready 后再接管"
-        ],
-        "improvements": [
-          "更新版本号至0.6.55并刷新构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "将 SW 升级切换改为整包 ready 后再接管"
-    },
-    {
-      "version": "0.6.55",
-      "date": "2026-04-23",
-      "type": "patch",
-      "highlights": "构建修复与稳定性改进"
     }
   ]
 }

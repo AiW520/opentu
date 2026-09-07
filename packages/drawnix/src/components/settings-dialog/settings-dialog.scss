@@ -828,6 +828,233 @@
     }
   }
 
+  &__endpoint-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--sd-border);
+    border-radius: 14px;
+    background: #f8fafc;
+  }
+
+  &__endpoint-toolbar,
+  &__endpoint-actions,
+  &__endpoint-auto,
+  &__endpoint-test-btn,
+  &__endpoint-row,
+  &__endpoint-add {
+    display: flex;
+    align-items: center;
+  }
+
+  &__endpoint-toolbar {
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  &__endpoint-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__endpoint-count {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--sd-text);
+  }
+
+  &__endpoint-source,
+  &__endpoint-row-desc {
+    font-size: 12px;
+    color: var(--sd-muted);
+  }
+
+  &__endpoint-actions {
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  &__endpoint-auto {
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+
+    input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--sd-accent);
+    }
+  }
+
+  &__endpoint-test-btn,
+  &__endpoint-add-btn,
+  &__endpoint-remove {
+    justify-content: center;
+    border: 1px solid var(--sd-border);
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    transition: border-color 0.18s ease, color 0.18s ease,
+      background-color 0.18s ease;
+
+    &:hover:not(:disabled) {
+      border-color: rgba(245, 158, 11, 0.32);
+      color: #b45309;
+      background: #fffaf0;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+  }
+
+  &__endpoint-test-btn {
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  &__endpoint-spin {
+    animation: settings-dialog-spin 0.8s linear infinite;
+  }
+
+  &__endpoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow: auto;
+  }
+
+  &__endpoint-row {
+    gap: 10px;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: #ffffff;
+    cursor: pointer;
+    transition: border-color 0.18s ease, background-color 0.18s ease,
+      box-shadow 0.18s ease;
+
+    &:hover {
+      border-color: rgba(245, 158, 11, 0.22);
+      background: #fffdf8;
+    }
+
+    &--selected {
+      border-color: rgba(245, 158, 11, 0.38);
+      background: #fffaf0;
+      box-shadow: 0 6px 16px rgba(245, 158, 11, 0.08);
+    }
+  }
+
+  &__endpoint-row-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #cbd5e1;
+  }
+
+  &__endpoint-row--selected &__endpoint-row-dot {
+    background: var(--sd-accent);
+  }
+
+  &__endpoint-row-copy {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__endpoint-row-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--sd-text);
+  }
+
+  &__endpoint-row-url {
+    overflow: hidden;
+    font-size: 12px;
+    color: #475569;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__endpoint-row-latency {
+    min-width: 52px;
+    flex: 0 0 auto;
+    text-align: right;
+    font-size: 12px;
+    font-weight: 700;
+    color: #94a3b8;
+
+    &--fast {
+      color: #16a34a;
+    }
+
+    &--slow {
+      color: #d97706;
+    }
+
+    &--failed {
+      color: #dc2626;
+    }
+  }
+
+  &__endpoint-remove,
+  &__endpoint-remove-placeholder,
+  &__endpoint-add-btn {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    padding: 0;
+    border-radius: 9px;
+  }
+
+  &__endpoint-remove-placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #cbd5e1;
+  }
+
+  &__endpoint-add {
+    gap: 8px;
+
+    input {
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid var(--sd-border);
+      border-radius: 10px;
+      font-size: 13px;
+
+      &:focus {
+        outline: none;
+        border-color: rgba(245, 158, 11, 0.28);
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.08);
+      }
+    }
+  }
+
+  &__endpoint-error {
+    font-size: 12px;
+    color: #dc2626;
+  }
+
   &__secret-input-wrap {
     position: relative;
     flex: 1;

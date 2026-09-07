@@ -32,6 +32,17 @@ import {
   cacheRemoteUrl,
   cacheRemoteUrls,
 } from './fallback-utils';
+import { recoverImageByRequestId } from '../media-api';
+import { updateLLMApiLogRequestId } from './llm-api-logger';
+import type { ImageApiConfig } from '../media-api';
+
+function isTimeoutErrorForAdapterRecover(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' ||
+      /Request timeout|请求超时/.test(error.message))
+  );
+}
 
 type ImageGenerationMode = 'text_to_image' | 'image_to_image' | 'image_edit';
 type ImageInputFidelity = 'high' | 'low';
@@ -125,6 +136,21 @@ export async function executeImageViaAdapter(
     taskId,
   });
 
+  // 由 sendAdapterRequest 生成的 X-Request-Id 通过 onRequestSent 回传，用于超时兜底找回
+  let capturedRequestId: string | undefined;
+  const adapterContext = getAdapterContextFromSettings(
+    'image',
+    params.modelRef || params.model,
+    { preferredRequestSchema }
+  );
+  adapterContext.onRequestSent = ({ requestId }) => {
+    if (!capturedRequestId && requestId) {
+      capturedRequestId = requestId;
+      // 补写日志的 requestId 字段
+      updateLLMApiLogRequestId(logId, requestId);
+    }
+  };
+
   try {
     let processedImages: string[] | undefined;
     if (params.referenceImages && params.referenceImages.length > 0) {
@@ -138,11 +164,9 @@ export async function executeImageViaAdapter(
 
     options?.onProgress?.({ progress: 10, phase: 'submitting' });
 
-    const result = await adapter.generateImage(
-      getAdapterContextFromSettings('image', params.modelRef || params.model, {
-        preferredRequestSchema,
-      }),
-      {
+    let result;
+    try {
+      result = await adapter.generateImage(adapterContext, {
         prompt: params.prompt,
         model: params.model,
         modelRef: params.modelRef || null,
@@ -164,8 +188,54 @@ export async function executeImageViaAdapter(
           n: params.count,
           ...params.params,
         },
+      });
+    } catch (adapterError) {
+      // 超时兜底：通过 /log/get-request 找回已经生成成功的结果
+      const recoverRequestId =
+        capturedRequestId ||
+        (typeof (adapterError as { requestId?: unknown })?.requestId ===
+        'string'
+          ? ((adapterError as { requestId?: string }).requestId as string)
+          : undefined);
+
+      if (
+        isTimeoutErrorForAdapterRecover(adapterError) &&
+        recoverRequestId &&
+        adapterContext.provider
+      ) {
+        console.warn(
+          `[FallbackAdapterRoutes] 生图请求超时，尝试通过 X-Request-Id 找回: ${recoverRequestId}`
+        );
+        try {
+          // 构造 ImageApiConfig：从 provider 上下文取字段
+          const recoverConfig: ImageApiConfig = {
+            apiKey: adapterContext.provider.apiKey || '',
+            baseUrl: adapterContext.provider.baseUrl,
+            authType: adapterContext.provider.authType,
+            providerType: adapterContext.provider.providerType,
+            extraHeaders: adapterContext.provider.extraHeaders,
+            provider: adapterContext.provider,
+            binding: adapterContext.binding || null,
+          };
+          result = await recoverImageByRequestId(
+            recoverRequestId,
+            recoverConfig,
+            options?.signal
+          );
+          console.info(
+            `[FallbackAdapterRoutes] ✅ 通过 X-Request-Id 找回结果成功: ${recoverRequestId}`
+          );
+        } catch (recoverError) {
+          console.error(
+            `[FallbackAdapterRoutes] ❌ 通过 X-Request-Id 找回失败: ${recoverRequestId}`,
+            recoverError
+          );
+          throw adapterError;
+        }
+      } else {
+        throw adapterError;
       }
-    );
+    }
 
     const duration = Date.now() - logStartTime;
 
@@ -299,8 +369,8 @@ export async function executeVideoViaAdapter(
               phase: safeProgress <= 10 ? 'submitting' : 'polling',
             });
           },
-          onSubmitted: (videoId: string) => {
-            void taskStorageWriter.updateRemoteId(
+          onSubmitted: async (videoId: string) => {
+            await taskStorageWriter.updateRemoteId(
               taskId,
               videoId,
               createTaskInvocationRouteSnapshot(

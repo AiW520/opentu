@@ -6,11 +6,13 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import classNames from 'classnames';
 import { Switch } from 'tdesign-react';
 import { InfoCircleIcon } from 'tdesign-icons-react';
 import {
@@ -23,17 +25,16 @@ import {
   EyeOff,
   FlaskConical,
   Loader2,
+  Plus,
   Search,
   Trash2,
   X,
+  Zap,
 } from 'lucide-react';
 import { LS_KEYS } from '../../constants/storage-keys';
 import { ModelDiscoveryDialog } from './model-discovery-dialog';
 import { PricingFieldGroup } from './pricing-field-group';
-import {
-  useModelPriceText,
-  useModelMeta,
-} from '../../hooks/use-model-pricing';
+import { useModelPriceText, useModelMeta } from '../../hooks/use-model-pricing';
 import {
   getDefaultAudioModel,
   getDefaultImageModel,
@@ -47,10 +48,8 @@ import {
   useProfilePreferredModels,
   useRuntimeModelDiscoveryState,
 } from '../../hooks/use-runtime-models';
-import {
-  normalizeModelApiBaseUrl,
-  runtimeModelDiscovery,
-} from '../../utils/runtime-model-discovery';
+import { runtimeModelDiscovery } from '../../utils/runtime-model-discovery';
+import { normalizeModelApiBaseUrl } from '../../utils/provider-base-url';
 import { compareModelsByDisplayPriority } from '../../utils/model-sort';
 import {
   createModelRef,
@@ -98,19 +97,57 @@ import {
 import { modelBenchmarkService } from '../../services/model-benchmark-service';
 import { HoverTip } from '../shared/hover';
 import { createProviderProfileDraft } from './provider-profile-draft';
+import {
+  normalizeEndpointApiBaseUrl,
+  normalizeEndpointUrl,
+  resolveEndpointSelectionUrl,
+} from './provider-endpoint-utils';
 import { MessagePlugin } from '../../utils/message-plugin';
+import {
+  isTrustedTuziApiBaseUrl,
+  loadTuziApiEndpointSources,
+  TUZI_API_FALLBACK_ENDPOINTS,
+  type TuziApiEndpointSource,
+} from '../../services/provider-routing/tuzi-api-endpoints';
 
 export { IMAGE_MODEL_GROUPED_SELECT_OPTIONS as IMAGE_MODEL_GROUPED_OPTIONS } from '../../constants/model-config';
 export { VIDEO_MODEL_SELECT_OPTIONS as VIDEO_MODEL_OPTIONS } from '../../constants/model-config';
 
 type SettingsView = 'providers' | 'presets' | 'canvas' | 'speech';
 type CompactPanelMode = 'catalog' | 'detail';
+type EndpointSelectionMode = 'auto' | 'manual';
+type EndpointLatency = number | 'failed' | null;
 type ProviderNavigationIntent =
   | { action: 'select'; profileId: string }
   | { action: 'create' };
 
 const SETTINGS_PROVIDER_NAV_EVENT = 'aitu:settings:provider-nav';
 const SETTINGS_DIALOG_COMPACT_BREAKPOINT = 980;
+const TUZI_PROVIDER_PROFILE_IDS = new Set([
+  LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
+  TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
+  TUZI_MIX_PROVIDER_PROFILE_ID,
+  TUZI_CODEX_PROVIDER_PROFILE_ID,
+  TUZI_BUSINESS_PROVIDER_PROFILE_ID,
+]);
+let tuziApiEndpointCache: EndpointOption[] | null = null;
+
+interface EndpointOption {
+  id: string;
+  url: string;
+  shortLabel: string;
+  name?: string;
+  description?: string;
+  removable?: boolean;
+}
+
+function isTuziProviderProfile(profile?: ProviderProfile | null): boolean {
+  return Boolean(
+    profile &&
+      (TUZI_PROVIDER_PROFILE_IDS.has(profile.id) ||
+        isTrustedTuziApiBaseUrl(profile.baseUrl))
+  );
+}
 
 const VIEW_SECTIONS: Array<{ value: SettingsView; label: string }> = [
   { value: 'providers', label: '供应商' },
@@ -644,6 +681,68 @@ function buildPresetRouteModels(
   );
 }
 
+function createEndpointOption(
+  endpoint:
+    | string
+    | {
+        name?: string;
+        url?: string;
+        description?: string;
+      },
+  index: number,
+  removable = false
+): EndpointOption {
+  const url = typeof endpoint === 'string' ? endpoint : endpoint.url || '';
+  const normalizedUrl = normalizeEndpointUrl(url);
+  return {
+    id: `${removable ? 'custom' : 'tuzi-api'}-${index}-${normalizedUrl}`,
+    url: normalizedUrl,
+    shortLabel: removable
+      ? '自定义'
+      : typeof endpoint === 'string'
+      ? index === 0
+        ? '主'
+        : `S${index + 1}`
+      : endpoint.name || (index === 0 ? '主' : `S${index + 1}`),
+    name: typeof endpoint === 'string' ? undefined : endpoint.name,
+    description:
+      typeof endpoint === 'string' ? undefined : endpoint.description,
+    removable,
+  };
+}
+
+async function loadTuziApiEndpointOptions(): Promise<EndpointOption[]> {
+  if (tuziApiEndpointCache) {
+    return tuziApiEndpointCache;
+  }
+
+  const sourceEndpoints = await loadTuziApiEndpointSources();
+  tuziApiEndpointCache = sourceEndpoints.map((endpoint, index) =>
+    createEndpointOption(endpoint, index)
+  );
+  return tuziApiEndpointCache;
+}
+
+async function measureEndpointLatency(url: string): Promise<EndpointLatency> {
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 4500);
+
+  try {
+    await fetch(normalizeEndpointUrl(url), {
+      method: 'GET',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return Math.max(1, Math.round(performance.now() - startedAt));
+  } catch {
+    return 'failed';
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 export const SettingsDialog = ({
   container,
 }: {
@@ -689,6 +788,24 @@ export const SettingsDialog = ({
     new Set()
   );
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
+  const [endpointSelectionMode, setEndpointSelectionMode] =
+    useState<EndpointSelectionMode>('auto');
+  const [selectedEndpointUrl, setSelectedEndpointUrl] = useState(() =>
+    normalizeEndpointUrl(geminiSettings.get().baseUrl)
+  );
+  const [tuziApiEndpointOptions, setTuziApiEndpointOptions] = useState<
+    EndpointOption[]
+  >([]);
+  const [customEndpointOptions, setCustomEndpointOptions] = useState<
+    EndpointOption[]
+  >([]);
+  const [endpointLatencies, setEndpointLatencies] = useState<
+    Record<string, EndpointLatency>
+  >({});
+  const [isEndpointTesting, setIsEndpointTesting] = useState(false);
+  const [customEndpointUrl, setCustomEndpointUrl] = useState('');
+  const [endpointAddError, setEndpointAddError] = useState('');
+  const [tuziApiEndpointLoadError, setTuziApiEndpointLoadError] = useState('');
 
   const toggleGroupCollapse = (type: ModelType) => {
     setCollapsedGroups((prev) => {
@@ -706,6 +823,7 @@ export const SettingsDialog = ({
     profilesDraft.find((profile) => profile.id === selectedProfileId) ||
     profilesDraft[0] ||
     null;
+  const isSelectedTuziProfile = isTuziProviderProfile(selectedProfile);
   const selectedImageApiCompatibilityHint = selectedProfile
     ? getImageApiCompatibilityHint(selectedProfile)
     : '同一个图片模型在不同 API Key 或网关下可能需要不同接口格式；不确定时使用自动。';
@@ -756,6 +874,50 @@ export const SettingsDialog = ({
   });
   const hasPendingChanges =
     appState.openSettings && currentDraftSignature !== initialDraftSignature;
+
+  const endpointOptions = useMemo(() => {
+    const map = new Map<string, EndpointOption>();
+    const push = (option: EndpointOption) => {
+      const normalizedUrl = normalizeEndpointUrl(option.url);
+      if (!normalizedUrl || map.has(normalizedUrl)) {
+        return;
+      }
+      map.set(normalizedUrl, { ...option, url: normalizedUrl });
+    };
+
+    tuziApiEndpointOptions.forEach(push);
+    customEndpointOptions.forEach(push);
+
+    return Array.from(map.values());
+  }, [customEndpointOptions, tuziApiEndpointOptions]);
+
+  const bestEndpoint = useMemo(() => {
+    const measured = endpointOptions
+      .map((endpoint) => ({
+        endpoint,
+        latency: endpointLatencies[endpoint.url],
+      }))
+      .filter(
+        (entry): entry is { endpoint: EndpointOption; latency: number } =>
+          typeof entry.latency === 'number'
+      )
+      .sort((a, b) => a.latency - b.latency);
+
+    return (
+      measured[0]?.endpoint ||
+      endpointOptions[0] || {
+        id: 'fallback-tuzi-api-primary',
+        url: normalizeEndpointUrl(TUZI_API_FALLBACK_ENDPOINTS[0].url),
+        shortLabel: TUZI_API_FALLBACK_ENDPOINTS[0].name,
+        name: TUZI_API_FALLBACK_ENDPOINTS[0].name,
+        description: TUZI_API_FALLBACK_ENDPOINTS[0].description,
+      }
+    );
+  }, [endpointLatencies, endpointOptions]);
+
+  const activeEndpoint =
+    endpointOptions.find((endpoint) => endpoint.url === selectedEndpointUrl) ||
+    bestEndpoint;
 
   useEffect(() => {
     setIsApiKeyVisible(false);
@@ -985,6 +1147,54 @@ export const SettingsDialog = ({
     setModelSearchQuery('');
   }, [selectedProfileId, activeView]);
 
+  useEffect(() => {
+    if (!appState.openSettings) {
+      return;
+    }
+
+    let cancelled = false;
+    loadTuziApiEndpointOptions()
+      .then((options) => {
+        if (cancelled) {
+          return;
+        }
+        setTuziApiEndpointOptions(options);
+        setTuziApiEndpointLoadError('');
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        console.warn('[SettingsDialog] 加载 tuzi-api 端点失败:', error);
+        setTuziApiEndpointOptions(
+          TUZI_API_FALLBACK_ENDPOINTS.map((endpoint, index) =>
+            createEndpointOption(endpoint, index)
+          )
+        );
+        setTuziApiEndpointLoadError('tuzi-api 端点加载失败，已使用内置站点');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appState.openSettings]);
+
+  useEffect(() => {
+    if (!selectedProfile) {
+      return;
+    }
+    setSelectedEndpointUrl(
+      resolveEndpointSelectionUrl(
+        selectedProfile.baseUrl,
+        endpointOptions.map((endpoint) => endpoint.url)
+      )
+    );
+  }, [endpointOptions, selectedProfile?.baseUrl, selectedProfile?.id]);
+
+  useEffect(() => {
+    setEndpointSelectionMode('auto');
+  }, [selectedProfile?.id]);
+
   const updateProfile = (
     profileId: string,
     updater: (profile: ProviderProfile) => ProviderProfile
@@ -1006,6 +1216,135 @@ export const SettingsDialog = ({
       )
     );
   };
+
+  const handleEndpointSelect = useCallback(
+    (url: string, mode: EndpointSelectionMode = 'manual') => {
+      if (!selectedProfile) {
+        return;
+      }
+      const normalizedUrl = normalizeEndpointUrl(url);
+      const normalizedApiBaseUrl = normalizeEndpointApiBaseUrl(normalizedUrl);
+      setEndpointSelectionMode(mode);
+      setSelectedEndpointUrl(normalizedUrl);
+      updateProfile(selectedProfile.id, (profile) => ({
+        ...profile,
+        baseUrl: normalizedApiBaseUrl,
+      }));
+      if (selectedProfile.id === LEGACY_DEFAULT_PROVIDER_PROFILE_ID) {
+        void geminiSettings.update({
+          ...geminiSettings.get(),
+          baseUrl: normalizedApiBaseUrl,
+        });
+      }
+    },
+    [selectedProfile]
+  );
+
+  const handleEndpointAutoSelectChange = useCallback(
+    (checked: boolean) => {
+      if (checked) {
+        handleEndpointSelect(bestEndpoint.url, 'auto');
+        return;
+      }
+      handleEndpointSelect(activeEndpoint.url, 'manual');
+    },
+    [activeEndpoint.url, bestEndpoint.url, handleEndpointSelect]
+  );
+
+  const handleAddCustomEndpoint = useCallback(() => {
+    const normalizedUrl = normalizeEndpointUrl(customEndpointUrl);
+
+    if (!/^https?:\/\/[^/]+\.[^/]+/i.test(normalizedUrl)) {
+      setEndpointAddError('请输入有效的端点地址');
+      return;
+    }
+
+    if (endpointOptions.some((endpoint) => endpoint.url === normalizedUrl)) {
+      setEndpointAddError('端点已存在');
+      return;
+    }
+
+    const nextEndpoint = createEndpointOption(
+      normalizedUrl,
+      customEndpointOptions.length,
+      true
+    );
+    setCustomEndpointOptions((prev) => [...prev, nextEndpoint]);
+    setCustomEndpointUrl('');
+    setEndpointAddError('');
+    handleEndpointSelect(nextEndpoint.url, 'manual');
+  }, [
+    customEndpointOptions.length,
+    customEndpointUrl,
+    endpointOptions,
+    handleEndpointSelect,
+  ]);
+
+  const handleRemoveCustomEndpoint = useCallback(
+    (endpoint: EndpointOption) => {
+      if (!endpoint.removable) {
+        return;
+      }
+      setCustomEndpointOptions((prev) =>
+        prev.filter((item) => item.url !== endpoint.url)
+      );
+      setEndpointLatencies((prev) => {
+        const next = { ...prev };
+        delete next[endpoint.url];
+        return next;
+      });
+      if (selectedEndpointUrl === endpoint.url) {
+        handleEndpointSelect(bestEndpoint.url, 'auto');
+      }
+    },
+    [bestEndpoint.url, handleEndpointSelect, selectedEndpointUrl]
+  );
+
+  const handleRunEndpointSpeedTest = useCallback(async () => {
+    if (isEndpointTesting || endpointOptions.length === 0) {
+      return;
+    }
+
+    setIsEndpointTesting(true);
+    setEndpointLatencies((prev) => {
+      const next = { ...prev };
+      for (const endpoint of endpointOptions) {
+        next[endpoint.url] = null;
+      }
+      return next;
+    });
+
+    const results = await Promise.all(
+      endpointOptions.map(async (endpoint) => ({
+        url: endpoint.url,
+        latency: await measureEndpointLatency(endpoint.url),
+      }))
+    );
+    setEndpointLatencies(
+      results.reduce<Record<string, EndpointLatency>>((acc, result) => {
+        acc[result.url] = result.latency;
+        return acc;
+      }, {})
+    );
+    setIsEndpointTesting(false);
+
+    if (endpointSelectionMode === 'auto') {
+      const fastest = results
+        .filter(
+          (result): result is { url: string; latency: number } =>
+            typeof result.latency === 'number'
+        )
+        .sort((a, b) => a.latency - b.latency)[0];
+      if (fastest) {
+        handleEndpointSelect(fastest.url, 'auto');
+      }
+    }
+  }, [
+    endpointOptions,
+    endpointSelectionMode,
+    handleEndpointSelect,
+    isEndpointTesting,
+  ]);
 
   const persistPresetConfiguration = async (
     nextPresets: InvocationPreset[],
@@ -1459,7 +1798,10 @@ export const SettingsDialog = ({
       await runtimeModelDiscovery.discover(
         selectedProfile.id,
         normalizedBaseUrl,
-        trimmedApiKey
+        trimmedApiKey,
+        isSelectedTuziProfile
+          ? tuziApiEndpointOptions.map((endpoint) => endpoint.url)
+          : []
       );
       analytics.trackUIInteraction({
         area: 'settings',
@@ -1759,7 +2101,9 @@ export const SettingsDialog = ({
           closeAfterSave,
           profilesCount: normalizedProfiles.length,
           presetsCount: normalizedPresets.length,
-          enabledProfilesCount: normalizedProfiles.filter((profile) => profile.enabled).length,
+          enabledProfilesCount: normalizedProfiles.filter(
+            (profile) => profile.enabled
+          ).length,
         },
       });
 
@@ -2214,7 +2558,15 @@ export const SettingsDialog = ({
               </span>
             </div>
 
-            <div className="settings-dialog__field settings-dialog__field--full" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div
+              className="settings-dialog__field settings-dialog__field--full"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap',
+              }}
+            >
               <label className="settings-dialog__label" style={{ margin: 0 }}>
                 图片优先使用异步接口（实验功能，建议不要开，还未上线）
               </label>
@@ -2236,7 +2588,10 @@ export const SettingsDialog = ({
                   );
                 }}
               />
-              <span className="settings-dialog__field-hint" style={{ width: '100%' }}>
+              <span
+                className="settings-dialog__field-hint"
+                style={{ width: '100%' }}
+              >
                 开启后，支持异步接口的图片模型将优先使用 /v1/videos 异步接口生成
               </span>
             </div>
@@ -2278,6 +2633,183 @@ export const SettingsDialog = ({
                 }
                 placeholder={TUZI_PROVIDER_DEFAULT_BASE_URL}
               />
+              {isSelectedTuziProfile ? (
+                <div className="settings-dialog__endpoint-panel">
+                  <div className="settings-dialog__endpoint-toolbar">
+                    <div className="settings-dialog__endpoint-title">
+                      <div className="settings-dialog__endpoint-count">
+                        {endpointOptions.length} 个端点
+                      </div>
+                      <div className="settings-dialog__endpoint-source">
+                        来源: tuzi-api
+                      </div>
+                    </div>
+                    <div className="settings-dialog__endpoint-actions">
+                      <label className="settings-dialog__endpoint-auto">
+                        <input
+                          type="checkbox"
+                          checked={endpointSelectionMode === 'auto'}
+                          onChange={(event) =>
+                            handleEndpointAutoSelectChange(event.target.checked)
+                          }
+                        />
+                        <span>自动选择</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="settings-dialog__endpoint-test-btn"
+                        onClick={() => void handleRunEndpointSpeedTest()}
+                        disabled={
+                          isEndpointTesting || endpointOptions.length === 0
+                        }
+                      >
+                        {isEndpointTesting ? (
+                          <Loader2
+                            size={14}
+                            className="settings-dialog__endpoint-spin"
+                          />
+                        ) : (
+                          <Zap size={15} />
+                        )}
+                        <span>测速</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-dialog__endpoint-list">
+                    {endpointOptions.map((endpoint) => {
+                      const selected = endpoint.url === activeEndpoint.url;
+                      const latency = endpointLatencies[endpoint.url];
+                      const latencyText =
+                        typeof latency === 'number'
+                          ? `${latency}ms`
+                          : latency === 'failed'
+                          ? '失败'
+                          : '—';
+                      const latencyState =
+                        latency === 'failed'
+                          ? 'failed'
+                          : typeof latency === 'number' && latency < 300
+                          ? 'fast'
+                          : typeof latency === 'number' && latency >= 800
+                          ? 'slow'
+                          : null;
+
+                      return (
+                        <div
+                          key={endpoint.id}
+                          role="button"
+                          tabIndex={0}
+                          className={classNames(
+                            'settings-dialog__endpoint-row',
+                            {
+                              'settings-dialog__endpoint-row--selected':
+                                selected,
+                            }
+                          )}
+                          onClick={() => {
+                            handleEndpointSelect(endpoint.url, 'manual');
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              handleEndpointSelect(endpoint.url, 'manual');
+                            }
+                          }}
+                        >
+                          <span className="settings-dialog__endpoint-row-dot" />
+                          <span className="settings-dialog__endpoint-row-copy">
+                            <span className="settings-dialog__endpoint-row-name">
+                              {endpoint.name || endpoint.shortLabel}
+                            </span>
+                            <span className="settings-dialog__endpoint-row-url">
+                              {endpoint.url}
+                            </span>
+                            {endpoint.description ? (
+                              <span className="settings-dialog__endpoint-row-desc">
+                                {endpoint.description}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span
+                            className={classNames(
+                              'settings-dialog__endpoint-row-latency',
+                              {
+                                'settings-dialog__endpoint-row-latency--fast':
+                                  latencyState === 'fast',
+                                'settings-dialog__endpoint-row-latency--slow':
+                                  latencyState === 'slow',
+                                'settings-dialog__endpoint-row-latency--failed':
+                                  latencyState === 'failed',
+                              }
+                            )}
+                          >
+                            {isEndpointTesting && latency == null ? (
+                              <Loader2
+                                size={14}
+                                className="settings-dialog__endpoint-spin"
+                              />
+                            ) : (
+                              latencyText
+                            )}
+                          </span>
+                          {endpoint.removable ? (
+                            <button
+                              type="button"
+                              className="settings-dialog__endpoint-remove"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleRemoveCustomEndpoint(endpoint);
+                              }}
+                            >
+                              <X size={17} />
+                            </button>
+                          ) : (
+                            <span className="settings-dialog__endpoint-remove-placeholder">
+                              —
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="settings-dialog__endpoint-add">
+                    <input
+                      value={customEndpointUrl}
+                      placeholder="https://api.example.com"
+                      onChange={(event) => {
+                        setCustomEndpointUrl(event.target.value);
+                        setEndpointAddError('');
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          handleAddCustomEndpoint();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="settings-dialog__endpoint-add-btn"
+                      onClick={handleAddCustomEndpoint}
+                    >
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                  {endpointAddError ? (
+                    <div className="settings-dialog__endpoint-error">
+                      {endpointAddError}
+                    </div>
+                  ) : null}
+                  {tuziApiEndpointLoadError ? (
+                    <div className="settings-dialog__endpoint-error">
+                      {tuziApiEndpointLoadError}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="settings-dialog__field settings-dialog__field--column settings-dialog__field--full">
@@ -2377,7 +2909,11 @@ export const SettingsDialog = ({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => setIsApiKeyVisible((visible) => !visible)}
                     >
-                      {isApiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {isApiKeyVisible ? (
+                        <EyeOff size={16} />
+                      ) : (
+                        <Eye size={16} />
+                      )}
                     </button>
                   </HoverTip>
                 </div>
