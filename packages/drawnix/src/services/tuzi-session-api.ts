@@ -1,6 +1,12 @@
 import type { TuziEmbeddedConfig } from './tuzi-embedded-config';
 import { tuziEmbeddedConfig } from './tuzi-embedded-config';
+import {
+  ensureTuziProviders,
+  getTuziBridgeContext,
+  isTuziBridgeConnected,
+} from './tuzi-postmessage-bridge';
 import { getTuziSystemToken, getTuziSystemUserId } from './tuzi-token-auth';
+import { extractTuziGeneratedImageUrls } from './tuzi-log-media';
 
 export type TuziSessionErrorCode =
   | 'TOKEN_INVALID'
@@ -53,6 +59,7 @@ export interface TuziUsageLog {
   requestId: string;
   responseId: string;
   upstreamRequestId: string;
+  generatedImageUrls?: string[];
   other: Record<string, unknown>;
 }
 
@@ -78,6 +85,11 @@ export interface TuziManagedProvider {
   rotatedAt: number;
 }
 
+export interface TuziProviderGroup {
+  group: string;
+  displayName: string;
+}
+
 export type TuziQuotaDisplayType = 'USD' | 'CNY' | 'CUSTOM' | 'TOKENS';
 
 export interface TuziDisplayConfig {
@@ -89,6 +101,9 @@ export interface TuziDisplayConfig {
 }
 
 type JsonRecord = Record<string, unknown>;
+const TUZI_REQUEST_TIMEOUT_MS = 15_000;
+const TUZI_PROVIDER_GROUPS_REQUEST_TIMEOUT_MS = 6_000;
+const TUZI_PROVIDER_GROUPS_RETRY_DELAY_MS = 250;
 
 function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -151,7 +166,9 @@ export class TuziSessionApiClient {
   private async request(
     path: string,
     query?: URLSearchParams,
-    method: 'GET' | 'POST' = 'GET'
+    method: 'GET' | 'POST' = 'GET',
+    body?: string,
+    timeoutMs = TUZI_REQUEST_TIMEOUT_MS
   ): Promise<unknown> {
     if (!this.systemToken) {
       throw new TuziSessionApiError('NOT_CONFIGURED', '请先填写系统访问令牌');
@@ -171,27 +188,42 @@ export class TuziSessionApiClient {
     if (query) url.search = query.toString();
 
     let response: Response;
+    const controller =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : undefined;
     try {
       response = await this.fetcher.call(globalThis, url.toString(), {
         method,
         credentials: 'omit',
         headers: {
           Accept: 'application/json',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
           Authorization: `Bearer ${this.systemToken}`,
           'New-Api-User': this.systemUserId,
         },
+        ...(body ? { body } : {}),
+        ...(controller ? { signal: controller.signal } : {}),
       });
     } catch (error) {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (controller?.signal.aborted) {
+        throw new TuziSessionApiError(
+          'REQUEST_FAILED',
+          'Tuzi API 请求超时，请稍后重试'
+        );
+      }
       throw new TuziSessionApiError(
         'REQUEST_FAILED',
         error instanceof Error ? error.message : '无法连接 Tuzi API'
       );
     }
-
     let payload: unknown = null;
     try {
       payload = await response.json();
     } catch {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
       if (response.ok) {
         throw new TuziSessionApiError(
           'INVALID_RESPONSE',
@@ -200,6 +232,7 @@ export class TuziSessionApiClient {
         );
       }
     }
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
 
     const object = asRecord(payload);
     const code = responseCode(object);
@@ -227,11 +260,27 @@ export class TuziSessionApiClient {
     return object?.data;
   }
 
-  async ensureManagedProviders(): Promise<TuziManagedProvider[]> {
+  async ensureManagedProviders(
+    groups?: readonly string[]
+  ): Promise<TuziManagedProvider[]> {
+    const selectedGroups = groups
+      ? new Set(groups.map((group) => group.trim()).filter(Boolean))
+      : null;
+    const body = selectedGroups
+      ? JSON.stringify({ groups: [...selectedGroups] })
+      : undefined;
+    if (isTuziBridgeConnected()) {
+      return ensureTuziProviders(selectedGroups ? [...selectedGroups] : []);
+    }
     let data: JsonRecord | null;
     try {
       data = asRecord(
-        await this.request('/api/opentu/providers/ensure', undefined, 'POST')
+        await this.request(
+          '/api/opentu/providers/ensure',
+          undefined,
+          'POST',
+          body
+        )
       );
     } catch (error) {
       // Older Tuzi deployments do not expose managed-provider routes. Keep
@@ -252,14 +301,71 @@ export class TuziSessionApiClient {
       ) {
         return [];
       }
+      const managedProvider = {
+        id: provider.id,
+        group: provider.group.trim(),
+        displayName: stringValue(provider.display_name),
+        apiKey: provider.api_key,
+        status: numberValue(provider.status),
+        rotatedAt: numberValue(provider.rotated_at),
+      };
+      if (
+        !managedProvider.group ||
+        (selectedGroups && !selectedGroups.has(managedProvider.group))
+      ) {
+        return [];
+      }
+      return [managedProvider];
+    });
+  }
+
+  async getProviderGroups(): Promise<TuziProviderGroup[]> {
+    if (isTuziBridgeConnected()) {
+      return (getTuziBridgeContext()?.groups || []).map((group) => ({
+        group: group.group,
+        displayName: group.displayName,
+      }));
+    }
+    let data: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        data = await this.request(
+          '/api/opentu/provider-groups',
+          undefined,
+          'GET',
+          undefined,
+          TUZI_PROVIDER_GROUPS_REQUEST_TIMEOUT_MS
+        );
+        break;
+      } catch (error) {
+        if (error instanceof TuziSessionApiError && error.status === 404) {
+          return [];
+        }
+        const retryable =
+          error instanceof TuziSessionApiError &&
+          error.code === 'REQUEST_FAILED' &&
+          (error.status === undefined ||
+            error.status === 408 ||
+            error.status === 429 ||
+            error.status >= 500);
+        if (!retryable || attempt === 1) {
+          throw error;
+        }
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, TUZI_PROVIDER_GROUPS_RETRY_DELAY_MS)
+        );
+      }
+    }
+    if (!Array.isArray(data)) return [];
+    return data.flatMap((item) => {
+      const group = asRecord(item);
+      if (!group) return [];
+      const groupId = stringValue(group.group).trim();
+      if (!groupId) return [];
       return [
         {
-          id: provider.id,
-          group: provider.group,
-          displayName: stringValue(provider.display_name),
-          apiKey: provider.api_key,
-          status: numberValue(provider.status),
-          rotatedAt: numberValue(provider.rotated_at),
+          group: groupId,
+          displayName: stringValue(group.display_name).trim() || groupId,
         },
       ];
     });
@@ -364,6 +470,7 @@ export class TuziSessionApiClient {
     return {
       items: rawItems.map((item) => {
         const log = asRecord(item) || {};
+        const other = logOtherValue(log.other);
         return {
           id: numberValue(log.id),
           createdAt: numberValue(log.created_at),
@@ -403,7 +510,11 @@ export class TuziSessionApiClient {
           upstreamRequestId:
             stringValue(log.upstream_request_id) ||
             stringValue(log.upstreamRequestId),
-          other: logOtherValue(log.other),
+          generatedImageUrls: extractTuziGeneratedImageUrls(
+            other,
+            this.baseUrl
+          ),
+          other,
         };
       }),
       total: numberValue(data?.total),

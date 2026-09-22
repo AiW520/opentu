@@ -135,6 +135,42 @@ describe('generation queue context passthrough', () => {
     });
   });
 
+  it('preserves MiniMax-H3 2K resolution on video queue tasks', async () => {
+    const { createVideoTask } = await import('./video-generation');
+
+    await createVideoTask({
+      prompt: '生成高清品牌短片',
+      model: 'MiniMax-H3',
+      size: '2k',
+    });
+
+    expect(createdTasks[0]).toMatchObject({
+      type: TaskType.VIDEO,
+      params: {
+        model: 'MiniMax-H3',
+        size: '2K',
+      },
+    });
+  });
+
+  it('uses MiniMax-H3 model defaults on video queue tasks', async () => {
+    const { createVideoTask } = await import('./video-generation');
+
+    await createVideoTask({
+      prompt: '生成默认规格品牌短片',
+      model: 'MiniMax-H3',
+    });
+
+    expect(createdTasks[0]).toMatchObject({
+      type: TaskType.VIDEO,
+      params: {
+        model: 'MiniMax-H3',
+        size: '768P',
+        duration: 5,
+      },
+    });
+  });
+
   it('keeps taskbar follow control metadata on video queue tasks', async () => {
     const { createVideoTask } = await import('./video-generation');
 

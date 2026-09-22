@@ -19,13 +19,17 @@ import {
 } from './utils';
 import { providerTransport } from '../provider-routing/provider-transport';
 import {
+  appendVideoOutputParams,
   downloadVideoContentToLocalUrl,
   extractInlineVideoUrl,
-  resolveVideoPollPath,
+  isMiniMaxH3Model,
+  normalizeMiniMaxH3VideoResponse,
+  resolveVideoPollPathForModel,
   resolveVideoSubmission,
   shouldDownloadVideoContent,
 } from '../video-binding-utils';
 import { prepareVideoReferenceImageBlob } from '../video-reference-image-utils';
+import { prepareMiniMaxH3Submission } from '../minimax-h3-video-workflow';
 
 const DURATION_IN_MODEL_PREFIX = 'sora-2-';
 const PROVIDER_ERROR_PREVIEW_LIMIT = 1000;
@@ -190,7 +194,7 @@ export async function submitVideoGeneration(
     config.binding,
     params.params as Record<string, string> | undefined
   );
-  const submitPath = config.binding?.submitPath || '/v1/videos';
+  const isMiniMaxH3 = isMiniMaxH3Model(model);
 
   // 构建 FormData
   const formData = new FormData();
@@ -201,12 +205,14 @@ export async function submitVideoGeneration(
     formData.append(submission.durationField, String(submission.duration));
   }
 
-  if (params.size) {
-    formData.append('size', params.size);
-  }
+  appendVideoOutputParams(formData, model, params.size, params.params);
 
   // 处理参考图片（体积控制在 1MB 内，与图片生成一致）
-  if (params.referenceImages && params.referenceImages.length > 0) {
+  if (
+    !isMiniMaxH3 &&
+    params.referenceImages &&
+    params.referenceImages.length > 0
+  ) {
     for (let i = 0; i < params.referenceImages.length; i++) {
       const refImage = params.referenceImages[i];
       try {
@@ -224,11 +230,36 @@ export async function submitVideoGeneration(
     }
   }
 
+  const miniMaxSubmission = isMiniMaxH3
+    ? await prepareMiniMaxH3Submission(
+        {
+          prompt: params.prompt,
+          duration: submission.duration,
+          size: params.size,
+          ratio: params.params?.ratio,
+          referenceImages: params.referenceImages,
+          params: params.params,
+        },
+        {
+          provider: providerContext,
+          fetcher: fetchFn,
+          signal,
+        }
+      )
+    : null;
+  const submitPath =
+    miniMaxSubmission?.path || config.binding?.submitPath || '/v1/videos';
+
   const response = await providerTransport.send(providerContext, {
     path: submitPath,
-    baseUrlStrategy: config.binding?.baseUrlStrategy,
+    baseUrlStrategy: isMiniMaxH3
+      ? 'trim-v1'
+      : config.binding?.baseUrlStrategy,
     method: 'POST',
-    body: formData,
+    headers: isMiniMaxH3 ? { 'Content-Type': 'application/json' } : undefined,
+    body: isMiniMaxH3
+      ? JSON.stringify(miniMaxSubmission!.body)
+      : formData,
     signal,
     fetcher: fetchFn,
   });
@@ -238,7 +269,8 @@ export async function submitVideoGeneration(
     throw buildVideoSubmissionHttpError(response.status, errorText);
   }
 
-  const data = await response.json();
+  const rawData = await response.json();
+  const data = isMiniMaxH3 ? normalizeMiniMaxH3VideoResponse(rawData) : rawData;
 
   if (data.status === 'failed') {
     throw new VideoGenerationFailedError(
@@ -269,10 +301,16 @@ export async function queryVideoStatus(
   const fetchFn = config.fetchImpl || fetch;
   const baseUrl = normalizeApiBase(config.baseUrl);
   const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
+  const isMiniMaxH3 = isMiniMaxH3Model(config.defaultModel);
 
   const response = await providerTransport.send(providerContext, {
-    path: resolveVideoPollPath(videoId, config.binding, config.params),
-    baseUrlStrategy: config.binding?.baseUrlStrategy,
+    path: resolveVideoPollPathForModel(
+      videoId,
+      config.defaultModel,
+      config.binding,
+      config.params
+    ),
+    baseUrlStrategy: isMiniMaxH3 ? 'trim-v1' : config.binding?.baseUrlStrategy,
     method: 'GET',
     signal,
     fetcher: fetchFn,
@@ -282,7 +320,10 @@ export async function queryVideoStatus(
     throw new Error(`Video status query failed: ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  return isMiniMaxH3
+    ? (normalizeMiniMaxH3VideoResponse(data, videoId) as VideoStatusResponse)
+    : data;
 }
 
 /**
@@ -302,6 +343,7 @@ export async function pollVideoUntilComplete(
   const fetchFn = config.fetchImpl || fetch;
   const baseUrl = normalizeApiBase(config.baseUrl);
   const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
+  const isMiniMaxH3 = isMiniMaxH3Model(config.defaultModel);
 
   let attempts = 0;
   let consecutiveErrors = 0;
@@ -314,8 +356,15 @@ export async function pollVideoUntilComplete(
 
     try {
       const response = await providerTransport.send(providerContext, {
-        path: resolveVideoPollPath(videoId, config.binding, config.params),
-        baseUrlStrategy: config.binding?.baseUrlStrategy,
+        path: resolveVideoPollPathForModel(
+          videoId,
+          config.defaultModel,
+          config.binding,
+          config.params
+        ),
+        baseUrlStrategy: isMiniMaxH3
+          ? 'trim-v1'
+          : config.binding?.baseUrlStrategy,
         signal,
         fetcher: fetchFn,
       });
@@ -346,7 +395,13 @@ export async function pollVideoUntilComplete(
       // 请求成功，重置连续错误计数
       consecutiveErrors = 0;
 
-      const data: VideoStatusResponse = await response.json();
+      const rawData = await response.json();
+      const data: VideoStatusResponse = isMiniMaxH3
+        ? (normalizeMiniMaxH3VideoResponse(
+            rawData,
+            videoId
+          ) as VideoStatusResponse)
+        : rawData;
       const status =
         data.status?.toLowerCase() as VideoStatusResponse['status'];
 
@@ -425,7 +480,15 @@ export async function generateVideo(
   onRemoteId?.(remoteId);
 
   // 轮询等待完成
-  const result = await pollVideoUntilComplete(remoteId, config, options);
+  const result = await pollVideoUntilComplete(
+    remoteId,
+    {
+      ...config,
+      defaultModel: params.model || config.defaultModel,
+      params: { ...config.params, ...params.params },
+    },
+    options
+  );
   const videoUrl =
     extractInlineVideoUrl(result as Record<string, any>) ||
     (shouldDownloadVideoContent(

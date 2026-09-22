@@ -716,7 +716,11 @@ describe('runtime-model-discovery', () => {
         throw new TypeError('Failed to fetch');
       }
 
-      if (url === 'https://api.tu-zi.com/v1/models') {
+      if (
+        url === 'https://api.tu-zi.com/v1/models' ||
+        url ===
+          'http://localhost:3000/__opentu_tuzi_session__/v1/models'
+      ) {
         return {
           ok: true,
           text: async () =>
@@ -727,6 +731,17 @@ describe('runtime-model-discovery', () => {
                   owned_by: 'openai',
                   category: '生图',
                 },
+                ...[
+                  'gpt-image-2.5-1k',
+                  'gpt-image-2.5',
+                  'gpt-image-2.5-vip',
+                  'gpt-image-2.5-sunburst',
+                  'gpt-image-2.5-flare',
+                ].map((id) => ({
+                  id,
+                  owned_by: 'openai',
+                  category: '文本',
+                })),
               ],
             }),
         };
@@ -792,6 +807,77 @@ describe('runtime-model-discovery', () => {
       id: 'gpt-image-2',
       type: 'image',
     });
+    for (const modelId of [
+      'gpt-image-2.5-1k',
+      'gpt-image-2.5',
+      'gpt-image-2.5-vip',
+      'gpt-image-2.5-sunburst',
+      'gpt-image-2.5-flare',
+    ]) {
+      expect(models.find((model) => model.id === modelId)).toMatchObject({
+        type: 'image',
+      });
+    }
+  });
+
+  it('浏览器请求 Tuzi 模型列表时走同源代理以保留鉴权错误响应', async () => {
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'http://127.0.0.1:7200',
+        href: 'http://127.0.0.1:7200/',
+      },
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        'http://127.0.0.1:7200/__opentu_tuzi_session__/v1/models'
+      );
+      return {
+        ok: false,
+        status: 401,
+        text: async () =>
+          JSON.stringify({
+            error: { message: '无效的令牌' },
+          }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
+
+    await expect(
+      runtimeModelDiscovery.discover(
+        'provider-tuzi',
+        'https://api.tu-zi.com/v1',
+        'invalid-key'
+      )
+    ).rejects.toThrow('无效的令牌');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('不会把 OpenAI 自有 omni 模型误归类为 Gemini', async () => {
@@ -857,6 +943,67 @@ describe('runtime-model-discovery', () => {
       id: 'omni-moderation-latest',
       vendor: 'GPT',
     });
+  });
+
+  it('外部取消模型发现时保留 AbortError', async () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        requestSignal = init?.signal || undefined;
+        return new Promise((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('aborted');
+              error.name = 'AbortError';
+              reject(error);
+            },
+            { once: true }
+          );
+        });
+      })
+    );
+    vi.doMock('../settings-manager', () => ({
+      LEGACY_DEFAULT_PROVIDER_PROFILE_ID: 'legacy-default',
+      providerCatalogsSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+        update: async () => {},
+      },
+      providerProfilesSettings: {
+        get: () => [],
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      invocationPresetsSettings: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      settingsManager: {
+        getSetting: () => ({}),
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    }));
+
+    const { runtimeModelDiscovery } = await import(
+      '../runtime-model-discovery'
+    );
+    const controller = new AbortController();
+    const discovery = runtimeModelDiscovery.discover(
+      'provider-abort',
+      'https://api.example.com/v1',
+      'test-key',
+      [],
+      controller.signal
+    );
+
+    controller.abort();
+
+    await expect(discovery).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it('优先按接口 category 分类模型', async () => {

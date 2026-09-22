@@ -73,13 +73,82 @@ describe('tuzi GPT image adapter', () => {
       model: 'gpt-image-2',
       prompt: 'Draw a clean product photo',
       size: '3840x2160',
+      resolution: '4k',
       image: ['data:image/png;base64,abc123'],
       quality: 'high',
       n: 2,
     });
   });
 
-  it('treats legacy 1K/2K/4K quality values as resolution compatibility hints', () => {
+  it.each(['gpt-image-2.5', 'gpt-image-2.5-vip'])(
+    'builds %s requests with extended resolution and quality',
+    (modelId) => {
+      expect(
+        buildTuziGPTImageRequestBody({
+          model: modelId,
+          prompt: 'Draw a clean product photo',
+          size: '16x9',
+          params: { resolution: '4k', quality: 'max' },
+        })
+      ).toEqual({
+        model: modelId,
+        prompt: 'Draw a clean product photo',
+        size: '3840x2160',
+        resolution: '4k',
+        quality: 'max',
+      });
+    }
+  );
+
+  it('forces gpt-image-2.5-1k requests to the 1K matrix', () => {
+    expect(
+      buildTuziGPTImageRequestBody({
+        model: 'gpt-image-2.5-1k',
+        prompt: 'Draw a clean product photo',
+        size: '21x9',
+        params: { resolution: '4k', quality: 'max' },
+      })
+    ).toEqual({
+      model: 'gpt-image-2.5-1k',
+      prompt: 'Draw a clean product photo',
+      size: '1568x672',
+      resolution: '1k',
+      quality: 'max',
+    });
+  });
+
+  it.each(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])(
+    'builds %s requests with extended resolution and quality',
+    (modelId) => {
+      expect(
+        buildTuziGPTImageRequestBody({
+          model: modelId,
+          prompt: 'Draw a clean product photo',
+          size: '16x9',
+          params: { resolution: '4k', quality: 'max' },
+        })
+      ).toEqual({
+        model: modelId,
+        prompt: 'Draw a clean product photo',
+        size: '3840x2160',
+        resolution: '4k',
+        quality: 'max',
+      });
+    }
+  );
+
+  it('does not send Sunburst and Flare quality values to older GPT Image models', () => {
+    expect(
+      buildTuziGPTImageRequestBody({
+        model: 'gpt-image-2',
+        prompt: 'Draw a clean product photo',
+        size: '1x1',
+        params: { quality: 'max' },
+      })
+    ).not.toHaveProperty('quality');
+  });
+
+  it('does not treat quality as a resolution compatibility hint', () => {
     expect(
       buildTuziGPTImageRequestBody({
         model: 'gpt-image-2',
@@ -92,7 +161,23 @@ describe('tuzi GPT image adapter', () => {
     ).toEqual({
       model: 'gpt-image-2',
       prompt: 'Draw a clean product photo',
-      size: '2368x1776',
+      size: '1184x880',
+    });
+  });
+
+  it('keeps auto size and independently sends the selected resolution', () => {
+    expect(
+      buildTuziGPTImageRequestBody({
+        model: 'gpt-image-2',
+        prompt: 'Draw a clean product photo',
+        size: 'auto',
+        params: { resolution: '4k' },
+      })
+    ).toEqual({
+      model: 'gpt-image-2',
+      prompt: 'Draw a clean product photo',
+      size: 'auto',
+      resolution: '4k',
     });
   });
 
@@ -161,12 +246,20 @@ describe('tuzi GPT image adapter', () => {
 
   it('uses the provider binding model id instead of a stale image2 task alias', async () => {
     const controller = new AbortController();
-    mocks.sendAdapterRequest.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: [{ url: 'https://example.com/tuzi.png' }],
-      }),
-    });
+    mocks.sendAdapterRequest.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              url: 'https://example.com/tuzi.png',
+              width: 1024,
+              height: 1024,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
 
     await tuziGPTImageAdapter.generateImage(
       {
@@ -223,7 +316,13 @@ describe('tuzi GPT image adapter', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            data: [{ url: 'https://example.com/tuzi.png' }],
+            data: [
+              {
+                url: 'https://example.com/tuzi.png',
+                width: 1024,
+                height: 1024,
+              },
+            ],
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         )
@@ -319,6 +418,7 @@ describe('tuzi GPT image adapter', () => {
       model: 'gpt-image-2',
       prompt: 'Edit this image',
       size: '2736x1536',
+      resolution: '2k',
       image: ['data:image/png;base64,source'],
       response_format: 'b64_json',
       quality: 'medium',

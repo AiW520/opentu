@@ -23,6 +23,21 @@ export {
 const FIXED_SORA_DURATION_MODEL_PATTERN = /^sora-2-(\d+)s$/i;
 const DEFAULT_VIDEO_POLL_PATH = '/videos/{taskId}';
 const DEFAULT_VIDEO_DOWNLOAD_PATH = '/videos/{taskId}/content';
+export const MINIMAX_H3_VIDEO_SUBMIT_PATH = '/v2/video_generation';
+export const MINIMAX_H3_V1_VIDEO_SUBMIT_PATH = '/v1/videos';
+const MINIMAX_H3_VIDEO_POLL_PATH = '/v2/query/video_generation/{taskId}';
+export const MINIMAX_H3_V1_VIDEO_POLL_PATH = '/v1/videos/{taskId}';
+export const MINIMAX_H3_API_VERSION_PARAM_ID = 'api_version';
+const MINIMAX_H3_RESOLUTIONS = new Set(['768P', '2K']);
+const MINIMAX_H3_RATIOS = new Set([
+  '21:9',
+  '16:9',
+  '4:3',
+  '1:1',
+  '3:4',
+  '9:16',
+  'adaptive',
+]);
 const SORA_API_ALLOWED_DURATIONS = ['4', '8', '12'] as const;
 const SORA_MODE_VALUES = new Set(['api', 'web']);
 const KLING_ACTION_VALUES = new Set(['text2video', 'image2video']);
@@ -267,6 +282,151 @@ export interface ResolvedVideoSubmission {
   duration?: string;
   durationField: string;
   bindingMetadata: ProviderVideoBindingMetadata | null;
+}
+
+export function isMiniMaxH3Model(modelId?: string | null): boolean {
+  return modelId?.trim().toLowerCase() === 'minimax-h3';
+}
+
+export type MiniMaxH3ApiVersion = 'v1' | 'v2';
+
+export function resolveMiniMaxH3ApiVersion(
+  params?: Record<string, unknown> | null
+): MiniMaxH3ApiVersion {
+  return String(params?.[MINIMAX_H3_API_VERSION_PARAM_ID] || '')
+    .trim()
+    .toLowerCase() === 'v2'
+    ? 'v2'
+    : 'v1';
+}
+
+export function resolveMiniMaxH3VideoSubmitPath(
+  _params?: Record<string, unknown> | null
+): string {
+  return MINIMAX_H3_VIDEO_SUBMIT_PATH;
+}
+
+export function buildMiniMaxH3VideoRequest(params: {
+  prompt: string;
+  duration?: string | number | null;
+  size?: string | null;
+  ratio?: unknown;
+  referenceImages?: string[];
+}): Record<string, unknown> {
+  const parsedDuration = Number(params.duration);
+  const duration =
+    Number.isInteger(parsedDuration) &&
+    parsedDuration >= 4 &&
+    parsedDuration <= 15
+      ? parsedDuration
+      : 5;
+  const requestedResolution = String(params.size || '')
+    .trim()
+    .toUpperCase();
+  const resolution = MINIMAX_H3_RESOLUTIONS.has(requestedResolution)
+    ? requestedResolution
+    : '768P';
+  const requestedRatio = String(params.ratio || '').trim();
+  const referenceImage = (params.referenceImages || [])
+    .map((url) => url?.trim())
+    .find(Boolean);
+  const hasReferenceImages = Boolean(referenceImage);
+  const ratio =
+    MINIMAX_H3_RATIOS.has(requestedRatio) &&
+    (requestedRatio !== 'adaptive' || hasReferenceImages)
+      ? requestedRatio
+      : '16:9';
+  const content: Array<Record<string, unknown>> = [
+    { type: 'text', text: params.prompt },
+  ];
+
+  if (referenceImage) {
+    content.push({
+      type: 'image_url',
+      role: 'first_frame',
+      image_url: { url: referenceImage },
+    });
+  }
+
+  return {
+    model: 'MiniMax-H3',
+    content,
+    duration,
+    resolution,
+    ratio,
+  };
+}
+
+export function normalizeMiniMaxH3VideoResponse(
+  payload: Record<string, any>,
+  fallbackId?: string
+): Record<string, any> {
+  const task =
+    payload?.task && typeof payload.task === 'object' ? payload.task : payload;
+  const rawStatus = String(
+    task?.status || payload?.status || 'queued'
+  ).toLowerCase();
+  const status =
+    rawStatus === 'running'
+      ? 'in_progress'
+      : rawStatus === 'succeeded'
+      ? 'completed'
+      : rawStatus === 'cancelled' || rawStatus === 'canceled'
+      ? 'failed'
+      : rawStatus;
+  const id = payload?.task_id || task?.id || fallbackId;
+  const videoUrl = task?.content?.url || task?.video_url || task?.url;
+  const duration = task?.duration;
+  const businessCode = payload?.base_resp?.status_code;
+  const businessMessage = String(
+    payload?.base_resp?.status_msg || payload?.message || ''
+  ).trim();
+
+  // Tuzi may return provider/business errors in a successful HTTP response.
+  // Convert them to a terminal failure so the shared poller cannot spin on a
+  // response without a task status.
+  if (businessCode !== undefined && String(businessCode) !== '0') {
+    return {
+      ...task,
+      id,
+      model: task?.model || 'MiniMax-H3',
+      status: 'failed',
+      error: {
+        code: String(businessCode),
+        message: businessMessage || `MiniMax-H3 请求失败（${businessCode}）`,
+      },
+    };
+  }
+
+  return {
+    ...task,
+    id,
+    model: task?.model || 'MiniMax-H3',
+    status,
+    ...(videoUrl ? { url: videoUrl, video_url: videoUrl } : {}),
+    ...(duration !== undefined ? { seconds: String(duration) } : {}),
+  };
+}
+
+export function appendVideoOutputParams(
+  formData: FormData,
+  model: string,
+  size?: string,
+  params?: Record<string, unknown>
+): void {
+  const isMiniMaxH3 = isMiniMaxH3Model(model);
+
+  if (size) {
+    const normalizedSize = isMiniMaxH3 ? size.trim().toUpperCase() : size;
+    formData.append(isMiniMaxH3 ? 'resolution' : 'size', normalizedSize);
+  }
+
+  if (isMiniMaxH3) {
+    const ratio = params?.ratio;
+    if (ratio !== undefined && ratio !== null && String(ratio).trim()) {
+      formData.append('ratio', String(ratio).trim());
+    }
+  }
 }
 
 export function getResolvedVideoBindingMetadata(
@@ -522,6 +682,18 @@ export function resolveVideoPollPath(
 ): string {
   const template = binding?.pollPathTemplate || DEFAULT_VIDEO_POLL_PATH;
   return resolveTemplatePath(template, videoId, params);
+}
+
+export function resolveVideoPollPathForModel(
+  videoId: string,
+  modelId?: string | null,
+  binding?: ProviderModelBinding | null,
+  params?: Record<string, unknown> | null
+): string {
+  if (isMiniMaxH3Model(modelId)) {
+    return resolveTemplatePath(MINIMAX_H3_VIDEO_POLL_PATH, videoId);
+  }
+  return resolveVideoPollPath(videoId, binding, params);
 }
 
 export function shouldDownloadVideoContent(

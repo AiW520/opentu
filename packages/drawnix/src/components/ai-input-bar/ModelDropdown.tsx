@@ -14,7 +14,9 @@ import React, {
   useRef,
   useEffect,
   useMemo,
+  useSyncExternalStore,
 } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { copyToClipboard } from '../../utils/runtime-helpers';
 import { createPortal } from 'react-dom';
 import {
@@ -22,6 +24,7 @@ import {
   ChevronDown,
   Copy,
   ExternalLink,
+  Loader2,
   Plus,
   Search,
   X,
@@ -32,6 +35,7 @@ import {
   ModelVendor,
   getModelConfig,
   type ModelConfig,
+  type ModelType,
 } from '../../constants/model-config';
 import { VendorTabPanel, type VendorTab } from '../shared/VendorTabPanel';
 import { ATTACHED_ELEMENT_CLASS_NAME } from '@plait/core';
@@ -69,21 +73,52 @@ import {
 } from '../../utils/settings-manager';
 import { runtimeModelDiscovery } from '../../utils/runtime-model-discovery';
 import { queueProviderSettingsNavigation } from '../settings-dialog/provider-settings-navigation';
+import { isTuziEmbeddedMode } from '../../services/tuzi-embedded-config';
+import {
+  requestTuziParentContext,
+  TUZI_BRIDGE_EVENT,
+} from '../../services/tuzi-postmessage-bridge';
+import { getTuziSystemUserId } from '../../services/tuzi-token-auth';
+import { saveTuziActiveProviderGroup } from '../../services/tuzi-provider-selection';
 
 const lazyProviderModelLoads = new Map<string, Promise<void>>();
+const subscribeToModelDiscovery = (listener: () => void) =>
+  runtimeModelDiscovery.subscribe(listener);
+const getModelDiscoveryRevision = () => runtimeModelDiscovery.getRevision();
 
-function ensureProviderModels(profile?: ProviderProfile | null): void {
-  if (
-    !profile?.id.startsWith('tuzi-managed-') ||
-    !profile.apiKey.trim() ||
-    !profile.baseUrl.trim()
-  ) {
-    return;
+function canLoadProviderModels(
+  profile?: ProviderProfile | null
+): profile is ProviderProfile {
+  return Boolean(
+    profile &&
+      profile.enabled !== false &&
+      profile.capabilities?.supportsModelsEndpoint !== false &&
+      String(profile.apiKey || '').trim() &&
+      String(profile.baseUrl || '').trim()
+  );
+}
+
+function ensureProviderModels(
+  profile?: ProviderProfile | null
+): Promise<void> | null {
+  if (!profile || !canLoadProviderModels(profile)) {
+    return null;
   }
 
   const state = runtimeModelDiscovery.getState(profile.id);
-  if (state.discoveredModels.length > 0 || state.status === 'loading') return;
-  if (lazyProviderModelLoads.has(profile.id)) return;
+  if (state.discoveredModels.length > 0) {
+    return null;
+  }
+  if (state.status === 'loading') {
+    const inFlightLoad =
+      lazyProviderModelLoads.get(profile.id) ||
+      runtimeModelDiscovery.getInFlightDiscovery(profile.id);
+    if (inFlightLoad) {
+      return inFlightLoad.then(() => undefined);
+    }
+  }
+  const existingLoad = lazyProviderModelLoads.get(profile.id);
+  if (existingLoad) return existingLoad;
 
   const load = runtimeModelDiscovery
     .discover(profile.id, profile.baseUrl, profile.apiKey)
@@ -94,12 +129,17 @@ function ensureProviderModels(profile?: ProviderProfile | null): void {
       );
     })
     .catch((error) => {
+      const message =
+        error instanceof Error ? error.message : '模型列表获取失败';
+      runtimeModelDiscovery.setError(profile.id, message);
       console.warn('[ModelDropdown] Failed to load provider models:', error);
+      throw error;
     })
     .finally(() => {
       lazyProviderModelLoads.delete(profile.id);
     });
   lazyProviderModelLoads.set(profile.id, load);
+  return load;
 }
 
 function normalizeSearchText(value?: string | null): string {
@@ -201,6 +241,7 @@ export interface ModelDropdownProps {
   language?: 'zh' | 'en';
   /** 模型列表（可选，默认为图片模型） */
   models?: ModelConfig[];
+  modelType?: ModelType;
   /** 下拉菜单弹出方向（可选，默认自动判断） */
   placement?: DropdownPlacement;
   /** 自定义标题（可选，仅用于 minimal 变体） */
@@ -239,6 +280,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   onSelectModel,
   language = 'zh',
   models = IMAGE_MODELS,
+  modelType,
   placement = 'auto',
   header,
   disabled = false,
@@ -254,6 +296,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   strictModelList = false,
 }) => {
   const { setAppState } = useDrawnix();
+  useSyncExternalStore(subscribeToModelDiscovery, getModelDiscoveryRevision);
   const { value: isOpen, setValue: setIsOpen } = useControllableState({
     controlledValue: controlledIsOpen,
     defaultValue: false,
@@ -264,6 +307,11 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
   const [activeVendor, setActiveVendor] = useState<string | null>(null);
+  const [loadingProviderId, setLoadingProviderId] = useState<string | null>(
+    null
+  );
+  const [tuziMode, setTuziMode] = useState(() => isTuziEmbeddedMode());
+  const loadingRequestRef = useRef(0);
   const {
     contextMenu,
     open: openContextMenuAt,
@@ -275,12 +323,77 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const providerProfiles = useProviderProfiles();
   const effectiveProviderProfiles =
     providerProfilesOverride || providerProfiles;
+
+  useEffect(() => {
+    let active = true;
+    const syncTuziMode = (event: Event) => {
+      const mode = (event as CustomEvent<{ mode?: string }>).detail?.mode;
+      setTuziMode(
+        mode === 'tuzi'
+          ? true
+          : mode === 'standalone'
+          ? false
+          : isTuziEmbeddedMode()
+      );
+    };
+    window.addEventListener(TUZI_BRIDGE_EVENT, syncTuziMode);
+    if (window.parent !== window) {
+      void requestTuziParentContext().then((nextContext) => {
+        if (active) setTuziMode(Boolean(nextContext));
+      });
+    }
+    return () => {
+      active = false;
+      window.removeEventListener(TUZI_BRIDGE_EVENT, syncTuziMode);
+    };
+  }, []);
   const providerProfileMap = useMemo(
     () =>
       new Map(
         effectiveProviderProfiles.map((profile) => [profile.id, profile])
       ),
     [effectiveProviderProfiles]
+  );
+
+  const loadProviderModels = useCallback(
+    (profile?: ProviderProfile | null) => {
+      if (canLoadProviderModels(profile)) {
+        setLoadingProviderId(profile.id);
+      }
+      const load = ensureProviderModels(profile);
+      if (!load || !profile) {
+        if (canLoadProviderModels(profile)) {
+          setLoadingProviderId(null);
+        }
+        return load;
+      }
+
+      const requestId = loadingRequestRef.current + 1;
+      loadingRequestRef.current = requestId;
+      void load.then(
+        () => {
+          if (loadingRequestRef.current === requestId) {
+            setLoadingProviderId(null);
+          }
+        },
+        (error) => {
+          if (loadingRequestRef.current === requestId) {
+            setLoadingProviderId(null);
+          }
+          MessagePlugin.error({
+            content:
+              error instanceof Error
+                ? error.message
+                : language === 'zh'
+                ? '模型列表获取失败'
+                : 'Failed to load models',
+            duration: 5000,
+          });
+        }
+      );
+      return load;
+    },
+    [language]
   );
   const modelOrderMap = useMemo(
     () =>
@@ -342,38 +455,6 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     );
   }, [activeProvider, activeVendor]);
 
-  // 确保高亮项可见
-  useEffect(() => {
-    if (isOpen && listRef.current) {
-      const highlightedElement = listRef.current.querySelector(
-        `[data-model-index="${highlightedIndex}"]`
-      ) as HTMLElement | null;
-      if (highlightedElement) {
-        const listContainer = listRef.current;
-        const itemTop = highlightedElement.offsetTop;
-        const itemHeight = highlightedElement.offsetHeight;
-        const containerScrollTop = listContainer.scrollTop;
-        const containerHeight = listContainer.offsetHeight;
-        const containerPaddingTop = 4; // 与 SCSS 中的 padding 一致
-
-        if (highlightedIndex === 0) {
-          // 强制滚回到最顶部，处理 padding
-          listContainer.scrollTop = 0;
-        } else if (itemTop - containerPaddingTop < containerScrollTop) {
-          // 在上方不可见
-          listContainer.scrollTop = itemTop - containerPaddingTop;
-        } else if (
-          itemTop + itemHeight >
-          containerScrollTop + containerHeight
-        ) {
-          // 在下方不可见
-          listContainer.scrollTop =
-            itemTop + itemHeight - containerHeight + containerPaddingTop;
-        }
-      }
-    }
-  }, [highlightedIndex, isOpen]);
-
   // 获取当前模型配置
   const currentModel =
     models.find(
@@ -388,6 +469,67 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   // 使用 shortCode 或默认简写
   const shortCode = currentModel?.shortCode || 'img';
   const isSearching = Boolean(searchQuery.trim());
+  const effectiveModelType = modelType || currentModel?.type || models[0]?.type;
+  const typeLabel = effectiveModelType
+    ? {
+        image: language === 'zh' ? '图片' : 'image',
+        video: language === 'zh' ? '视频' : 'video',
+        audio: language === 'zh' ? '音频' : 'audio',
+        text: language === 'zh' ? '文本' : 'text',
+      }[effectiveModelType]
+    : '';
+  const activeDiscovery = activeProvider
+    ? runtimeModelDiscovery.getState(activeProvider.providerId)
+    : null;
+  const discoveredTypeModels =
+    activeDiscovery?.discoveredModels.filter(
+      (model) => !effectiveModelType || model.type === effectiveModelType
+    ) || [];
+  const isLoadingModels = Boolean(
+    activeProvider &&
+      (loadingProviderId === activeProvider.providerId ||
+        activeDiscovery?.status === 'loading')
+  );
+  const hasUnselectedModels =
+    !isSearching &&
+    !isLoadingModels &&
+    activeProvider?.totalCount === 0 &&
+    discoveredTypeModels.length > 0;
+  const emptyMessage = isSearching
+    ? language === 'zh'
+      ? '未找到匹配的模型'
+      : 'No matching models'
+    : isLoadingModels
+    ? language === 'zh'
+      ? '正在加载模型...'
+      : 'Loading models...'
+    : activeDiscovery?.status === 'error'
+    ? language === 'zh'
+      ? `模型获取失败：${activeDiscovery.error || '请稍后重试'}`
+      : `Failed to load models: ${activeDiscovery.error || 'Please try again'}`
+    : hasUnselectedModels
+    ? language === 'zh'
+      ? `已发现 ${discoveredTypeModels.length} 个${typeLabel}模型，尚未添加`
+      : `${discoveredTypeModels.length} ${typeLabel} models discovered, none added`
+    : activeProvider?.totalCount === 0 &&
+      activeDiscovery?.discoveredModels.length
+    ? language === 'zh'
+      ? `该供应商暂无可用的${typeLabel}模型`
+      : `No ${typeLabel} models available from this provider`
+    : emptyText ||
+      (language === 'zh'
+        ? `暂无可用的${typeLabel}模型`
+        : `No ${typeLabel} models available`);
+
+  const handleAddDiscoveredModels = () => {
+    if (!activeProvider || !activeDiscovery) return;
+    runtimeModelDiscovery.applySelection(activeProvider.providerId, [
+      ...new Set([
+        ...activeDiscovery.selectedModelIds,
+        ...discoveredTypeModels.map((model) => model.id),
+      ]),
+    ]);
+  };
 
   // 从 selectionKey 或 currentModel 推导当前选中模型所属的供应商 ID 和 vendor
   const selectedProviderHint = useMemo(() => {
@@ -444,6 +586,47 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     () => (isSearching ? filteredModelList : activeCategory?.models || []),
     [isSearching, filteredModelList, activeCategory]
   );
+  const shouldVirtualizeModels = displayedModels.length > 50;
+  const modelVirtualizer = useVirtualizer({
+    count: shouldVirtualizeModels ? displayedModels.length : 0,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 72,
+    overscan: 6,
+    getItemKey: (index) => getModelKey(displayedModels[index]),
+  });
+  const virtualItems = shouldVirtualizeModels
+    ? modelVirtualizer.getVirtualItems()
+    : [];
+
+  // 确保键盘高亮项可见；大列表由 virtualizer 负责定位未挂载的模型项。
+  useEffect(() => {
+    if (!isOpen || !listRef.current) return;
+    if (shouldVirtualizeModels) {
+      modelVirtualizer.scrollToIndex(highlightedIndex, { align: 'auto' });
+      return;
+    }
+
+    const highlightedElement = listRef.current.querySelector(
+      `[data-model-index="${highlightedIndex}"]`
+    ) as HTMLElement | null;
+    if (!highlightedElement) return;
+
+    const listContainer = listRef.current;
+    const itemTop = highlightedElement.offsetTop;
+    const itemHeight = highlightedElement.offsetHeight;
+    const containerScrollTop = listContainer.scrollTop;
+    const containerHeight = listContainer.offsetHeight;
+    const containerPaddingTop = 4;
+
+    if (highlightedIndex === 0) {
+      listContainer.scrollTop = 0;
+    } else if (itemTop - containerPaddingTop < containerScrollTop) {
+      listContainer.scrollTop = itemTop - containerPaddingTop;
+    } else if (itemTop + itemHeight > containerScrollTop + containerHeight) {
+      listContainer.scrollTop =
+        itemTop + itemHeight - containerHeight + containerPaddingTop;
+    }
+  }, [highlightedIndex, isOpen, modelVirtualizer, shouldVirtualizeModels]);
 
   // 供应商标签列表（第一列）
   const providerTabs = useMemo(
@@ -490,9 +673,9 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
       const group = providerGroups.find((g) => g.providerId === providerId);
       setActiveVendor(group?.vendorCategories[0]?.vendor ?? null);
       setHighlightedIndex(0);
-      ensureProviderModels(providerProfileMap.get(providerId));
+      loadProviderModels(providerProfileMap.get(providerId));
     },
-    [providerGroups, providerProfileMap]
+    [loadProviderModels, providerGroups, providerProfileMap]
   );
 
   // 切换厂商分类
@@ -510,14 +693,22 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     [openContextMenuAt]
   );
 
-  const handleOpenProviderSettings = useCallback(() => {
-    queueProviderSettingsNavigation({
-      action: 'select',
-      profileId: LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
-    });
+  const handleOpenProviderSettings = useCallback(async () => {
+    let openTuziGroups = tuziMode;
+    if (!openTuziGroups && window.parent !== window) {
+      openTuziGroups = Boolean(await requestTuziParentContext());
+    }
+    queueProviderSettingsNavigation(
+      openTuziGroups
+        ? { action: 'tuzi-groups' }
+        : {
+            action: 'select',
+            profileId: LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
+          }
+    );
     setIsOpen(false);
     setAppState((prev) => ({ ...prev, openSettings: true }));
-  }, [setAppState, setIsOpen]);
+  }, [setAppState, setIsOpen, tuziMode]);
 
   // 当过滤结果变化时，高亮选中模型或重置到第一项
   useEffect(() => {
@@ -599,8 +790,14 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
         if (selectedVendorHint) {
           setActiveVendor(selectedVendorHint);
         }
-        ensureProviderModels(providerProfileMap.get(selectedProviderHint));
-        ensureProviderModels(providerProfileMap.get(nextProviderId));
+        // 预取当前供应商，同时把实际展示的供应商绑定到 loading 覆盖层。
+        const prefetch = ensureProviderModels(
+          providerProfileMap.get(selectedProviderHint)
+        );
+        if (prefetch) {
+          void prefetch.catch(() => undefined);
+        }
+        loadProviderModels(providerProfileMap.get(nextProviderId));
       }
       if (next) {
         // 打开时清空搜索，默认展示当前供应商/分类
@@ -622,6 +819,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
       providerGroups,
       providerProfileMap,
       selectedVendorHint,
+      loadProviderModels,
     ]
   );
 
@@ -629,6 +827,15 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const handleSelect = useCallback(
     (model: ModelConfig) => {
       closeContextMenu();
+      const profile = model.sourceProfileId
+        ? providerProfileMap.get(model.sourceProfileId)
+        : null;
+      if (profile?.id.startsWith('tuzi-managed-') && profile.pricingGroup) {
+        saveTuziActiveProviderGroup(
+          getTuziSystemUserId(),
+          profile.pricingGroup
+        );
+      }
       onSelect(
         model.id,
         createModelRef(model.sourceProfileId || null, model.id)
@@ -641,7 +848,14 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
         setSearchQuery('');
       }
     },
-    [closeContextMenu, onSelect, onSelectModel, setIsOpen, variant]
+    [
+      closeContextMenu,
+      onSelect,
+      onSelectModel,
+      providerProfileMap,
+      setIsOpen,
+      variant,
+    ]
   );
 
   const handleCopyModelId = useCallback(
@@ -1071,12 +1285,25 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                     className="model-dropdown__provider-action"
                     onClick={handleOpenProviderSettings}
                     aria-label={
-                      language === 'zh'
+                      tuziMode
+                        ? language === 'zh'
+                          ? '添加分组'
+                          : 'Add group'
+                        : language === 'zh'
                         ? '新增供应商或打开供应商设置'
                         : 'Add provider or open provider settings'
                     }
                   >
                     <Plus size={16} />
+                    <span>
+                      {tuziMode
+                        ? language === 'zh'
+                          ? '添加分组'
+                          : 'Add group'
+                        : language === 'zh'
+                        ? '新增供应商'
+                        : 'Add provider'}
+                    </span>
                   </button>
                 ) : null
               }
@@ -1088,7 +1315,17 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                   onScroll={closeContextMenu}
                 >
                   {displayedModels.length > 0 ? (
-                    displayedModels.map((model, index) => {
+                    (shouldVirtualizeModels
+                      ? virtualItems
+                      : displayedModels
+                    ).map((entry, virtualIndex) => {
+                      const index = shouldVirtualizeModels
+                        ? (entry as (typeof virtualItems)[number]).index
+                        : virtualIndex;
+                      const model = displayedModels[index];
+                      const virtualItem = shouldVirtualizeModels
+                        ? (entry as (typeof virtualItems)[number])
+                        : null;
                       const modelKey = getModelKey(model);
                       const isSelected =
                         modelKey === (selectedSelectionKey || selectedModel);
@@ -1097,6 +1334,22 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                         <div
                           key={modelKey}
                           data-model-index={index}
+                          ref={
+                            virtualItem
+                              ? (node) => modelVirtualizer.measureElement(node)
+                              : undefined
+                          }
+                          style={
+                            virtualItem
+                              ? {
+                                  position: 'absolute',
+                                  top: 0,
+                                  left: 0,
+                                  width: '100%',
+                                  transform: `translateY(${virtualItem.start}px)`,
+                                }
+                              : undefined
+                          }
                           className={`model-dropdown__item ${
                             isSelected ? 'model-dropdown__item--selected' : ''
                           } ${
@@ -1164,12 +1417,52 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                     })
                   ) : (
                     <div className="model-dropdown__empty">
-                      {language === 'zh'
-                        ? emptyText || '未找到匹配的模型'
-                        : emptyText || 'No matching models'}
+                      <div role="status">{emptyMessage}</div>
+                      {hasUnselectedModels && (
+                        <button
+                          type="button"
+                          className="model-dropdown__empty-action"
+                          onClick={handleAddDiscoveredModels}
+                        >
+                          <Plus size={14} aria-hidden="true" />
+                          {language === 'zh'
+                            ? `添加${typeLabel}模型`
+                            : `Add ${typeLabel} models`}
+                        </button>
+                      )}
                     </div>
                   )}
+                  {shouldVirtualizeModels && displayedModels.length > 0 ? (
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        height: modelVirtualizer.getTotalSize(),
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  ) : null}
                 </div>
+                {loadingProviderId !== null ? (
+                  <div
+                    className="model-dropdown__loading-overlay"
+                    role="status"
+                    aria-live="polite"
+                    aria-label={
+                      language === 'zh' ? '正在加载模型' : 'Loading models'
+                    }
+                  >
+                    <Loader2
+                      className="model-dropdown__loading-icon"
+                      size={18}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {language === 'zh'
+                        ? '正在加载模型...'
+                        : 'Loading models...'}
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </VendorTabPanel>
           </div>

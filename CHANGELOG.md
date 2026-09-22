@@ -1,3 +1,88 @@
+## 1.1.13 (2026-09-20)
+
+### 🚀 Features
+
+- complete MiniMax-H3 V2 workflow ([63240233](https://github.com/ljquan/opentu/commit/63240233))
+
+### 🔧 Chores
+
+- 功能：补齐 GPT Image 2.5 尺寸与分辨率参数 ([84b5e01f](https://github.com/ljquan/opentu/commit/84b5e01f))
+
+### ❤️  Thank You
+
+- selwen-0102 <2548530499@qq.com>
+- Liang <13642533686@163.com>
+
+## 1.1.12 (2026-09-15)
+
+### 🚀 Features
+
+- 完善 Tuzi 账户工作区与日志图片预览 (#260) ([806216d9](https://github.com/ljquan/opentu/commit/806216d9))
+
+### 🔧 Chores
+
+- 功能：支持 MiniMax-H3 V1/V2 专用视频接口 (#262) ([b5d6b350](https://github.com/ljquan/opentu/commit/b5d6b350))
+- 功能：完善图片 Request ID 幂等恢复与安全切换 (#261) ([9c6eaa49](https://github.com/ljquan/opentu/commit/9c6eaa49))
+
+### ❤️  Thank You
+
+- Liang <13642533686@163.com>
+- selwen-0102 <2548530499@qq.com>
+
+## 1.1.11 (2026-09-14)
+
+### 🔧 Chores
+
+- 功能：接入 GPT Image 2.5 Sunburst 与 Flare (#259) ([d73224b3](https://github.com/ljquan/opentu/commit/d73224b3))
+- 修复：Tuzi 图片请求恢复直连上游 (#258) ([90c71157](https://github.com/ljquan/opentu/commit/90c71157))
+
+### ❤️  Thank You
+
+- selwen-0102 <2548530499@qq.com>
+
+## 1.1.10 (2026-09-11)
+
+### 🔧 Chores
+
+- 修复：提高生产图片同源代理请求体上限 (#257) ([9b015af4](https://github.com/ljquan/opentu/commit/9b015af4))
+
+### ❤️  Thank You
+
+- selwen-0102 <2548530499@qq.com>
+
+## 1.1.9 (2026-09-10)
+
+### 🔧 Chores
+
+- 修复：加固 Tuzi 同源代理与请求标识 (#256) ([b0d039b4](https://github.com/ljquan/opentu/commit/b0d039b4))
+
+### ❤️  Thank You
+
+- selwen-0102 <2548530499@qq.com>
+
+## 1.1.8 (2026-09-10)
+
+### 🔧 Chores
+
+- 接入 Tuzi GPT Image 2.5 图片模型 (#255) ([ce9ddf14](https://github.com/ljquan/opentu/commit/ce9ddf14))
+
+### ❤️  Thank You
+
+- selwen-0102 <2548530499@qq.com>
+
+## 1.1.7 (2026-09-09)
+
+### 🔧 Chores
+
+- 优化 Tuzi 账户同步与模型加载体验 (#254) ([bbb28924](https://github.com/ljquan/opentu/commit/bbb28924))
+- 修复生产环境图片请求恢复与轮询路由 (#253) ([9ad433b0](https://github.com/ljquan/opentu/commit/9ad433b0))
+- 修复 AI 生图、批量生图与视频结果无法渲染 (#252) ([c8fb074c](https://github.com/ljquan/opentu/commit/c8fb074c))
+
+### ❤️  Thank You
+
+- Liang <13642533686@163.com>
+- selwen-0102 <2548530499@qq.com>
+
 ## 1.1.6 (2026-09-07)
 
 ### 🚀 Features

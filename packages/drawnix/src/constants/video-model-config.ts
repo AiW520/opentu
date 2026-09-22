@@ -92,6 +92,19 @@ const HAPPYHORSE_DURATION_OPTIONS: DurationOption[] = [
   { label: '15秒', value: '15' },
 ];
 
+const MINIMAX_H3_DURATION_OPTIONS: DurationOption[] = Array.from(
+  { length: 12 },
+  (_, index) => {
+    const value = String(index + 4);
+    return { label: `${value}秒`, value };
+  }
+);
+
+const MINIMAX_H3_SIZE_OPTIONS: SizeOption[] = [
+  { label: '768P', value: '768P', aspectRatio: 'resolution' },
+  { label: '2K', value: '2K', aspectRatio: 'resolution' },
+];
+
 /**
  * Video model configurations
  * Each model has specific duration, size, and image upload options
@@ -691,6 +704,24 @@ function getConfigOrDefault(model?: string | null): VideoModelConfig {
     runtimeConfig?.videoDefaults?.aspectRatio || '16:9';
   const defaultDuration = runtimeConfig?.videoDefaults?.duration || '8';
   const lowerId = normalized.toLowerCase();
+
+  if (lowerId === 'minimax-h3') {
+    return {
+      id: normalized,
+      label: runtimeConfig?.shortLabel || runtimeConfig?.label || normalized,
+      provider: 'veo',
+      description: runtimeConfig?.description || 'MiniMax-H3 视频生成模型',
+      durationOptions: MINIMAX_H3_DURATION_OPTIONS,
+      defaultDuration: '5',
+      sizeOptions: MINIMAX_H3_SIZE_OPTIONS,
+      defaultSize: '768P',
+      imageUpload: {
+        maxCount: 1,
+        mode: 'reference',
+        labels: ['参考图'],
+      },
+    };
+  }
 
   const sizeOptions: SizeOption[] = [
     {

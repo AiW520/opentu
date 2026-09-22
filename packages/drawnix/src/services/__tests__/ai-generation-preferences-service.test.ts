@@ -117,6 +117,72 @@ describe('ai-generation-preferences-service', () => {
     });
   });
 
+  it.each([
+    ['auto', 'auto', 'auto'],
+    ['1:1', '1x1', '1:1'],
+    ['2:3', '2x3', '2:3'],
+    ['3:2', '3x2', '3:2'],
+    ['3:4', '3x4', '3:4'],
+    ['4:3', '4x3', '4:3'],
+    ['4:5', '4x5', '4:5'],
+    ['5:4', '5x4', '5:4'],
+    ['9:16', '9x16', '9:16'],
+    ['16:9', '16x9', '16:9'],
+    ['1:4', 'auto', 'auto'],
+    ['21:9', '21x9', '21:9'],
+  ])(
+    'GPT Image 2.5 保留图片工具比例 %s 为尺寸 %s',
+    async (aspectRatio, expectedSize, expectedAspectRatio) => {
+      const {
+        loadScopedAIImageToolPreferences,
+        loadScopedAIInputModelParams,
+        saveAIImageToolPreferences,
+      } = await import('../ai-generation-preferences-service');
+
+      saveAIImageToolPreferences({
+        currentModel: 'gpt-image-2.5',
+        currentSelectionKey: 'provider-a::gpt-image-2.5',
+        extraParams: {},
+        aspectRatio,
+      });
+
+      expect(
+        loadScopedAIImageToolPreferences(
+          'gpt-image-2.5',
+          'provider-a::gpt-image-2.5'
+        )
+      ).toMatchObject({
+        extraParams: {
+          size: expectedSize,
+          resolution: '1k',
+          quality: 'auto',
+        },
+        aspectRatio: expectedAspectRatio,
+      });
+      expect(
+        loadScopedAIInputModelParams(
+          'image',
+          'gpt-image-2.5',
+          'provider-a::gpt-image-2.5'
+        )
+      ).toMatchObject({ size: expectedSize });
+    }
+  );
+
+  it('切换到 gpt-image-2.5-1k 时将历史高分辨率回退为 1K', async () => {
+    const { sanitizeImageToolExtraParams } = await import(
+      '../ai-generation-preferences-service'
+    );
+
+    expect(
+      sanitizeImageToolExtraParams('gpt-image-2.5-1k', {
+        size: '21x9',
+        resolution: '4k',
+        quality: 'max',
+      })
+    ).toEqual({ size: '21x9', resolution: '1k', quality: 'max' });
+  });
+
   it('将 GPT Image 的旧 quality 档位偏好迁移到 resolution', async () => {
     localStorage.setItem(
       'aitu_ai_image_tool_preferences',

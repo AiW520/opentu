@@ -126,6 +126,7 @@ export function getExtensionFromUrl(url: string): string {
  */
 export function sizeToAspectRatio(size?: string): string | undefined {
   if (!size || !size.includes('x')) return undefined;
+  if (size.toLowerCase() === '21x9') return '21:9';
   const [wStr, hStr] = size.split('x');
   const w = Number(wStr);
   const h = Number(hStr);
@@ -404,12 +405,19 @@ export function normalizeToClosestVideoSize(
   const trimmed = size.trim();
   if (!trimmed) return defaultSize;
 
-  // 1. 精确匹配
-  if (validSizes.includes(trimmed)) return trimmed;
+  const findCanonicalSize = (candidate: string) =>
+    validSizes.find(
+      (validSize) => validSize.toLowerCase() === candidate.toLowerCase()
+    );
+
+  // 1. 精确匹配（忽略大小写，并返回模型配置中的规范值）
+  const exactMatch = findCanonicalSize(trimmed);
+  if (exactMatch) return exactMatch;
 
   // 2. ':' → 'x' 后精确匹配
   const colonToX = trimmed.replace(':', 'x');
-  if (validSizes.includes(colonToX)) return colonToX;
+  const normalizedMatch = findCanonicalSize(colonToX);
+  if (normalizedMatch) return normalizedMatch;
 
   // 3. 解析 size 的宽高比数值，在 validSizes 中找最接近的
   const targetRatio = parseAspectRatioValue(trimmed);

@@ -22,7 +22,6 @@ import {
   hasTuziSystemToken,
   isTuziEmbeddedMode,
   syncTuziSessionProvidersOnStartup,
-  wasTuziCredentialsProvidedByUrl,
 } from '@drawnix/drawnix/runtime';
 import type {
   PlaitBoard,
@@ -95,11 +94,7 @@ function updateBootStatus(options: { progress?: number; tip?: string }): void {
 let tuziStartupPromise: Promise<boolean> | null = null;
 
 function shouldWaitForTuziStartup(): boolean {
-  return (
-    wasTuziCredentialsProvidedByUrl() &&
-    isTuziEmbeddedMode() &&
-    hasTuziSystemToken()
-  );
+  return isTuziEmbeddedMode() && hasTuziSystemToken();
 }
 
 function getTuziStartupPromise(): Promise<boolean> | null {
@@ -340,10 +335,8 @@ export function App() {
         if (!tuziStartup) {
           setIsLoading(false);
         }
-        await Promise.all([
-          workspaceService.waitForInitialization(),
-          waitForTuziStartup(tuziStartup),
-        ]);
+        await workspaceService.waitForInitialization();
+        void waitForTuziStartup(tuziStartup);
         // 使用 switchBoard 确保加载完整数据
         const currentBoardId = workspaceService.getState().currentBoardId;
         // 验证画板是否存在，防止旧状态中的 currentBoardId 指向不存在的画板
@@ -572,7 +565,8 @@ export function App() {
             });
         }
 
-        await waitForTuziStartup(tuziStartup);
+        // Tuzi 供应商/模型同步在后台进行，不阻塞工作区首屏进入。
+        void waitForTuziStartup(tuziStartup);
       } catch (error) {
         console.error('[App] Initialization failed:', error);
         setInitError(error instanceof Error ? error : new Error(String(error)));
@@ -1026,9 +1020,9 @@ export function App() {
 
 const addDebugLog = async (board: PlaitBoard, value: string) => {
   const { PlaitBoard } = await import('@plait/core');
-  const container = PlaitBoard.getBoardContainer(board).closest('.drawnix') as
-    | HTMLElement
-    | null;
+  const container = PlaitBoard.getBoardContainer(board).closest(
+    '.drawnix'
+  ) as HTMLElement | null;
   if (!container) {
     return;
   }

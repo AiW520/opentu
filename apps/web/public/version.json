@@ -1,9 +1,9 @@
 {
-  "version": "1.1.6",
-  "buildTime": "2026-09-07T06:27:22.382Z",
+  "version": "1.1.13",
+  "buildTime": "2026-09-20T07:38:26.857Z",
   "gitCommit": "unknown",
   "changelog": [
-    "support dragging images into reference inputs (#251)",
-    "融合 AI 语义分层与图片生成增强 (#250)"
+    "完善 MiniMax-H3 V2 视频生成工作流",
+    "功能：补齐 GPT Image 2.5 尺寸与分辨率参数"
   ]
 }

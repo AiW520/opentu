@@ -19,7 +19,10 @@ import {
   type KnowledgeContextRef,
 } from '../../types/task.types';
 import type { VideoModel } from '../../types/video.types';
-import { VIDEO_MODEL_CONFIGS } from '../../constants/video-model-config';
+import {
+  VIDEO_MODEL_CONFIGS,
+  getVideoModelConfig,
+} from '../../constants/video-model-config';
 import { getDefaultVideoModel } from '../../constants/model-config';
 import { geminiSettings, type ModelRef } from '../../utils/settings-manager';
 import { normalizeToClosestVideoSize } from '../../services/media-api/utils';
@@ -49,7 +52,10 @@ export function getCurrentVideoModel(): string {
  */
 function getVideoDurationOptions(): string[] {
   const durations = new Set<string>();
-  Object.values(VIDEO_MODEL_CONFIGS).forEach((config) => {
+  [
+    ...Object.values(VIDEO_MODEL_CONFIGS),
+    getVideoModelConfig('MiniMax-H3'),
+  ].forEach((config) => {
     config.durationOptions.forEach((opt) => durations.add(opt.value));
   });
   return Array.from(durations).sort((a, b) => parseInt(a) - parseInt(b));
@@ -60,7 +66,10 @@ function getVideoDurationOptions(): string[] {
  */
 function getVideoSizeOptions(): string[] {
   const sizes = new Set<string>();
-  Object.values(VIDEO_MODEL_CONFIGS).forEach((config) => {
+  [
+    ...Object.values(VIDEO_MODEL_CONFIGS),
+    getVideoModelConfig('MiniMax-H3'),
+  ].forEach((config) => {
     config.sizeOptions.forEach((opt) => sizes.add(opt.value));
   });
   return Array.from(sizes);
@@ -185,7 +194,7 @@ async function executeAsync(params: VideoGenerationParams): Promise<MCPResult> {
 /** 视频任务队列配置 */
 function getVideoQueueConfig(params: VideoGenerationParams) {
   const model = (params.model || 'veo3') as VideoModel;
-  const modelConfig = VIDEO_MODEL_CONFIGS[model] || VIDEO_MODEL_CONFIGS['veo3'];
+  const modelConfig = getVideoModelConfig(model);
   const uploadedImages = toUploadedImages(params.referenceImages);
 
   return {
@@ -195,7 +204,7 @@ function getVideoQueueConfig(params: VideoGenerationParams) {
     logPrefix: 'VideoGenerationTool',
     buildTaskPayload: () => ({
       prompt: params.prompt,
-      size: params.size || '16x9',
+      size: params.size || modelConfig.defaultSize,
       duration: parseInt(params.seconds || modelConfig.defaultDuration, 10),
       model,
       modelRef: params.modelRef || null,
@@ -216,7 +225,7 @@ function getVideoQueueConfig(params: VideoGenerationParams) {
       boundTargetFollowControlled: params.boundTargetFollowControlled,
     }),
     buildResultData: () => ({
-      size: params.size || '16x9',
+      size: params.size || modelConfig.defaultSize,
       duration: parseInt(params.seconds || modelConfig.defaultDuration, 10),
     }),
   };
@@ -256,15 +265,13 @@ export const videoGenerationTool: MCPTool = {
       },
       seconds: {
         type: 'string',
-        description: '视频时长（秒），不同模型支持的时长不同',
+        description: '视频时长（秒），可选值和默认值按模型决定',
         enum: getVideoDurationOptions(),
-        default: '8',
       },
       size: {
         type: 'string',
-        description: '视频尺寸',
+        description: '视频尺寸，可选值和默认值按模型决定',
         enum: getVideoSizeOptions(),
-        default: '1280x720',
       },
       referenceImages: {
         type: 'array',
@@ -352,8 +359,8 @@ export const videoGenerationTool: MCPTool = {
         '将用户描述扩展为详细的英文视频提示词，包含：主体动作（walking, flying, spinning）、场景描述、镜头运动（camera pan, zoom in, tracking shot）、氛围（cinematic, dreamy）、时间节奏（slow motion, timelapse）。',
       model: '默认使用 veo3，支持高质量视频生成。可选其他模型如需特定效果。',
       seconds:
-        '根据内容复杂度选择：简单动作用 5-8 秒，复杂场景用 8-10 秒。默认 8 秒。',
-      size: '横屏视频用 1280x720 或 1920x1080，竖屏用 720x1280，正方形用 1024x1024。',
+        '根据内容复杂度和所选模型支持范围选择；未指定时使用该模型默认时长。',
+      size: '根据所选模型支持的尺寸选择；未指定时使用该模型默认尺寸。',
       referenceImages:
         '当用户提供图片并想让它"动起来"时使用，传入图片 URL 实现图生视频。',
       count: '用户明确要求批量生成时使用，如 "+3 生成视频" 则 count=3。',
@@ -423,22 +430,19 @@ export const videoGenerationTool: MCPTool = {
     const rawParams = params as unknown as VideoGenerationParams;
     const mode = options?.mode || 'async';
 
-    // 规范化 size：将不在可用范围内的 size 自动转换为最接近的可用值
-    let normalizedSize = rawParams.size;
-    if (rawParams.size) {
-      const model = (rawParams.model || 'veo3') as VideoModel;
-      const modelConfig =
-        VIDEO_MODEL_CONFIGS[model] || VIDEO_MODEL_CONFIGS['veo3'];
-      const validSizes = modelConfig.sizeOptions.map((opt) => opt.value);
-      normalizedSize = normalizeToClosestVideoSize(
-        rawParams.size,
-        validSizes,
-        modelConfig.defaultSize
-      );
-    }
+    // 按实际模型补齐默认值，并将 size 规范化为该模型支持的值
+    const model = (rawParams.model || 'veo3') as VideoModel;
+    const modelConfig = getVideoModelConfig(model);
+    const validSizes = modelConfig.sizeOptions.map((opt) => opt.value);
+    const normalizedSize = normalizeToClosestVideoSize(
+      rawParams.size || modelConfig.defaultSize,
+      validSizes,
+      modelConfig.defaultSize
+    );
     const typedParams: VideoGenerationParams = {
       ...rawParams,
       size: normalizedSize,
+      seconds: rawParams.seconds || modelConfig.defaultDuration,
     };
 
     if (mode === 'queue') {
