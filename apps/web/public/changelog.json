@@ -1,6 +1,217 @@
 {
   "versions": [
     {
+      "version": "1.1.20",
+      "date": "2026-09-30",
+      "changes": {
+        "features": [
+          "完善 Seedance 2.5 参数适配 (#285)"
+        ],
+        "fixes": [
+          "hide toolbar entry and keep direct route (#286)"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "完善 Seedance 2.5 参数适配 (#285)"
+    },
+    {
+      "version": "1.1.19",
+      "date": "2026-09-30",
+      "changes": {
+        "features": [],
+        "fixes": [
+          "preserve configured provider visibility (#284)"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "preserve configured provider visibility (#284)"
+    },
+    {
+      "version": "1.1.18",
+      "date": "2026-09-30",
+      "changes": {
+        "features": [
+          "integrate workflow runtime and harden generation recovery (#283)",
+          "persist linked provider groups across reloads (#281)"
+        ],
+        "fixes": [],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "integrate workflow runtime and harden generation recovery (#283)"
+    },
+    {
+      "version": "1.1.17",
+      "date": "2026-09-29",
+      "changes": {
+        "features": [
+          "优化画布交互并修复 Seedance 视频播放 (#278)",
+          "integrate workflow runtime and harden generation recovery",
+          "integrate embedded OpenTu workflow mode"
+        ],
+        "fixes": [
+          "clear failed generation cards (#280)"
+        ],
+        "improvements": [
+          "fix（music）：Suno 任务轮询时音频结果丢失 (#282)",
+          "Revert \"feat: integrate workflow runtime and harden generation recovery\""
+        ]
+      },
+      "type": "patch",
+      "highlights": "优化画布交互并修复 Seedance 视频播放 (#278)"
+    },
+    {
+      "version": "1.1.16",
+      "date": "2026-09-26",
+      "changes": {
+        "features": [
+          "add new Tuzi text models (#274)"
+        ],
+        "fixes": [
+          "修复下载完成后提示持续转圈 (#276)",
+          "align MiniMax reference image limits (#275)"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "add new Tuzi text models (#274)"
+    },
+    {
+      "version": "1.1.15",
+      "date": "2026-09-22",
+      "changes": {
+        "features": [
+          "支持 MiniMax-H3 视频输入 (#273)"
+        ],
+        "fixes": [
+          "修复等待执行循环 (#272)"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "支持 MiniMax-H3 视频输入 (#273)"
+    },
+    {
+      "version": "1.1.14",
+      "date": "2026-09-22",
+      "changes": {
+        "features": [
+          "add Tuzi postMessage onboarding"
+        ],
+        "fixes": [
+          "seedance2.0/2.5 的参数修复",
+          "为批量图片下载增加加载状态",
+          "correct Image 2 and 2.5 sizes"
+        ],
+        "improvements": [
+          "修复：模型列表及数量获取问题修复"
+        ]
+      },
+      "type": "patch",
+      "highlights": "add Tuzi postMessage onboarding"
+    },
+    {
+      "version": "1.1.13",
+      "date": "2026-09-20",
+      "changes": {
+        "features": [
+          "complete MiniMax-H3 V2 workflow"
+        ],
+        "fixes": [],
+        "improvements": [
+          "功能：补齐 GPT Image 2.5 尺寸与分辨率参数"
+        ]
+      },
+      "type": "patch",
+      "highlights": "complete MiniMax-H3 V2 workflow"
+    },
+    {
+      "version": "1.1.12",
+      "date": "2026-09-15",
+      "changes": {
+        "features": [
+          "完善 Tuzi 账户工作区与日志图片预览 (#260)"
+        ],
+        "fixes": [],
+        "improvements": [
+          "功能：支持 MiniMax-H3 V1/V2 专用视频接口 (#262)",
+          "功能：完善图片 Request ID 幂等恢复与安全切换 (#261)"
+        ]
+      },
+      "type": "patch",
+      "highlights": "完善 Tuzi 账户工作区与日志图片预览 (#260)"
+    },
+    {
+      "version": "1.1.11",
+      "date": "2026-09-14",
+      "changes": {
+        "features": [],
+        "fixes": [],
+        "improvements": [
+          "功能：接入 GPT Image 2.5 Sunburst 与 Flare (#259)",
+          "修复：Tuzi 图片请求恢复直连上游 (#258)"
+        ]
+      },
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
+      "version": "1.1.10",
+      "date": "2026-09-11",
+      "changes": {
+        "features": [],
+        "fixes": [],
+        "improvements": [
+          "修复：提高生产图片同源代理请求体上限 (#257)"
+        ]
+      },
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
+      "version": "1.1.9",
+      "date": "2026-09-10",
+      "changes": {
+        "features": [],
+        "fixes": [],
+        "improvements": [
+          "修复：加固 Tuzi 同源代理与请求标识 (#256)"
+        ]
+      },
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
+      "version": "1.1.8",
+      "date": "2026-09-10",
+      "changes": {
+        "features": [],
+        "fixes": [],
+        "improvements": [
+          "接入 Tuzi GPT Image 2.5 图片模型 (#255)"
+        ]
+      },
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
+      "version": "1.1.7",
+      "date": "2026-09-09",
+      "changes": {
+        "features": [],
+        "fixes": [],
+        "improvements": [
+          "优化 Tuzi 账户同步与模型加载体验 (#254)",
+          "修复生产环境图片请求恢复与轮询路由 (#253)",
+          "修复 AI 生图、批量生图与视频结果无法渲染 (#252)"
+        ]
+      },
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
       "version": "1.1.6",
       "date": "2026-09-07",
       "changes": {
@@ -778,225 +989,6 @@
       },
       "type": "minor",
       "highlights": "allow hand panning while drawing"
-    },
-    {
-      "version": "0.6.99",
-      "date": "2026-05-03",
-      "changes": {
-        "features": [
-          "为视频生成 prompt 添加参考图用途说明",
-          "支持异步图片生成和生成素材重置",
-          "添加目标总时长配置并优化UI与错误处理"
-        ],
-        "fixes": [
-          "移除生成视频时重复的提示词构建逻辑",
-          "强化爆款视频首尾帧角色一致性",
-          "绑定异步任务供应商路由"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "为视频生成 prompt 添加参考图用途说明"
-    },
-    {
-      "version": "0.6.98",
-      "date": "2026-05-02",
-      "type": "patch",
-      "highlights": "构建修复与稳定性改进"
-    },
-    {
-      "version": "0.6.97",
-      "date": "2026-05-02",
-      "changes": {
-        "features": [
-          "优化价格展示增加Bussiness"
-        ],
-        "fixes": [
-          "parallelize character reference generation"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "优化价格展示增加Bussiness"
-    },
-    {
-      "version": "0.6.96",
-      "date": "2026-05-01",
-      "changes": {
-        "features": [
-          "优化视频工作流批量生成",
-          "add image 3d transform panel"
-        ],
-        "fixes": [
-          "pass image transform context to AI"
-        ],
-        "improvements": [
-          "补充视频主体引用经验",
-          "更新应用版本号至0.6.95并刷新构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "优化视频工作流批量生成"
-    },
-    {
-      "version": "0.6.95",
-      "date": "2026-04-30",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "优化页面卡片布局并修复提示词回填逻辑"
-        ],
-        "improvements": [
-          "更新应用版本号至0.6.94并刷新构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "优化页面卡片布局并修复提示词回填逻辑"
-    },
-    {
-      "version": "0.6.94",
-      "date": "2026-04-30",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "强化历史收藏入口并放宽 AI 并发"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "强化历史收藏入口并放宽 AI 并发"
-    },
-    {
-      "version": "0.6.93",
-      "date": "2026-04-30",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "防止复制粘贴事件在可编辑元素中触发"
-        ],
-        "improvements": [
-          "更新应用版本号至0.6.92并同步构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "防止复制粘贴事件在可编辑元素中触发"
-    },
-    {
-      "version": "0.6.92",
-      "date": "2026-04-30",
-      "changes": {
-        "features": [
-          "在历史记录中显示创建时间并调整排序",
-          "新增 HappyHorse 视频模型支持并重构工作流外壳",
-          "完善多图生成视觉提示词工作流",
-          "优化多图生成提示词预览"
-        ],
-        "fixes": [
-          "修正任务队列批量序号显示",
-          "修复多图生成队列参数并记录经验",
-          "优化媒体预览缩放同步",
-          "优化媒体预览自适应展示",
-          "修复 Milkdown 节点上下文注册顺序"
-        ],
-        "improvements": [
-          "同步 0.6.91 Web 版本元数据",
-          "Refresh docs, CI, and Docker build",
-          "perf(changelog): 限制解析的版本数量以避免内存问题"
-        ]
-      },
-      "type": "patch",
-      "highlights": "在历史记录中显示创建时间并调整排序"
-    },
-    {
-      "version": "0.6.91",
-      "date": "2026-04-29",
-      "changes": {
-        "features": [
-          "支持完整环境备份与覆盖恢复"
-        ],
-        "fixes": [
-          "改进部署包关键资源检查逻辑"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "支持完整环境备份与覆盖恢复"
-    },
-    {
-      "version": "0.6.90",
-      "date": "2026-04-29",
-      "changes": {
-        "features": [],
-        "fixes": [],
-        "improvements": [
-          "更新应用版本号至0.6.89"
-        ]
-      },
-      "type": "patch",
-      "highlights": "构建修复与稳定性改进"
-    },
-    {
-      "version": "0.6.89",
-      "date": "2026-04-29",
-      "changes": {
-        "features": [
-          "添加PPT生成参考图片支持并修复React组件卸载问题"
-        ],
-        "fixes": [
-          "修复图片生成完成后画布自动插入卡住"
-        ],
-        "improvements": [
-          "添加 mermaid 依赖用于图表渲染",
-          "更新应用版本号至0.6.88并同步构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "添加PPT生成参考图片支持并修复React组件卸载问题"
-    },
-    {
-      "version": "0.6.88",
-      "date": "2026-04-28",
-      "changes": {
-        "features": [],
-        "fixes": [
-          "改进动态导入错误恢复机制并优化错误处理",
-          "guard toImage fetch failures"
-        ],
-        "improvements": [
-          "更新应用版本号至0.6.87并同步构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "改进动态导入错误恢复机制并优化错误处理"
-    },
-    {
-      "version": "0.6.87",
-      "date": "2026-04-28",
-      "changes": {
-        "features": [
-          "为 API Key 输入框添加显示/隐藏切换功能"
-        ],
-        "fixes": [
-          "stabilize GPT image generation requests",
-          "retry failed image generation anchors"
-        ],
-        "improvements": []
-      },
-      "type": "patch",
-      "highlights": "为 API Key 输入框添加显示/隐藏切换功能"
-    },
-    {
-      "version": "0.6.86",
-      "date": "2026-04-28",
-      "changes": {
-        "features": [],
-        "fixes": [],
-        "improvements": [
-          "更新版本号至 0.6.85 并同步构建时间"
-        ]
-      },
-      "type": "patch",
-      "highlights": "构建修复与稳定性改进"
     }
   ]
 }

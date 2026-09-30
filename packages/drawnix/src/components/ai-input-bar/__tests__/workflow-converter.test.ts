@@ -409,6 +409,25 @@ describe('workflow-converter', () => {
         expect(workflow.steps[0].args.seconds).toBe('15');
       });
 
+      it('MiniMax-H3 别名应透传选中的本地参考视频', () => {
+        const params = createMockParams({
+          generationType: 'video',
+          modelId: 'minimax-h3',
+          selection: {
+            texts: [],
+            images: [],
+            videos: ['/asset-library/content-local.mp4'],
+            graphics: [],
+          },
+        });
+
+        const workflow = convertDirectGenerationToWorkflow(params);
+
+        expect(workflow.steps[0].args.params).toMatchObject({
+          input_videos: ['/asset-library/content-local.mp4'],
+        });
+      });
+
       it('Seedance 2.0 应透传多视频和多音频选择', () => {
         const virtualAudioUrl =
           '/__aitu_generated__/audio/content-reference.mp3';

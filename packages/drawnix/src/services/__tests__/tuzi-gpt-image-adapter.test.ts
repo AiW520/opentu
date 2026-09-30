@@ -13,6 +13,35 @@ vi.mock('../model-adapters/context', () => ({
 }));
 
 describe('tuzi GPT image adapter', () => {
+  it.each(['gpt-image-2.5', 'gpt-image-2.5-vip', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])(
+    '%s keeps every 2K ratio within the billing cap without changing quality',
+    (model) => {
+      const sizes = {
+        '1x1': '1920x1920', '2x3': '1536x2304', '3x2': '2304x1536',
+        '3x4': '1632x2176', '4x3': '2176x1632', '4x5': '1664x2080',
+        '5x4': '2080x1664', '9x16': '1440x2560', '16x9': '2560x1440',
+        '21x9': '2912x1248',
+      };
+      for (const [ratio, size] of Object.entries(sizes)) {
+        const body = buildTuziGPTImageRequestBody({
+          model, prompt: 'Test', size: ratio,
+          params: { resolution: '2k', quality: 'medium' },
+        });
+        expect(body).toEqual({ model, prompt: 'Test', size, quality: 'medium' });
+        const [width, height] = size.split('x').map(Number);
+        const [ratioWidth, ratioHeight] = ratio.split('x').map(Number);
+        expect(width % 16).toBe(0);
+        expect(height % 16).toBe(0);
+        expect(width * ratioHeight).toBe(height * ratioWidth);
+        expect(width * height).toBeGreaterThan(1_048_576);
+        expect(width * height).toBeLessThanOrEqual(3_686_400);
+      }
+      expect(buildTuziGPTImageRequestBody({
+        model, prompt: 'Test', size: '2048x2048', params: { resolution: '2k', quality: 'medium' },
+      }).size).toBe('1920x1920');
+    }
+  );
+
   afterEach(() => {
     mocks.sendAdapterRequest.mockReset();
     vi.unstubAllGlobals();
@@ -79,6 +108,128 @@ describe('tuzi GPT image adapter', () => {
     });
   });
 
+  it.each(['gpt-image-2.5-1k'])(
+    'builds %s requests with only supported sizes',
+    (modelId) => {
+      expect(
+        buildTuziGPTImageRequestBody({
+          model: modelId,
+          prompt: 'Draw a clean product photo',
+          size: '1024x1536',
+        })
+      ).toEqual({
+        model: modelId,
+        prompt: 'Draw a clean product photo',
+        size: '1024x1536',
+      });
+
+      expect(
+        buildTuziGPTImageRequestBody({
+          model: modelId,
+          prompt: 'Draw a clean product photo',
+          size: '2048x2048',
+        })
+      ).toEqual({
+        model: modelId,
+        prompt: 'Draw a clean product photo',
+      });
+    }
+  );
+
+  it.each(['1k', '2k', '4k'])(
+    'builds VIP requests with %s resolution without changing model identity',
+    (resolution) => {
+      const sizes = { '1k': '1360x768', '2k': '2560x1440', '4k': '3840x2160' };
+      expect(buildTuziGPTImageRequestBody({
+        model: 'gpt-image-2.5-vip',
+        prompt: 'Draw a clean product photo',
+        size: '16x9',
+        params: { resolution, quality: 'high' },
+      })).toEqual({
+        model: 'gpt-image-2.5-vip',
+        prompt: 'Draw a clean product photo',
+        size: sizes[resolution as keyof typeof sizes],
+        quality: 'high',
+      });
+    }
+  );
+
+  it.each([
+    'gpt-image-2', 'gpt-image-2-vip', 'gpt-image2', 'gpt-image2-vip',
+    'gpt-image-2.5', 'gpt-image-2.5-vip', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare',
+  ])('保留 %s 的自动比例和独立 K 档位', (model) => {
+    for (const resolution of ['1k', '2k', '4k', 'auto']) {
+      for (const referenceImages of [undefined, ['data:image/png;base64,source']]) {
+        expect(
+          buildTuziGPTImageRequestBody({
+            model,
+            prompt: 'Draw a clean product photo',
+            size: 'auto',
+            referenceImages,
+            params: { resolution, quality: 'medium' },
+          })
+        ).toEqual({
+          model,
+          prompt: 'Draw a clean product photo',
+          size: 'auto',
+          quality: 'medium',
+          ...(referenceImages ? { image: referenceImages } : {}),
+          ...(resolution === 'auto' ? {} : {
+            generationConfig: { imageConfig: { imageSize: resolution.toUpperCase() } },
+          }),
+        });
+      }
+    }
+  });
+
+  it('uses the bound model and params.size when preserving the automatic tier', () => {
+    expect(buildTuziGPTImageRequestBody({
+      model: 'stale-model', prompt: 'Test', size: '1x1',
+      params: { size: 'auto', resolution: '4k', quality: 'high' },
+    }, 'gpt-image-2.5')).toEqual({
+      model: 'gpt-image-2.5', prompt: 'Test', size: 'auto', quality: 'high',
+      generationConfig: { imageConfig: { imageSize: '4K' } },
+    });
+  });
+
+  it.each(['gpt-image-2-1k', 'gpt-image-2.5-1k'])(
+    '%s does not receive the Image 2.5 automatic tier extension',
+    (model) => {
+      expect(buildTuziGPTImageRequestBody({
+        model, prompt: 'Test', size: 'auto', params: { resolution: '4k' },
+      })).toEqual({ model, prompt: 'Test' });
+    }
+  );
+
+  it.each(['gpt-image-2.5', 'gpt-image-2.5-vip', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])('builds %s requests with extended resolution and quality',
+    (modelId) => {
+      expect(
+        buildTuziGPTImageRequestBody({
+          model: modelId,
+          prompt: 'Draw a clean product photo',
+          size: '16x9',
+          params: { resolution: '4k', quality: 'max' },
+        })
+      ).toEqual({
+        model: modelId,
+        prompt: 'Draw a clean product photo',
+        size: '3840x2160',
+        quality: 'max',
+      });
+    }
+  );
+
+  it('does not send Sunburst and Flare quality values to older GPT Image models', () => {
+    expect(
+      buildTuziGPTImageRequestBody({
+        model: 'gpt-image-2',
+        prompt: 'Draw a clean product photo',
+        size: '1x1',
+        params: { quality: 'max' },
+      })
+    ).not.toHaveProperty('quality');
+  });
+
   it('treats legacy 1K/2K/4K quality values as resolution compatibility hints', () => {
     expect(
       buildTuziGPTImageRequestBody({
@@ -92,7 +243,7 @@ describe('tuzi GPT image adapter', () => {
     ).toEqual({
       model: 'gpt-image-2',
       prompt: 'Draw a clean product photo',
-      size: '2368x1776',
+      size: '2176x1632',
     });
   });
 
@@ -161,12 +312,20 @@ describe('tuzi GPT image adapter', () => {
 
   it('uses the provider binding model id instead of a stale image2 task alias', async () => {
     const controller = new AbortController();
-    mocks.sendAdapterRequest.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: [{ url: 'https://example.com/tuzi.png' }],
-      }),
-    });
+    mocks.sendAdapterRequest.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              url: 'https://example.com/tuzi.png',
+              width: 1024,
+              height: 1024,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
 
     await tuziGPTImageAdapter.generateImage(
       {
@@ -223,7 +382,13 @@ describe('tuzi GPT image adapter', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            data: [{ url: 'https://example.com/tuzi.png' }],
+            data: [
+              {
+                url: 'https://example.com/tuzi.png',
+                width: 1024,
+                height: 1024,
+              },
+            ],
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         )
@@ -318,7 +483,7 @@ describe('tuzi GPT image adapter', () => {
     expect(JSON.parse(request.body)).toEqual({
       model: 'gpt-image-2',
       prompt: 'Edit this image',
-      size: '2736x1536',
+      size: '2560x1440',
       image: ['data:image/png;base64,source'],
       response_format: 'b64_json',
       quality: 'medium',

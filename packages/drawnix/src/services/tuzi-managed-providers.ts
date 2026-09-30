@@ -1,9 +1,6 @@
+import { isCurrentTuziEndpoint } from './tuzi-provider-reuse-state';
 import {
   LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
-  TUZI_BUSINESS_PROVIDER_PROFILE_ID,
-  TUZI_CODEX_PROVIDER_PROFILE_ID,
-  TUZI_MIX_PROVIDER_PROFILE_ID,
-  TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
   TUZI_PROVIDER_ICON_URL,
   providerCatalogsSettings,
   providerProfilesSettings,
@@ -11,15 +8,9 @@ import {
 import type { ProviderProfile } from '../utils/settings-types';
 import { tuziEmbeddedConfig } from './tuzi-embedded-config';
 import type { TuziManagedProvider } from './tuzi-session-api';
+import { normalizeModelApiBaseUrl } from '../utils/provider-base-url';
 
 const MANAGED_PROVIDER_PREFIX = 'tuzi-managed-';
-const BUILT_IN_TUZI_PROVIDER_IDS = new Set([
-  LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
-  TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
-  TUZI_MIX_PROVIDER_PROFILE_ID,
-  TUZI_CODEX_PROVIDER_PROFILE_ID,
-  TUZI_BUSINESS_PROVIDER_PROFILE_ID,
-]);
 const DEFAULT_CAPABILITIES: ProviderProfile['capabilities'] = {
   supportsModelsEndpoint: true,
   supportsText: true,
@@ -29,8 +20,49 @@ const DEFAULT_CAPABILITIES: ProviderProfile['capabilities'] = {
   supportsTools: true,
 };
 
+export function isTuziManagedProviderProfileId(profileId: unknown): boolean {
+  return (
+    typeof profileId === 'string' &&
+    profileId.startsWith(MANAGED_PROVIDER_PREFIX)
+  );
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (
+      !Array.isArray(left) ||
+      !Array.isArray(right) ||
+      left.length !== right.length
+    ) {
+      return false;
+    }
+    return left.every((value, index) => valuesEqual(value, right[index]));
+  }
+  if (
+    !left ||
+    !right ||
+    typeof left !== 'object' ||
+    typeof right !== 'object'
+  ) {
+    return false;
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+        valuesEqual(leftRecord[key], rightRecord[key])
+    )
+  );
+}
+
 function tuziV1BaseUrl(): string {
-  return `${tuziEmbeddedConfig.apiBaseUrl?.replace(/\/+$/, '') || ''}/v1`;
+  return normalizeModelApiBaseUrl(tuziEmbeddedConfig.apiBaseUrl || '');
 }
 
 function pricingUrl(): string {
@@ -90,28 +122,62 @@ export async function synchronizeTuziManagedProviders(
   );
   const retained = existing.filter(
     (profile) =>
-      !profile.id.startsWith(MANAGED_PROVIDER_PREFIX) ||
-      incoming.has(profile.id)
+      !isTuziManagedProviderProfileId(profile.id) || incoming.has(profile.id)
   );
   const merged = retained.map((profile) => {
     const provider = incoming.get(profile.id);
-    if (provider) return { ...profile, ...toProfile(provider, template) };
-    if (BUILT_IN_TUZI_PROVIDER_IDS.has(profile.id)) {
-      return { ...profile, enabled: false };
+    if (provider?.source === 'existing') {
+      return profile;
+    }
+    if (provider) {
+      const nextProfile = { ...profile, ...toProfile(provider, template) };
+      return nextProfile.apiKey.trim()
+        ? { ...nextProfile, enabled: true }
+        : nextProfile;
     }
     return profile;
   });
   const knownIds = new Set(merged.map((profile) => profile.id));
   providers.forEach((provider) => {
-    if (!knownIds.has(provider.id)) merged.push(toProfile(provider, template));
+    if (provider.source !== 'existing' && !knownIds.has(provider.id))
+      merged.push({ ...toProfile(provider, template), enabled: true });
   });
-  await providerProfilesSettings.update(merged);
+  if (!valuesEqual(existing, merged)) {
+    await providerProfilesSettings.update(merged);
+  }
   const validProfileIds = new Set(merged.map((profile) => profile.id));
   const existingCatalogs = providerCatalogsSettings.get();
   const retainedCatalogs = existingCatalogs.filter((catalog) =>
     validProfileIds.has(catalog.profileId)
   );
-  if (retainedCatalogs.length !== existingCatalogs.length) {
+  if (!valuesEqual(retainedCatalogs, existingCatalogs)) {
     await providerCatalogsSettings.update(retainedCatalogs);
   }
+}
+
+// Explicit imports add ordinary providers without replacing existing settings or catalogs.
+export async function addTuziTokenProviders(
+  providers: TuziManagedProvider[]
+): Promise<TuziManagedProvider[]> {
+  const existing = providerProfilesSettings.get();
+  const additions: TuziManagedProvider[] = [];
+  for (const provider of providers) {
+    if (
+      existing.some(
+        (profile) =>
+          isCurrentTuziEndpoint(profile.baseUrl) &&
+          profile.apiKey.replace(/^sk-/, '') ===
+            provider.apiKey.replace(/^sk-/, '')
+      )
+    )
+      continue;
+    if (!existing.some((profile) => profile.id === provider.id))
+      additions.push(provider);
+  }
+  if (additions.length)
+    await providerProfilesSettings.update([
+      ...existing,
+      ...additions.map((provider) => toProfile(provider, null)),
+    ]);
+  return additions;
 }

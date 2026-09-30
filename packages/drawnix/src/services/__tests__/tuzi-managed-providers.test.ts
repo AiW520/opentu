@@ -65,7 +65,12 @@ describe('synchronizeTuziManagedProviders', () => {
       { id: 'tuzi-mix', name: 'gemini-mix 分组', enabled: true },
       { id: 'tuzi-codex', name: 'codex 分组', enabled: true },
       { id: 'tuzi-business', name: 'Business', enabled: true },
-      { id: 'custom-provider', name: 'Custom', apiKey: 'keep-me' },
+      {
+        id: 'custom-provider',
+        name: 'Custom',
+        apiKey: 'keep-me',
+        enabled: false,
+      },
       { id: 'tuzi-managed-old', name: 'Old managed', apiKey: 'old' },
       { id: 'tuzi-managed-image', name: 'Old image', apiKey: 'old-image' },
     ]);
@@ -100,41 +105,53 @@ describe('synchronizeTuziManagedProviders', () => {
     );
     const updatedProfiles = update.mock.calls[0][0];
     expect(
+      updatedProfiles.find(
+        (profile: { id: string }) => profile.id === 'legacy-default'
+      ).apiKey
+    ).toBe('legacy-key');
+    expect(
+      updatedProfiles.find(
+        (profile: { id: string }) => profile.id === 'legacy-default'
+      ).enabled
+    ).not.toBe(false);
+    expect(
       updatedProfiles
         .filter((profile: { id: string }) =>
-          [
-            'legacy-default',
-            'tuzi-origin',
-            'tuzi-mix',
-            'tuzi-codex',
-            'tuzi-business',
-          ].includes(profile.id)
+          ['tuzi-origin', 'tuzi-mix', 'tuzi-codex', 'tuzi-business'].includes(
+            profile.id
+          )
         )
-        .every((profile: { enabled: boolean }) => profile.enabled === false)
+        .every((profile: { enabled: boolean }) => profile.enabled === true)
     ).toBe(true);
     expect(
       updatedProfiles.find(
         (profile: { id: string }) => profile.id === 'custom-provider'
       ).enabled
-    ).not.toBe(false);
+    ).toBe(false);
   });
 
-  it('disables built-in Tuzi profiles when credentials are cleared', async () => {
+  it('preserves ordinary keys while clearing managed credentials', async () => {
     await synchronizeTuziManagedProviders([]);
 
     const updatedProfiles = update.mock.calls[0][0];
     expect(
+      updatedProfiles.find(
+        (profile: { id: string }) => profile.id === 'legacy-default'
+      ).apiKey
+    ).toBe('legacy-key');
+    expect(
+      updatedProfiles.find(
+        (profile: { id: string }) => profile.id === 'legacy-default'
+      ).enabled
+    ).not.toBe(false);
+    expect(
       updatedProfiles
         .filter((profile: { id: string }) =>
-          [
-            'legacy-default',
-            'tuzi-origin',
-            'tuzi-mix',
-            'tuzi-codex',
-            'tuzi-business',
-          ].includes(profile.id)
+          ['tuzi-origin', 'tuzi-mix', 'tuzi-codex', 'tuzi-business'].includes(
+            profile.id
+          )
         )
-        .every((profile: { enabled: boolean }) => profile.enabled === false)
+        .every((profile: { enabled: boolean }) => profile.enabled === true)
     ).toBe(true);
     expect(
       updatedProfiles.some(
@@ -145,4 +162,76 @@ describe('synchronizeTuziManagedProviders', () => {
       { profileId: 'custom-provider' },
     ]);
   });
+
+  it('does not broadcast settings when managed providers are unchanged', async () => {
+    const provider = {
+      id: 'tuzi-managed-image',
+      group: 'image',
+      displayName: '图片分组',
+      apiKey: 'sk-new-image',
+      status: 1,
+      rotatedAt: 1700000000,
+    };
+
+    await synchronizeTuziManagedProviders([provider]);
+    const updatedProfiles = update.mock.calls[0][0];
+    expect(
+      updatedProfiles.find(
+        (profile: { id: string }) => profile.id === 'legacy-default'
+      ).apiKey
+    ).toBe('legacy-key');
+    expect(
+      updatedProfiles.find(
+        (profile: { id: string }) => profile.id === 'legacy-default'
+      ).enabled
+    ).not.toBe(false);
+    const updatedCatalogs = catalogUpdate.mock.calls[0][0];
+    update.mockClear();
+    catalogUpdate.mockClear();
+    get.mockReturnValue(updatedProfiles);
+    catalogGet.mockReturnValue(updatedCatalogs);
+
+    await synchronizeTuziManagedProviders([provider]);
+
+    expect(update).not.toHaveBeenCalled();
+    expect(catalogUpdate).not.toHaveBeenCalled();
+  });
+});
+
+it('adds same-group ordinary tokens independently and preserves matching manual profiles and catalogs', async () => {
+  const { addTuziTokenProviders } = await import('../tuzi-managed-providers');
+  const manual = {
+    id: 'manual',
+    name: '我的原始名称',
+    baseUrl: 'http://localhost:3100',
+    apiKey: 'existing',
+    enabled: true,
+    pricingGroup: 'default',
+  };
+  get.mockReturnValue([manual]);
+  update.mockClear();
+  catalogUpdate.mockClear();
+  const provider = {
+    id: 'tuzi-token-1-1',
+    group: 'default',
+    displayName: '服务端名称',
+    apiKey: 'sk-existing',
+    status: 1,
+    rotatedAt: 0,
+  };
+  const added = await addTuziTokenProviders([
+    provider,
+    {
+      ...provider,
+      id: 'tuzi-token-1-2',
+      apiKey: 'sk-other',
+      displayName: '备用令牌',
+    },
+  ]);
+  expect(added.map((p) => p.id)).toEqual(['tuzi-token-1-2']);
+  expect(update).toHaveBeenCalledWith([
+    manual,
+    expect.objectContaining({ id: 'tuzi-token-1-2', name: '备用令牌' }),
+  ]);
+  expect(catalogUpdate).not.toHaveBeenCalled();
 });

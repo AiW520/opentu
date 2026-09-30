@@ -1,9 +1,9 @@
 {
-  "version": "1.1.6",
-  "buildTime": "2026-09-07T06:27:22.382Z",
+  "version": "1.1.20",
+  "buildTime": "2026-09-30T10:48:28.035Z",
   "gitCommit": "unknown",
   "changelog": [
-    "support dragging images into reference inputs (#251)",
-    "融合 AI 语义分层与图片生成增强 (#250)"
+    "hide toolbar entry and keep direct route (#286)",
+    "完善 Seedance 2.5 参数适配 (#285)"
   ]
 }

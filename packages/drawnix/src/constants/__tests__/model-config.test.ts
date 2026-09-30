@@ -8,6 +8,7 @@ import {
   ModelVendor,
   setRuntimeModelConfigs,
 } from '../model-config';
+import { getVideoModelConfig } from '../video-model-config';
 
 describe('model-config image size options', () => {
   afterEach(() => {
@@ -36,6 +37,22 @@ describe('model-config image size options', () => {
       getSizeOptionsForModel('gpt-image-2-vip').map((option) => option.value)
     ).toEqual(expected);
 
+    for (const modelId of [
+      'gpt-image-2.5',
+      'gpt-image-2.5-vip',
+      'gpt-image-2.5-sunburst',
+      'gpt-image-2.5-flare',
+    ]) {
+      expect(getStaticModelConfig(modelId)).toMatchObject({
+        id: modelId,
+        type: 'image',
+        vendor: ModelVendor.GPT,
+      });
+      expect(
+        getSizeOptionsForModel(modelId).map((option) => option.value)
+      ).toEqual(expected);
+    }
+
     for (const modelId of ['gpt-image2-vip', 'gpt-image2']) {
       setRuntimeModelConfigs([
         {
@@ -46,9 +63,9 @@ describe('model-config image size options', () => {
         },
       ]);
 
-      expect(getSizeOptionsForModel(modelId).map((option) => option.value)).toEqual(
-        expected
-      );
+      expect(
+        getSizeOptionsForModel(modelId).map((option) => option.value)
+      ).toEqual(expected);
     }
   });
 
@@ -68,6 +85,85 @@ describe('model-config image size options', () => {
       'medium',
       'high',
     ]);
+  });
+
+  it.each(['gpt-image-2.5', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])(
+    '为 %s 暴露分辨率与最高到 xhigh 的画质选项',
+    (modelId) => {
+      const params = getCompatibleParams(modelId);
+
+      expect(
+        params
+          .find((param) => param.id === 'resolution')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['auto', '1k', '2k', '4k']);
+      expect(
+        params.find((param) => param.id === 'resolution')?.options
+      ).toEqual([
+        { value: 'auto', label: '自动' },
+        { value: '1k', label: '1K' },
+        { value: '2k', label: '2K' },
+        { value: '4k', label: '4K' },
+      ]);
+      expect(
+        params
+          .find((param) => param.id === 'quality')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['auto', 'low', 'medium', 'high', 'xhigh']);
+    }
+  );
+
+  it('为 GPT Image 2.5 VIP 提供分辨率与超高清画质档位', () => {
+    const params = getCompatibleParams('gpt-image-2.5-vip');
+    expect(
+      params
+        .find((param) => param.id === 'resolution')
+        ?.options?.map((option) => option.value)
+    ).toEqual(['auto', '1k', '2k', '4k']);
+    expect(
+      params
+        .find((param) => param.id === 'quality')
+        ?.options?.map((option) => option.value)
+    ).toEqual(['auto', 'low', 'medium', 'high', 'xhigh']);
+  });
+
+  it.each(['gpt-image-2.5-1k'])(
+    '将 %s 注册为仅支持官方像素尺寸的 GPT 图片模型',
+    (modelId) => {
+      const model = getStaticModelConfig(modelId);
+      const params = getCompatibleParams(modelId);
+
+      expect(model).toMatchObject({
+        id: modelId,
+        type: 'image',
+        vendor: ModelVendor.GPT,
+      });
+      expect(
+        getSizeOptionsForModel(modelId).map((option) => option.value)
+      ).toEqual(['auto', '1024x1024', '1024x1536', '1536x1024']);
+      expect(params.some((param) => param.id === 'resolution')).toBe(false);
+      expect(
+        params
+          .find((param) => param.id === 'quality')
+          ?.options?.map((option) => option.value)
+      ).toEqual(['auto', 'low', 'medium', 'high']);
+    }
+  );
+
+  it('在静态图片模型目录中公开全部 GPT Image 2.5 模型', () => {
+    const imageModelIds = getStaticModelsByType('image').map(
+      (model) => model.id
+    );
+
+    expect(imageModelIds).toEqual(
+      expect.arrayContaining([
+        'gpt-image-2.5-1k',
+        'gpt-image-2.5',
+        'gpt-image-2.5-vip',
+        'gpt-image-2.5-sunburst',
+        'gpt-image-2.5-flare',
+      ])
+    );
   });
 
   it('不再内置已下架的 GPT Image 旧模型', () => {
@@ -241,12 +337,12 @@ describe('model-config image size options', () => {
     const videoIds = getStaticModelsByType('video').map((model) => model.id);
 
     expect(textIds.slice(0, 6)).toEqual([
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'deepseek-v4-pro',
-      'deepseek-v4-flash',
-      'deepseek-v4-flash-0731',
     ]);
     expect(videoIds).toEqual(
       expect.arrayContaining([
@@ -276,6 +372,16 @@ describe('model-config image size options', () => {
     'doubao-seedance-2-0-mini-260615',
   ])('Seedance 2.0 参数与官方 JSON 契约一致：%s', (modelId) => {
     const params = getCompatibleParams(modelId);
+    expect(params.map((param) => param.id)).toEqual(
+      expect.arrayContaining([
+        'duration',
+        'size',
+        'ratio',
+        'generate_audio',
+        'seed',
+        'camera_fixed',
+      ])
+    );
     const options = (paramId: string) =>
       params
         .find((param) => param.id === paramId)
@@ -303,17 +409,20 @@ describe('model-config image size options', () => {
       'adaptive',
     ]);
     expect(params.map((param) => param.id)).toEqual(
-      expect.arrayContaining([
-        'generate_audio',
-        'watermark',
-        'seed',
-        'camera_fixed',
-      ])
+      expect.arrayContaining(['generate_audio', 'seed', 'camera_fixed'])
     );
   });
 
   it('Seedance 2.5 exposes its own duration and ratio boundaries', () => {
     const params = getCompatibleParams('doubao-seedance-2-5-260628');
+    expect(params.map((param) => param.id)).toEqual(
+      expect.arrayContaining([
+        'watermark',
+        'output_format',
+        'draft',
+        'priority',
+      ])
+    );
     const options = (paramId: string) =>
       params
         .find((param) => param.id === paramId)
@@ -331,9 +440,122 @@ describe('model-config image size options', () => {
       '21:9',
       'adaptive',
     ]);
-    expect(options('size')).toBeUndefined();
+    expect(options('size')).toEqual(['1080p', '720p', '480p']);
+    expect(params.find((param) => param.id === 'size')?.defaultValue).toBe(
+      '480p'
+    );
+    expect(params.find((param) => param.id === 'duration')?.defaultValue).toBe(
+      '4'
+    );
     expect(params.map((param) => param.id)).not.toEqual(
       expect.arrayContaining(['seed', 'camera_fixed'])
     );
+  });
+
+  it('为运行时 MiniMax-H3 暴露官方视频参数', () => {
+    setRuntimeModelConfigs([
+      {
+        id: 'MiniMax-H3',
+        label: 'MiniMax-H3',
+        type: 'video',
+        vendor: ModelVendor.MINIMAX,
+      },
+    ]);
+
+    const params = getCompatibleParams('MiniMax-H3');
+    const param = (id: string) => params.find((item) => item.id === id);
+
+    expect(param('duration')?.options?.map((option) => option.value)).toEqual([
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '10',
+      '11',
+      '12',
+      '13',
+      '14',
+      '15',
+    ]);
+    expect(param('duration')?.defaultValue).toBe('5');
+    expect(param('size')?.options?.map((option) => option.value)).toEqual([
+      '768P',
+      '2K',
+    ]);
+    expect(param('size')?.defaultValue).toBe('768P');
+    expect(param('ratio')?.options?.map((option) => option.value)).toEqual([
+      '21:9',
+      '16:9',
+      '4:3',
+      '1:1',
+      '3:4',
+      '9:16',
+      'adaptive',
+    ]);
+    expect(param('ratio')?.defaultValue).toBe('16:9');
+    expect(param('api_version')).toBeUndefined();
+    expect(param('prompt_enhancement')).toMatchObject({
+      label: '提示词增强',
+      control: 'switch',
+      defaultValue: 'false',
+    });
+    expect(params.some((item) => item.id === 'generate_audio')).toBe(false);
+
+    const videoConfig = getVideoModelConfig('MiniMax-H3');
+    expect(videoConfig.durationOptions.map((option) => option.value)).toEqual([
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '10',
+      '11',
+      '12',
+      '13',
+      '14',
+      '15',
+    ]);
+    expect(videoConfig.defaultDuration).toBe('5');
+    expect(videoConfig.sizeOptions.map((option) => option.value)).toEqual([
+      '768P',
+      '2K',
+    ]);
+    expect(videoConfig.defaultSize).toBe('768P');
+  });
+
+  it('为 MiniMax-H3 提供置顶与 NEW 展示元数据', () => {
+    expect(getStaticModelConfig('MiniMax-H3')).toMatchObject({
+      id: 'MiniMax-H3',
+      type: 'video',
+      vendor: ModelVendor.MINIMAX,
+      tags: ['new'],
+      recommendedScore: 103,
+    });
+  });
+
+  it('忽略 MiniMax-H3 模型 ID 的大小写差异', () => {
+    setRuntimeModelConfigs([
+      {
+        id: 'MiniMax-H3',
+        label: 'MiniMax-H3',
+        type: 'video',
+        vendor: ModelVendor.MINIMAX,
+      },
+    ]);
+
+    const paramIds = getCompatibleParams('minimax-h3').map((param) => param.id);
+
+    expect(paramIds).toEqual(
+      expect.arrayContaining([
+        'duration',
+        'size',
+        'ratio',
+        'prompt_enhancement',
+      ])
+    );
+    expect(paramIds).not.toContain('api_version');
   });
 });

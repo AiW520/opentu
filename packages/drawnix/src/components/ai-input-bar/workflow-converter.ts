@@ -11,6 +11,7 @@
 
 import type { ParsedGenerationParams } from '../../utils/ai-input-parser';
 import { isSeedance2ModelId } from '../../utils/seedance-model';
+import { isMiniMaxH3Model } from '../../services/video-binding-utils';
 import {
   cleanLLMResponse,
   parseWorkflowJson,
@@ -488,6 +489,13 @@ export function convertDirectGenerationToWorkflow(
         !videoParams.input_video
       ) {
         videoParams.input_video = selection.videos[0];
+      }
+      if (
+        isMiniMaxH3Model(modelId) &&
+        selection?.videos?.length &&
+        !videoParams.input_videos
+      ) {
+        videoParams.input_videos = selection.videos;
       }
       if (isSeedance2ModelId(modelId)) {
         if (selection?.videos?.length && !videoParams.input_videos) {

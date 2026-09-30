@@ -6,6 +6,7 @@ import {
   type Task,
 } from '../../types/task.types';
 import { IMAGE_GENERATION_TIMEOUT_MS } from '../../constants/TASK_CONSTANTS';
+import { registerDocumentBatchTaskGuard } from '../media-executor/task-storage-writer';
 import {
   ImageGenerationRecoveryService,
   createImageSubmissionParams,
@@ -119,6 +120,31 @@ describe('image generation recovery service', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not query a document batch from an unbound or revoked account scope', async () => {
+    const task = createTask('batch-recovery');
+    task.params.documentBatch = {
+      scopeId: 'account-a', batchId: 'batch', workItemId: 'item',
+      attemptId: 'attempt', epoch: 1, dispatchOwner: 'document-batch', dispatchTicket: 'ticket',
+    };
+    const fetcher = vi.fn(async () => Response.json({ status: 'processing' }));
+    const service = new ImageGenerationRecoveryService({
+      fetcher, resolveInvocationPlan: vi.fn(() => createPlan()), pollIntervalMs: 100, jitterRatio: 0,
+    });
+    const callbacks = { onSucceeded: vi.fn(), onFailed: vi.fn() };
+    expectRejectedStart(service.start(task, callbacks), 'invalid-task');
+    expect(fetcher).not.toHaveBeenCalled();
+    let current = true;
+    const unbind = registerDocumentBatchTaskGuard(task.id, task.params.documentBatch, () => current);
+    try {
+      getStartedHandle(service.start(task, callbacks));
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      current = false;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(callbacks.onSucceeded).not.toHaveBeenCalled();
+    } finally { unbind(); service.stopAll(); }
+  });
+
   it('calls the default browser fetch with the global receiver', async () => {
     const fetcher = vi.fn(function (this: unknown) {
       if (this !== globalThis) {
@@ -153,7 +179,7 @@ describe('image generation recovery service', () => {
     );
   });
 
-  it('queries the configured provider first with auth and no Request-ID header', async () => {
+  it('queries the configured provider first with auth and the same Request-ID header', async () => {
     const fetcher = vi.fn(async () =>
       Response.json({
         status: 'succeeded',
@@ -181,7 +207,7 @@ describe('image generation recovery service', () => {
     const headers = new Headers(init?.headers);
     expect(headers.get('Authorization')).toBe('Bearer secret-token');
     expect(headers.get('X-Custom')).toBe('keep-me');
-    expect(headers.has('X-Request-Id')).toBe(false);
+    expect(headers.get('X-Request-Id')).toBe('submission-1');
     expect(onSucceeded).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'submission-1',
@@ -189,6 +215,42 @@ describe('image generation recovery service', () => {
       }),
       expect.any(AbortSignal)
     );
+  });
+
+  it('queries a main Tuzi task directly after page recovery', async () => {
+    vi.stubGlobal('location', { hostname: 'opentu.ai' });
+    const plan = createPlan();
+    plan.provider.baseUrl = 'https://api.tu-zi.com/v1';
+    const fetcher = vi.fn(async () =>
+      Response.json({
+        status: 'succeeded',
+        request_id: 'submission-main',
+        data: [{ url: 'https://images.example.com/result-main.png' }],
+      })
+    );
+    const onSucceeded = vi.fn();
+    const service = new ImageGenerationRecoveryService({
+      fetcher,
+      resolveInvocationPlan: vi.fn(() => plan),
+      jitterRatio: 0,
+    });
+
+    service.start(
+      createTask('task-main', 'submission-main', Date.now(), plan),
+      {
+        onSucceeded,
+        onFailed: vi.fn(),
+      }
+    );
+    await vi.waitFor(() => expect(onSucceeded).toHaveBeenCalledTimes(1));
+
+    const [url, init] = fetcher.mock.calls[0] || [];
+    expect(String(url)).toBe(
+      'https://api.tu-zi.com/v1/images/generations/result?request_id=submission-main'
+    );
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer secret-token');
+    expect(headers.get('X-Request-Id')).toBe('submission-main');
   });
 
   it('re-resolves the same provider and model when a persisted binding ID no longer exists', async () => {
@@ -235,13 +297,10 @@ describe('image generation recovery service', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('retries recovery only on the configured provider', async () => {
+  it('queries a trusted fallback after the original recovery node is unavailable', async () => {
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(Response.json({}, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({}, { status: 404 }))
       .mockResolvedValueOnce(Response.json({}, { status: 503 }))
-      .mockRejectedValueOnce(new Error('Failed to fetch'))
       .mockResolvedValueOnce(
         Response.json({
           status: 'succeeded',
@@ -255,6 +314,7 @@ describe('image generation recovery service', () => {
       pollIntervalMs: 1,
       maxBackoffMs: 1,
       jitterRatio: 0,
+      loadEndpointBaseUrls: vi.fn(async () => ['https://api.tu-zi.com']),
     });
 
     service.start(createTask('task-2'), {
@@ -265,7 +325,7 @@ describe('image generation recovery service', () => {
 
     expect(
       fetcher.mock.calls.map(([url]) => new URL(String(url)).host)
-    ).toEqual(Array(5).fill('bus.tu-zi.com'));
+    ).toEqual(['bus.tu-zi.com', 'api.tu-zi.com']);
   });
 
   it('releases an error response body before retrying the configured provider', async () => {
@@ -293,6 +353,7 @@ describe('image generation recovery service', () => {
       pollIntervalMs: 1,
       maxBackoffMs: 1,
       jitterRatio: 0,
+      loadEndpointBaseUrls: vi.fn(async () => ['https://apius.tu-zi.com']),
     });
 
     service.start(createTask('task-release-body'), {
@@ -304,7 +365,7 @@ describe('image generation recovery service', () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(
       fetcher.mock.calls.map(([url]) => new URL(String(url)).host)
-    ).toEqual(['bus.tu-zi.com', 'bus.tu-zi.com']);
+    ).toEqual(['bus.tu-zi.com', 'apius.tu-zi.com']);
   });
 
   it('does not wait indefinitely for an error response body to cancel', async () => {

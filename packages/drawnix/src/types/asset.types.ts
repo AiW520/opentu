@@ -339,6 +339,8 @@ export interface MediaLibraryModalProps {
   onClose: () => void;
   mode?: SelectionMode;
   filterType?: AssetType;
+  /** Restrict selectable and visible assets to these media types. */
+  allowedTypes?: readonly AssetType[];
   filterCategory?: AssetCategory;
   onSelect?: (asset: Asset) => void | Promise<void>;
   /** 批量选择回调（素材库批量选择模式下使用） */
@@ -394,6 +396,7 @@ export interface MediaLibraryInspectorProps {
 
 export interface MediaLibraryGridProps {
   filterType?: AssetType;
+  allowedTypes?: readonly AssetType[];
   filterCategory?: AssetCategory;
   selectedAssetId: string | null;
   onSelectAsset: (id: string) => void;

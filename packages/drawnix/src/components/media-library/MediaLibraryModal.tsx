@@ -27,6 +27,7 @@ export function MediaLibraryModal({
   onClose,
   mode = SelectionMode.BROWSE,
   filterType,
+  allowedTypes,
   filterCategory,
   onSelect,
   onSelectMultiple,
@@ -79,13 +80,15 @@ export function MediaLibraryModal({
 
   // 应用入口限定筛选（如果提供）
   useEffect(() => {
-    if (isOpen && (filterType || filterCategory)) {
+    if (isOpen && (filterType || allowedTypes?.length || filterCategory)) {
+      const activeType =
+        filterType || (allowedTypes?.length === 1 ? allowedTypes[0] : 'ALL');
       setFilters({
-        ...(filterType ? { activeType: filterType } : {}),
+        activeType,
         activeCategory: filterCategory || undefined,
       });
     }
-  }, [isOpen, filterType, filterCategory, setFilters]);
+  }, [isOpen, filterType, allowedTypes, filterCategory, setFilters]);
 
   // 同步选中状态
   useEffect(() => {
@@ -377,6 +380,7 @@ export function MediaLibraryModal({
           <div className="media-library-layout__main">
             <MediaLibraryGrid
               filterType={filterType}
+              allowedTypes={allowedTypes}
               filterCategory={filterCategory}
               selectedAssetId={localSelectedAssetId}
               onSelectAsset={handleSelectAsset}

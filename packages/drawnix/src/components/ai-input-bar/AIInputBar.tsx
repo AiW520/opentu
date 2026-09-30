@@ -16,6 +16,7 @@
  * - Smart Suggestion Panel for #model
  */
 
+import { normalizeGPTImage25ResolutionParams } from '../../services/model-adapters/image-size-quality-resolver';
 import React, {
   useState,
   useEffect,
@@ -30,6 +31,7 @@ import {
   Maximize2,
   Minimize2,
   PinOff,
+  Settings2,
   Send,
   Unlink,
   X,
@@ -37,6 +39,7 @@ import {
 import {
   Dropdown,
   MessagePlugin,
+  Popup,
   Switch,
   type DropdownOption,
 } from 'tdesign-react';
@@ -120,7 +123,15 @@ import {
 import {
   getEffectiveVideoCompatibleParams,
   getEffectiveVideoModelConfigForSelection,
+  isMiniMaxH3Model,
 } from '../../services/video-binding-utils';
+import { unifiedCacheService } from '../../services/unified-cache-service';
+import {
+  enhanceMiniMaxH3Prompt,
+  isMiniMaxH3PromptEnhancementEnabled,
+  MINIMAX_H3_MAX_LOCAL_VIDEO_BYTES,
+  MINIMAX_H3_PROMPT_ENHANCEMENT_PARAM_ID,
+} from '../../services/minimax-h3-video-workflow';
 import { initializeMCP, mcpRegistry } from '../../mcp';
 import {
   clearCanvasBoard,
@@ -168,9 +179,11 @@ import {
   hasInvocationRouteCredentials,
   resolveInvocationRoute,
   createModelRef,
+  settingsManager,
   type ModelRef,
 } from '../../utils/settings-manager';
 import { promptForApiKey } from '../../utils/gemini-api/auth';
+import { prepareTuziManagedRoute } from '../../services/tuzi-managed-route-gate';
 import type { WorkflowMessageData } from '../../types/chat.types';
 import type {
   CanvasAssociationRef,
@@ -206,6 +219,8 @@ import { isFrameElement } from '../../types/frame.types';
 import { matchFrameSizeForModel } from '../../utils/frame-size-matcher';
 import { PlaitDrawElement } from '@plait/draw';
 import { isPlaitVideo } from '../../interfaces/video';
+import { getVideoDimensions } from '../../data/video';
+import { getSupportedVideoFileMimeType } from '../../data/blob';
 import { isCardElement } from '../../types/card.types';
 import { isAudioNodeElement } from '../../types/audio-node.types';
 import {
@@ -273,6 +288,10 @@ import {
   type BoundTargetTaskbarDraftEntry,
   type BoundImageTargetMode,
 } from './target-bound-taskbar-state';
+import {
+  persistCenterImageOnClickEnabled,
+  readCenterImageOnClickEnabled,
+} from './canvas-view-settings';
 import {
   appendCanvasAssociationRef,
   areCanvasAssociationRefsEqual,
@@ -740,6 +759,8 @@ const AI_INPUT_LONG_TEXT_MAX_VIEWPORT_RATIO = 0.65;
 const AI_INPUT_LONG_TEXT_MIN_MAX_HEIGHT = 320;
 const AI_INPUT_LONG_TEXT_MAX_HEIGHT = 680;
 const AI_INPUT_LINE_HEIGHT = 1.5;
+const AI_INPUT_IMAGE_ASSET_TYPES = [AssetType.IMAGE] as const;
+const AI_INPUT_VIDEO_ASSET_TYPES = [AssetType.IMAGE, AssetType.VIDEO] as const;
 type AIInputResizeMode = 'collapsed' | 'expanded' | 'long-text';
 type AIInputSubmitTrigger = 'button' | 'keyboard';
 
@@ -1663,6 +1684,11 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     );
     registerGenerationSubmitterRef.current =
       chatDrawerControl.registerGenerationSubmitter;
+    const submitGenerationWithCredentialGateRef = useRef(
+      chatDrawerControl.submitGenerationWithCredentialGate
+    );
+    submitGenerationWithCredentialGateRef.current =
+      chatDrawerControl.submitGenerationWithCredentialGate;
 
     // 当前工作流的重试上下文（用于在更新时保持 retryContext）
     const currentRetryContextRef = useRef<WorkflowRetryContext | null>(null);
@@ -1937,6 +1963,8 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     const [boundTargetFollowEnabled, setBoundTargetFollowEnabled] = useState(
       () => readBoundTargetFollowEnabled()
     );
+    const [centerImageOnClickEnabled, setCenterImageOnClickEnabled] =
+      useState(() => readCenterImageOnClickEnabled());
     const [boundTargetError, setBoundTargetError] = useState<string | null>(
       null
     );
@@ -2490,12 +2518,23 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     const localImageMessages = useMemo(
       () => ({
         invalidFile:
-          language === 'zh' ? '请上传图片文件' : 'Please upload image files',
-        fileTooLarge:
+          language === 'zh'
+            ? '请上传图片或视频文件'
+            : 'Please upload image or video files',
+        imageTooLarge:
           language === 'zh'
             ? '图片大小不能超过 25MB'
-            : 'Image size cannot exceed 25MB',
-        loadFailed: language === 'zh' ? '加载图片失败' : 'Failed to load image',
+            : 'Images cannot exceed 25MB',
+        videoTooLarge: (maxSizeMb: number, requiresPublicUrl: boolean) =>
+          language === 'zh'
+            ? requiresPublicUrl
+              ? `MiniMax-H3 本地视频不能超过 ${maxSizeMb}MB；更大视频请使用公网 URL`
+              : `视频大小不能超过 ${maxSizeMb}MB`
+            : requiresPublicUrl
+            ? `Local MiniMax-H3 videos cannot exceed ${maxSizeMb}MB; use a public URL for larger videos`
+            : `Videos cannot exceed ${maxSizeMb}MB`,
+        loadFailed:
+          language === 'zh' ? '加载图片或视频失败' : 'Failed to load media',
         compressionFailed:
           language === 'zh' ? '图片压缩失败' : 'Image compression failed',
         compressing: (sizeMb: number) =>
@@ -3823,6 +3862,17 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
       (asset: Asset): Promise<SelectedContent> =>
         new Promise((resolve) => {
           try {
+            if (
+              asset.type === AssetType.VIDEO ||
+              asset.type === AssetType.AUDIO
+            ) {
+              resolve({
+                type: asset.type === AssetType.VIDEO ? 'video' : 'audio',
+                url: asset.url,
+                name: asset.name,
+              });
+              return;
+            }
             const img = new Image();
             img.onload = () => {
               resolve({
@@ -3946,17 +3996,59 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
         const newContent: SelectedContent[] = [];
 
         for (const [index, file] of fileList.entries()) {
-          if (!file.type.startsWith('image/')) {
+          const isImage = file.type.startsWith('image/');
+          const videoMime = getSupportedVideoFileMimeType(file);
+          const isVideo = Boolean(videoMime);
+          if (!isImage && !isVideo) {
             MessagePlugin.error(localImageMessages.invalidFile);
             continue;
           }
 
-          if (file.size > 25 * 1024 * 1024) {
-            MessagePlugin.error(localImageMessages.fileTooLarge);
+          const isMiniMaxH3Video =
+            isVideo && isMiniMaxH3Model(selectedModel);
+          const videoSizeLimit = isMiniMaxH3Video
+            ? MINIMAX_H3_MAX_LOCAL_VIDEO_BYTES
+            : 50 * 1024 * 1024;
+          if (file.size > (isVideo ? videoSizeLimit : 25 * 1024 * 1024)) {
+            MessagePlugin.error(
+              isVideo
+                ? localImageMessages.videoTooLarge(
+                    videoSizeLimit / (1024 * 1024),
+                    isMiniMaxH3Video
+                  )
+                : localImageMessages.imageTooLarge
+            );
             continue;
           }
 
           try {
+            if (videoMime) {
+              const normalizedVideo = new File([file], file.name, {
+                type: videoMime,
+              });
+              const asset = await addAsset(
+                normalizedVideo,
+                AssetType.VIDEO,
+                AssetSource.LOCAL,
+                file.name
+              );
+              const objectUrl = URL.createObjectURL(normalizedVideo);
+              let dimensions;
+              try {
+                dimensions = await getVideoDimensions(objectUrl);
+              } finally {
+                URL.revokeObjectURL(objectUrl);
+              }
+              newContent.push({
+                type: 'video',
+                url: asset.url,
+                name: file.name || `上传视频 ${index + 1}`,
+                width: dimensions.width,
+                height: dimensions.height,
+              });
+              continue;
+            }
+
             let processedBlob: Blob = file;
 
             if (file.size > 10 * 1024 * 1024) {
@@ -4042,7 +4134,12 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           setUploadedContent(nextUploadedContent);
         }
       },
-      [addAsset, fileToBase64WithDimensions, localImageMessages]
+      [
+        addAsset,
+        fileToBase64WithDimensions,
+        localImageMessages,
+        selectedModel,
+      ]
     );
 
     const handleDroppedInputFiles = useCallback(
@@ -4341,6 +4438,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     const handleBoundTargetFollowChange = useCallback((enabled: boolean) => {
       setBoundTargetFollowEnabled(persistBoundTargetFollowEnabled(enabled));
       setBoundInputLayoutTick((tick) => tick + 1);
+    }, []);
+
+    const handleCenterImageOnClickChange = useCallback((enabled: boolean) => {
+      setCenterImageOnClickEnabled(persistCenterImageOnClickEnabled(enabled));
     }, []);
 
     const handleBoundInputViewportChange = useCallback(() => {
@@ -4778,7 +4879,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           } else {
             next[paramId] = value;
           }
-          return next;
+          return normalizeGPTImage25ResolutionParams(selectedModel, next);
         });
 
         // 关闭下拉菜单并保持焦点
@@ -4787,7 +4888,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           setTimeout(() => inputRef.current?.focus(), 0);
         }
       },
-      [clearTriggerSymbol]
+      [clearTriggerSymbol, selectedModel]
     );
 
     // 处理个数选择
@@ -5268,6 +5369,27 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           }
 
           // 引用预检通过后再请求凭据，避免无效引用触发无意义的 API Key 弹窗。
+          if (effectiveContent.some((item) => item.type === 'video')) {
+            const errors = validateCanvasAssociationCapability({
+              generationType: effectiveGenerationType,
+              modelId: effectiveSelectedModel,
+              content: effectiveContent,
+            });
+            if (errors.length > 0) {
+              MessagePlugin.error(errors.join('；'));
+              trackSubmitStatus('failed', {
+                submitMode: 'preflight',
+                submit_mode: 'preflight',
+                failureReason: 'input_capability_mismatch',
+                failure_reason: 'input_capability_mismatch',
+                errorCount: errors.length,
+                error_count: errors.length,
+              });
+              submitLockRef.current = false;
+              setIsSubmitting(false);
+              return;
+            }
+          }
           const currentRouteType =
             effectiveGenerationType === 'video'
               ? 'video'
@@ -5277,22 +5399,78 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                 effectiveGenerationType === 'agent'
               ? 'text'
               : 'image';
-          const hasRouteCredentials = hasInvocationRouteCredentials(
+          await settingsManager.waitForInitialization();
+          if (abortIfSubmittedBoardChanged('settings_initialization')) return;
+          const initialRoute = resolveInvocationRoute(
             currentRouteType,
             effectiveSelectedModelRef || effectiveSelectedModel
           );
-          if (!hasRouteCredentials) {
-            const newApiKey = await promptForApiKey();
-            if (abortIfSubmittedBoardChanged('api_key_prompt')) return;
-            if (!newApiKey) {
-              trackSubmitStatus('cancelled', {
-                reason: 'missing_api_key',
-                submitMode: 'preflight',
-                submit_mode: 'preflight',
-              });
+          let hasRouteCredentials = Boolean(
+            initialRoute.baseUrl && initialRoute.apiKey
+          );
+          const routePreparation = await prepareTuziManagedRoute(initialRoute);
+          if (
+            !hasRouteCredentials ||
+            routePreparation.context ||
+            routePreparation.managedRoute ||
+            routePreparation.requiresSetup
+          ) {
+            if (abortIfSubmittedBoardChanged('tuzi_context')) return;
+            hasRouteCredentials =
+              !routePreparation.requiresSetup &&
+              hasInvocationRouteCredentials(
+                currentRouteType,
+                effectiveSelectedModelRef || effectiveSelectedModel
+              ) &&
+              (!routePreparation.managedRoute ||
+                routePreparation.context?.status === 'ready');
+            if (
+              !hasRouteCredentials &&
+              (routePreparation.context || routePreparation.requiresSetup) &&
+              !override
+            ) {
+              const delegated =
+                await submitGenerationWithCredentialGateRef.current({
+                  prompt: effectivePrompt,
+                  selectedContent: effectiveContent,
+                  generationType: effectiveGenerationType,
+                  selectedModel: effectiveSelectedModel,
+                  selectedModelRef: effectiveSelectedModelRef,
+                  selectedParams: effectiveSelectedParams,
+                  selectedCount: effectiveSelectedCount,
+                  targetSessionId: targetChatSessionId,
+                });
+              if (delegated) {
+                clearSubmittedLocalInput();
+                trackSubmitStatus('cancelled', {
+                  reason: 'credential_setup_pending',
+                  submitMode: 'preflight',
+                  submit_mode: 'preflight',
+                });
+                submitLockRef.current = false;
+                setIsSubmitting(false);
+                return;
+              }
+            }
+            if (routePreparation.requiresSetup) {
+              MessagePlugin.error('请先完成 Tuzi 账户关联和分组配置，再重试');
               submitLockRef.current = false;
               setIsSubmitting(false);
               return;
+            }
+            if (!hasRouteCredentials && !routePreparation.context) {
+              const newApiKey = await promptForApiKey();
+              if (abortIfSubmittedBoardChanged('api_key_prompt')) return;
+              if (!newApiKey) {
+                trackSubmitStatus('cancelled', {
+                  reason: 'missing_api_key',
+                  submitMode: 'preflight',
+                  submit_mode: 'preflight',
+                });
+                submitLockRef.current = false;
+                setIsSubmitting(false);
+                return;
+              }
             }
           }
           if (abortIfSubmittedBoardChanged('credentials_ready')) return;
@@ -5355,6 +5533,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                 ? agentMediaDefaultModelRefs
                 : undefined,
           });
+          const promptForHistory = effectivePrompt;
           let imageBoundTargetGenerationParams =
             activeBoundImageTarget?.type === 'image'
               ? buildBoundTargetGenerationParams(
@@ -5430,6 +5609,65 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
 
           // 收集所有参考媒体（图片 + 图形 + 视频）
           const referenceImages = [...selection.images, ...selection.graphics];
+
+          if (
+            parsedParams.generationType === 'video' &&
+            isMiniMaxH3Model(parsedParams.modelId) &&
+            isMiniMaxH3PromptEnhancementEnabled(parsedParams.extraParams)
+          ) {
+            try {
+              const plan = resolveInvocationPlanFromRoute(
+                'video',
+                parsedParams.modelRef || parsedParams.modelId
+              );
+              if (!plan) {
+                throw new Error(
+                  language === 'zh'
+                    ? '未找到 MiniMax-H3 的视频供应商配置'
+                    : 'No video provider is configured for MiniMax-H3'
+                );
+              }
+
+              const miniMaxReferenceImages: string[] = [];
+              for (const referenceImage of referenceImages) {
+                const imageData = await unifiedCacheService.getImageForAI(
+                  referenceImage
+                );
+                miniMaxReferenceImages.push(imageData.value);
+              }
+
+              parsedParams.prompt = await enhanceMiniMaxH3Prompt(
+                {
+                  prompt: parsedParams.prompt,
+                  promptLanguage: language === 'zh' ? 'zh' : 'en',
+                  duration: parsedParams.duration,
+                  size: parsedParams.size,
+                  ratio: parsedParams.extraParams?.ratio,
+                  referenceImages: miniMaxReferenceImages,
+                  referenceVideos: selection.videos,
+                  params: parsedParams.extraParams,
+                },
+                { provider: plan.provider }
+              );
+              // The prompt has already been enhanced in this preflight. Keep
+              // the flag for the UI, but prevent the downstream video executor
+              // from submitting a second Context IR task.
+              parsedParams.extraParams = {
+                ...(parsedParams.extraParams || {}),
+                [MINIMAX_H3_PROMPT_ENHANCEMENT_PARAM_ID]: false,
+              };
+              if (abortIfSubmittedBoardChanged('prompt_enhancement')) return;
+            } catch (error) {
+              MessagePlugin.error(
+                error instanceof Error
+                  ? error.message
+                  : language === 'zh'
+                  ? 'MiniMax-H3 提示词增强失败，请重试'
+                  : 'MiniMax-H3 prompt enhancement failed. Please retry.'
+              );
+              throw error;
+            }
+          }
 
           // 创建工作流定义（仅用于 WorkZone 显示，实际工作流由 submitWorkflowToSW 创建）
           let workflow: WorkflowDefinition;
@@ -5952,8 +6190,8 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
               ) {
                 applyCurrentImageAnchorPresentationState(board, 'accepted');
               }
-              if (effectivePrompt.trim()) {
-                const trimmedPrompt = effectivePrompt.trim();
+              if (promptForHistory.trim()) {
+                const trimmedPrompt = promptForHistory.trim();
                 const hasSelection = effectiveContent.length > 0;
                 addPromptHistory(
                   trimmedPrompt,
@@ -5982,10 +6220,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
               return;
             }
           } catch (swError) {
-            console.warn(
-              '[AIInputBar] SW execution failed, falling back to main thread:',
-              swError
-            );
+            // Submission now runs on the main thread; a failed preparation
+            // must reach the outer cleanup instead of starting generation.
+            console.warn('[AIInputBar] Workflow preparation failed:', swError);
+            throw swError;
           }
           if (abortIfSubmittedBoardChanged('service_worker_fallback')) return;
           if (board && publishedTaskTargetElementId) {
@@ -6001,8 +6239,8 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           }
 
           // 工作流已提交，立即保存历史、清空输入并解锁，步骤执行在后台继续
-          if (effectivePrompt.trim()) {
-            const trimmedPrompt = effectivePrompt.trim();
+          if (promptForHistory.trim()) {
+            const trimmedPrompt = promptForHistory.trim();
             const hasSelection = effectiveContent.length > 0;
             addPromptHistory(
               trimmedPrompt,
@@ -7660,94 +7898,102 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
       [boundTargetFollowCopy]
     );
     const boundTargetFollowActions = followControlsTarget ? (
-      <div
-        className="ai-input-bar__bound-dismiss-actions"
-        data-testid="ai-bound-follow-actions"
-      >
-        <HoverTip
-          content={
-            boundTargetFollowEnabled
-              ? language === 'zh'
-                ? '任务栏跟随默认开启'
-                : 'Taskbar follow defaults to on'
-              : language === 'zh'
-              ? '任务栏跟随默认关闭'
-              : 'Taskbar follow defaults to off'
-          }
-          showArrow={false}
-        >
-          <span
-            className="ai-input-bar__bound-follow-toggle"
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
+      <Popup
+        trigger="click"
+        placement="top-right"
+        overlayClassName="ai-input-bar__settings-popup"
+        content={
+          <div
+            className="ai-input-bar__settings-panel"
+            onMouseDown={(event) => event.stopPropagation()}
           >
-            <Switch
-              size="small"
-              value={boundTargetFollowEnabled}
-              label={
-                <span className="ai-input-bar__bound-follow-label">
-                  {language === 'zh' ? '任务栏跟随' : 'Taskbar follow'}
-                </span>
-              }
-              onChange={(checked) =>
-                handleBoundTargetFollowChange(checked as boolean)
-              }
-            />
-          </span>
-        </HoverTip>
-        {boundTargetFollowEnabled ? (
-          <div className="ai-input-bar__bound-dismiss-secondary-actions">
-            <HoverTip content={boundTargetFollowCopy.stop} showArrow={false}>
-              <button
-                type="button"
-                className="ai-input-bar__bound-dismiss-btn"
-                aria-label={boundTargetFollowCopy.once}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onClick={() => handleDismissBoundTarget('once')}
-                disabled={isSubmitting}
-              >
-                <X size={16} aria-hidden="true" />
-              </button>
-            </HoverTip>
-            <Dropdown
-              options={boundTargetDismissOptions}
-              trigger="hover"
-              placement="top-right"
-              minColumnWidth={190}
-              popupProps={{
-                visible: isBoundTargetDismissMenuOpen,
-                onVisibleChange: setIsBoundTargetDismissMenuOpen,
-              }}
-              onClick={(data) =>
-                handleDismissBoundTarget(data.value as BoundTargetDismissMode)
-              }
-            >
-              <button
-                type="button"
-                className="ai-input-bar__bound-dismiss-menu-btn"
-                aria-label={
-                  language === 'zh' ? '选择跟随方式' : 'Choose follow behavior'
+            <div className="ai-input-bar__settings-title">
+              {language === 'zh' ? '任务栏设置' : 'Taskbar settings'}
+            </div>
+            <div className="ai-input-bar__settings-row">
+              <span>
+                {language === 'zh' ? '任务栏跟随' : 'Taskbar follow'}
+              </span>
+              <Switch
+                size="small"
+                value={boundTargetFollowEnabled}
+                aria-label={language === 'zh' ? '任务栏跟随' : 'Taskbar follow'}
+                onChange={(checked) =>
+                  handleBoundTargetFollowChange(checked as boolean)
                 }
-                aria-haspopup="menu"
-                aria-expanded={isBoundTargetDismissMenuOpen}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onClick={() => setIsBoundTargetDismissMenuOpen(true)}
-                disabled={isSubmitting}
-              >
-                <ChevronDown size={14} aria-hidden="true" />
-              </button>
-            </Dropdown>
+              />
+            </div>
+            <div className="ai-input-bar__settings-row">
+              <span>
+                {language === 'zh'
+                  ? '点击图片后自动居中'
+                  : 'Center image after clicking'}
+              </span>
+              <Switch
+                size="small"
+                value={centerImageOnClickEnabled}
+                aria-label={language === 'zh' ? '点击图片后自动居中' : 'Center image after clicking'}
+                onChange={(checked) =>
+                  handleCenterImageOnClickChange(checked as boolean)
+                }
+              />
+            </div>
+            {boundTargetFollowEnabled ? (
+              <div className="ai-input-bar__settings-actions">
+                <button
+                  type="button"
+                  className="ai-input-bar__bound-dismiss-btn"
+                  aria-label={boundTargetFollowCopy.once}
+                  onClick={() => handleDismissBoundTarget('once')}
+                  disabled={isSubmitting}
+                >
+                  <X size={16} aria-hidden="true" />
+                </button>
+                <Dropdown
+                  options={boundTargetDismissOptions}
+                  trigger="hover"
+                  placement="top-right"
+                  minColumnWidth={190}
+                  popupProps={{
+                    visible: isBoundTargetDismissMenuOpen,
+                    onVisibleChange: setIsBoundTargetDismissMenuOpen,
+                  }}
+                  onClick={(data) =>
+                    handleDismissBoundTarget(data.value as BoundTargetDismissMode)
+                  }
+                >
+                  <button
+                    type="button"
+                    className="ai-input-bar__bound-dismiss-menu-btn"
+                    aria-label={
+                      language === 'zh' ? '选择跟随方式' : 'Choose follow behavior'
+                    }
+                    aria-haspopup="menu"
+                    aria-expanded={isBoundTargetDismissMenuOpen}
+                    onClick={() => setIsBoundTargetDismissMenuOpen(true)}
+                    disabled={isSubmitting}
+                  >
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </button>
+                </Dropdown>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        }
+      >
+        <button
+          type="button"
+          className="ai-input-bar__settings-btn"
+          aria-label={language === 'zh' ? '设置' : 'Settings'}
+          data-testid="ai-input-settings"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <Settings2 size={18} aria-hidden="true" />
+        </button>
+      </Popup>
     ) : null;
 
     const boundInputStyle = boundInputPosition
@@ -7872,18 +8118,28 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   multiple
                   onChange={handleFileChange}
                   style={{ display: 'none' }}
                 />
 
                 <HoverTip
-                  content={language === 'zh' ? '上传图片' : 'Upload images'}
+                  content={
+                    language === 'zh'
+                      ? '上传图片或视频'
+                      : 'Upload images or videos'
+                  }
                   showArrow={false}
                 >
                   <button
                     className="ai-input-bar__upload-btn"
+                    aria-label={
+                      language === 'zh'
+                        ? '上传图片或视频'
+                        : 'Upload images or videos'
+                    }
+                    disabled={isSubmitting}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -7998,6 +8254,9 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                   onSelectModel={handleModelConfigSelect}
                   language={language}
                   models={currentModels}
+                  modelType={
+                    generationType === 'agent' ? 'text' : generationType
+                  }
                   header={
                     language === 'zh'
                       ? generationType === 'agent'
@@ -8028,6 +8287,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                       }
                       language={language}
                       models={visibleAgentImageModels}
+                      modelType="image"
                       header={
                         language === 'zh'
                           ? '选择图片模型 (↑↓ Tab)'
@@ -8068,6 +8328,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                       }
                       language={language}
                       models={visibleAgentVideoModels}
+                      modelType="video"
                       header={
                         language === 'zh'
                           ? '选择视频模型 (↑↓ Tab)'
@@ -8108,6 +8369,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                       }
                       language={language}
                       models={visibleAgentAudioModels}
+                      modelType="audio"
                       header={
                         language === 'zh'
                           ? '选择音频模型 (↑↓ Tab)'
@@ -8330,7 +8592,11 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
               isOpen={showMediaLibrary}
               onClose={() => setShowMediaLibrary(false)}
               mode={SelectionMode.SELECT}
-              filterType={AssetType.IMAGE}
+              allowedTypes={
+                generationType === 'video'
+                  ? AI_INPUT_VIDEO_ASSET_TYPES
+                  : AI_INPUT_IMAGE_ASSET_TYPES
+              }
               onSelect={handleMediaLibrarySelect}
               onSelectMultiple={handleMediaLibrarySelectMultiple}
               batchSelectButtonText="批量插入对话框"

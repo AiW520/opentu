@@ -1034,4 +1034,34 @@ describe('canvas association resolver', () => {
       'Seedance 2.0 音频 Data URL 合计不能超过 16 MiB',
     ]);
   });
+
+  it('allows up to three MiniMax-H3 video references for model aliases', () => {
+    const content = Array.from({ length: 3 }, (_, index) => ({
+      type: 'video' as const,
+      url: `/asset-library/reference-${index + 1}.mp4`,
+      name: `视频 ${index + 1}`,
+    }));
+
+    expect(
+      validateCanvasAssociationCapability({
+        generationType: 'video',
+        modelId: ' minimax-h3 ',
+        content,
+      })
+    ).toEqual([]);
+    expect(
+      validateCanvasAssociationCapability({
+        generationType: 'video',
+        modelId: 'MiniMax-H3',
+        content: [
+          ...content,
+          {
+            type: 'video',
+            url: '/asset-library/reference-4.mp4',
+            name: '视频 4',
+          },
+        ],
+      })
+    ).toEqual(['MiniMax-H3 最多支持 3 个视频联想引用']);
+  });
 });

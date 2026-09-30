@@ -32,6 +32,7 @@ async function setupTaskQueueServiceHarness(
   } = {}
 ) {
   const storedTasks = new Map<string, any>();
+  const batchGuards = new Map<string, () => boolean>();
 
   const mocks = {
     saveTask: vi.fn(async (task: any) => {
@@ -221,7 +222,27 @@ async function setupTaskQueueServiceHarness(
   });
 
   vi.doMock('../media-executor/task-storage-writer', () => ({
+    isDocumentBatchTaskScopeCurrent: (task: Task) => !task.params.documentBatch || batchGuards.get(task.id)?.() === true,
+    registerDocumentBatchTaskGuard: (id: string, _identity: unknown, guard: () => boolean) => {
+      batchGuards.set(id, guard);
+      return () => batchGuards.delete(id);
+    },
     taskStorageWriter: {
+      prepareDocumentBatchTask: async (id: string, params: Task['params'], metadata: unknown, route: unknown) => {
+        if (!storedTasks.has(id)) storedTasks.set(id, {
+          id, type: 'image', status: 'pending', params: { ...params, documentBatch: metadata },
+          createdAt: Date.now(), updatedAt: Date.now(), invocationRoute: route,
+        });
+        return clone(storedTasks.get(id));
+      },
+      claimDocumentBatchTask: async (id: string, metadata: unknown, ticket: string) => {
+        const task = storedTasks.get(id);
+        if (!task || task.status !== 'pending') return null;
+        task.status = 'processing'; task.startedAt = Date.now();
+        task.params = { ...task.params, imageSubmissionAttempted: true,
+          documentBatch: { ...(metadata as object), dispatchTicket: ticket } };
+        return clone(task);
+      },
       saveTask: mocks.saveTask,
       getTask: mocks.getStoredTask,
       updateStatus: mocks.updateStatus,
@@ -539,6 +560,41 @@ describe('task-queue-service image edit retry persistence', () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('requires a fresh scheduler ticket for a prepared batch and cannot retry it generically', async () => {
+    const { taskQueueService, mocks } = await setupTaskQueueServiceHarness([TaskStatus.COMPLETED], {
+      customProfiles: [{ id: 'profile-a', enabled: true, apiKey: 'test-key', baseUrl: 'https://api.example.com/v1' }],
+    });
+    const metadata = { scopeId: 'scope', batchId: 'batch', workItemId: 'item', attemptId: 'attempt',
+      epoch: 1, dispatchOwner: 'document-batch' as const };
+    const prepared = await taskQueueService.prepareDocumentBatchTask('batch-task', {
+      prompt: 'batch image', modelRef: { profileId: 'profile-a', modelId: 'image' },
+    }, metadata);
+    expect(prepared.status).toBe(TaskStatus.PENDING);
+    expect(mocks.generateImage).not.toHaveBeenCalled();
+    const claimTicket = vi.fn(async () => false as const);
+    const options = { taskId: prepared.id, metadata, claimTicket, scopeGuard: () => true };
+    expect(await taskQueueService.startPreparedDocumentBatchTask(options)).toBe('rejected');
+    expect(mocks.generateImage).not.toHaveBeenCalled();
+    expect(await taskQueueService.startPreparedDocumentBatchTask({ ...options, claimTicket: async () => 'ticket' })).toBe('started');
+    await flushAsyncWork();
+    expect(mocks.generateImage).toHaveBeenCalledTimes(1);
+    expect(await taskQueueService.startPreparedDocumentBatchTask(options)).toBe('already-started');
+    taskQueueService.retryTask(prepared.id, { allowCompleted: true });
+    await flushAsyncWork();
+    expect(mocks.generateImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not consume a batch ticket after scope revocation', async () => {
+    const { taskQueueService, mocks } = await setupTaskQueueServiceHarness([TaskStatus.COMPLETED]);
+    const claimTicket = vi.fn(async () => 'ticket');
+    expect(await taskQueueService.startPreparedDocumentBatchTask({
+      taskId: 'missing', metadata: { scopeId: 'old', batchId: 'b', workItemId: 'w', attemptId: 'a',
+        epoch: 1, dispatchOwner: 'document-batch' }, claimTicket, scopeGuard: () => false,
+    })).toBe('rejected');
+    expect(claimTicket).not.toHaveBeenCalled();
+    expect(mocks.generateImage).not.toHaveBeenCalled();
   });
 
   it('reports only a live in-page execution as active', async () => {
@@ -1172,6 +1228,7 @@ describe('task-queue-service image edit retry persistence', () => {
 
   it('does not let a late analyzer response overwrite a newer same-id restore', async () => {
     vi.stubGlobal('window', {
+      location: { origin: 'http://localhost:7200' },
       setInterval: vi.fn(() => 1),
       clearInterval: vi.fn(),
     });
@@ -1530,6 +1587,116 @@ describe('task-queue-service image edit retry persistence', () => {
       'data:image/png;base64,source',
     ]);
   });
+
+  it.each([
+    [TaskStatus.COMPLETED, true],
+    [TaskStatus.COMPLETED, false],
+    [TaskStatus.FAILED, true],
+    [TaskStatus.FAILED, false],
+  ] as const)(
+    'preserves the video provider ID and route on %s writeback (progress callback: %s)',
+    async (terminalStatus, emitProgress) => {
+      const { taskQueueService, storedTasks, mocks } =
+        await setupTaskQueueServiceHarness([terminalStatus]);
+      const updates: Task[] = [];
+      const subscription = taskQueueService
+        .observeTaskUpdates()
+        .subscribe((event) => {
+          if (
+            event.type === 'taskUpdated' &&
+            event.task.status === terminalStatus
+          ) {
+            updates.push(clone(event.task));
+          }
+        });
+      let submittedRoute: Task['invocationRoute'];
+      mocks.generateVideo.mockImplementationOnce(async (params) => {
+        const storedTask = storedTasks.get(params.taskId);
+        submittedRoute = {
+          ...storedTask.invocationRoute,
+          providerProfileId: 'submitted-video-provider',
+          modelRef: {
+            profileId: 'submitted-video-provider',
+            modelId: 'MiniMax-H3',
+          },
+        };
+        // The executor writes submission metadata directly to IndexedDB.
+        storedTasks.set(params.taskId, {
+          ...storedTask,
+          remoteId: 'h3-provider-task-1',
+          invocationRoute: submittedRoute,
+        });
+      });
+      mocks.waitForTaskCompletion.mockImplementationOnce(
+        async (taskId, options) => {
+          const completedTask = {
+            ...clone(storedTasks.get(taskId)),
+            status: terminalStatus,
+            completedAt: Date.now(),
+            ...(terminalStatus === TaskStatus.COMPLETED
+              ? {
+                  result: {
+                    url: 'https://example.com/video.mp4',
+                    format: 'mp4',
+                    size: 1,
+                  },
+                }
+              : {
+                  error: {
+                    code: 'VIDEO_FAILED',
+                    message: 'Provider task failed',
+                  },
+                }),
+          };
+          storedTasks.set(taskId, clone(completedTask));
+          if (emitProgress) options?.onProgress?.(clone(completedTask));
+          return {
+            success: terminalStatus === TaskStatus.COMPLETED,
+            task: completedTask,
+          };
+        }
+      );
+
+      const task = taskQueueService.createTask(
+        { prompt: 'Generate a video', model: 'MiniMax-H3', size: '768P' },
+        TaskType.VIDEO
+      );
+      await flushAsyncWork();
+
+      expect(mocks.generateVideo).toHaveBeenCalledTimes(1);
+      expect(updates).toHaveLength(emitProgress ? 2 : 1);
+      for (const updatedTask of updates) {
+        expect(updatedTask).toMatchObject({
+          remoteId: 'h3-provider-task-1',
+          invocationRoute: submittedRoute,
+        });
+      }
+      expect(taskQueueService.getTask(task.id)).toMatchObject({
+        status: terminalStatus,
+        remoteId: 'h3-provider-task-1',
+        invocationRoute: submittedRoute,
+      });
+      expect(storedTasks.get(task.id)).toMatchObject({
+        status: terminalStatus,
+        remoteId: 'h3-provider-task-1',
+        invocationRoute: submittedRoute,
+      });
+      if (terminalStatus === TaskStatus.COMPLETED) {
+        const { getMiniMaxH3RegenerationEligibility } = await import(
+          '../minimax-h3-regeneration-service'
+        );
+        const completedTask = taskQueueService.getTask(task.id);
+        if (!completedTask) throw new Error('Completed video task is missing');
+        expect(
+          getMiniMaxH3RegenerationEligibility(completedTask)
+        ).toMatchObject({
+          supported: true,
+          enabled: true,
+        });
+      }
+      subscription.unsubscribe();
+    }
+  );
 
   it('forwards internal result visibility when executing video tasks', async () => {
     const { taskQueueService, mocks } = await setupTaskQueueServiceHarness([

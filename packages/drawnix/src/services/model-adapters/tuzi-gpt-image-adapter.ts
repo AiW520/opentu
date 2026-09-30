@@ -1,4 +1,5 @@
 import {
+  normalizeImageResolutionTier,
   resolveOfficialGPTImageQuality,
   resolveOfficialGPTImageSize,
 } from './image-size-quality-resolver';
@@ -19,6 +20,7 @@ import {
 } from '../provider-routing';
 import { registerModelAdapter } from './registry';
 import type { ImageGenerationRequest, ImageModelAdapter } from './types';
+import { GPT_IMAGE_2_MODEL_IDS } from '../../constants/model-config';
 
 type TuziResponseFormat = 'url' | 'b64_json';
 
@@ -74,8 +76,9 @@ export function buildTuziGPTImageRequestOptions(
   size?: string;
   image?: string[];
   response_format?: TuziResponseFormat;
-  quality?: 'auto' | 'low' | 'medium' | 'high';
+  quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   count?: number;
+  imageSize?: string;
   model: string;
   modelRef: ImageGenerationRequest['modelRef'];
 } {
@@ -84,15 +87,21 @@ export function buildTuziGPTImageRequestOptions(
     request.modelRef?.modelId?.trim() ||
     request.model?.trim() ||
     TUZI_GPT_IMAGE_MODEL_ID;
+  const requestedSize = getStringParam(request.params, 'size') || request.size;
+  const useAutomaticRatio =
+    GPT_IMAGE_2_MODEL_IDS.includes(model.toLowerCase()) &&
+    requestedSize?.trim().toLowerCase() === 'auto';
+  const resolution = normalizeImageResolutionTier(request.params?.resolution);
 
   return {
-    size: getResolvedOfficialSize(request, model),
+    size: useAutomaticRatio ? 'auto' : getResolvedOfficialSize(request, model),
+    imageSize: useAutomaticRatio ? resolution?.toUpperCase() : undefined,
     image:
       request.referenceImages && request.referenceImages.length > 0
         ? request.referenceImages
         : undefined,
     response_format: getResponseFormat(request),
-    quality: resolveOfficialGPTImageQuality(request.params),
+    quality: resolveOfficialGPTImageQuality(request.params, model),
     count: getRequestedCount(request),
     model,
     modelRef: request.modelRef || null,
@@ -114,6 +123,10 @@ export function buildTuziGPTImageRequestBody(
 
   if (options.size) {
     body.size = options.size;
+  }
+  // Auto controls aspect ratio only; retain the selected tier for Tuzi billing.
+  if (options.imageSize) {
+    body.generationConfig = { imageConfig: { imageSize: options.imageSize } };
   }
   if (options.image && options.image.length > 0) {
     body.image = options.image;
@@ -211,7 +224,7 @@ export const tuziGPTImageAdapter: ImageModelAdapter = {
     }
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response));
+      throw Object.assign(new Error(await readErrorMessage(response)), { httpStatus: response.status });
     }
 
     const result = await readProviderResponseJson(response);

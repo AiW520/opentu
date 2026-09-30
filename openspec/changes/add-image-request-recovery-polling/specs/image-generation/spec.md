@@ -2,7 +2,7 @@
 
 ### Requirement: Trusted Tuzi Image Submissions SHALL Carry A Stable Request ID
 
-The system SHALL persist the current image submission Request ID before the formal POST and SHALL attach it as `X-Request-Id` only when the user-configured trusted Tuzi target is Request-ID-CORS-compatible. The system SHALL NOT change the configured provider address to enable this header.
+The system SHALL persist the current image submission Request ID before the formal POST, SHALL send image submissions directly to the user-configured trusted Tuzi target, and SHALL attach the ID as `X-Request-Id` for trusted synchronous Tuzi image POSTs.
 
 #### Scenario: First formal submission to a compatible configured endpoint
 
@@ -12,15 +12,15 @@ The system SHALL persist the current image submission Request ID before the form
 - **AND** SHALL persist `imageSubmissionAttempted=true` and the invocation route before sending
 - **AND** the request SHALL contain exactly one `X-Request-Id` with that value
 
-#### Scenario: Configured trusted node lacks Request-ID CORS support
+#### Scenario: Trusted configured node receives the custom request header
 
-- **GIVEN** the configured Tuzi node is trusted but does not allow `X-Request-Id` in browser preflight
+- **GIVEN** the configured Tuzi node is a trusted Tuzi API deployment
 - **WHEN** the formal image POST is prepared
 - **THEN** the system SHALL send the request directly to the configured node
-- **AND** SHALL NOT attach `X-Request-Id`
-- **AND** SHALL NOT enable automatic result recovery for that submission
-- **AND** SHALL submit the image POST only once
-- **AND** network or HTTP failure SHALL NOT trigger another image POST on a different node
+- **AND** SHALL attach `X-Request-Id`
+- **AND** SHALL persist the submission identity before sending the POST once
+- **AND** page reload SHALL issue read-only result queries with the persisted ID
+- **AND** network or HTTP failure SHALL NOT trigger another image POST
 
 #### Scenario: Compatible trusted node is configured
 
@@ -29,11 +29,11 @@ The system SHALL persist the current image submission Request ID before the form
 - **THEN** the system SHALL keep that node
 - **AND** SHALL attach the current submission Request ID
 
-#### Scenario: GET or untrusted target
+#### Scenario: Recovery GET and untrusted target
 
-- **WHEN** a request is GET or its final URL is not a trusted Tuzi target
-- **THEN** the system SHALL NOT inject the task Request ID
-- **AND** trusted recovery GET requests SHALL remove stale Request ID header variants
+- **WHEN** a recovery GET targets the trusted Tuzi result endpoint
+- **THEN** the system SHALL send the Request ID in both the query and `X-Request-Id` header
+- **AND** other GET requests or requests whose final URL is not a trusted Tuzi target SHALL NOT inject the task Request ID
 - **AND** third-party targets SHALL NOT receive Tuzi credentials
 
 #### Scenario: Retry creates a new submission identity
@@ -130,7 +130,7 @@ The system SHALL resume a formally submitted synchronous image task after page r
 - **GIVEN** image request inputs select a different binding from the model's default binding
 - **WHEN** the formal POST is about to be sent
 - **THEN** the submitted-attempt marker and actual selected binding SHALL be persisted atomically
-- **AND** recovery SHALL be excluded when the final prepared target cannot carry the Request ID
+- **AND** recovery SHALL be excluded only when the final target is not a trusted synchronous Tuzi image route
 
 #### Scenario: Legacy or unsubmitted task
 

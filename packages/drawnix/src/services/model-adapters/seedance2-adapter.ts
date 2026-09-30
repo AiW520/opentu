@@ -1,3 +1,4 @@
+import { notifyTaskSubmitted } from '../submission-persistence';
 import type {
   AdapterContext,
   VideoGenerationRequest,
@@ -11,6 +12,8 @@ import {
   areSeedanceAudioDataUrlsWithinLimit,
   downloadVideoContentToLocalUrl,
   extractInlineVideoUrl,
+  shouldDownloadVideoContent,
+  VideoContentHttpError,
   isSeedanceAudioReference,
   isPublicHttpMediaUrl,
 } from '../video-binding-utils';
@@ -31,6 +34,8 @@ import {
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 const MAX_CONSECUTIVE_ERRORS = 10;
 const MAX_POLL_ATTEMPTS = 1080;
+const MAX_CONTENT_DOWNLOAD_ATTEMPTS = 3;
+const CONTENT_DOWNLOAD_RETRY_DELAY_MS = 1000;
 
 interface Seedance2ContentItem {
   type: 'text' | 'image_url' | 'video_url' | 'audio_url';
@@ -141,7 +146,9 @@ function resolveVideoOptions(
   ratio: string;
   duration: number;
 } {
-  const legacy = parseLegacySize(request.size);
+  const legacy = parseLegacySize(
+    request.size || (isSeedance25ModelId(request.model) ? '480p' : undefined)
+  );
   const resolution =
     getStringParam(request.params, ['resolution']) || legacy.resolution;
   const ratio =
@@ -361,7 +368,9 @@ async function buildContent(
   capabilities: NonNullable<ReturnType<typeof getSeedance2Capabilities>>,
   modelLabel: string
 ): Promise<Seedance2ContentItem[]> {
-  if ((request.referenceImages || []).length > capabilities.maxReferenceImages) {
+  if (
+    (request.referenceImages || []).length > capabilities.maxReferenceImages
+  ) {
     throw new Error(
       `${modelLabel} 参考图片最多支持 ${capabilities.maxReferenceImages} 张`
     );
@@ -486,21 +495,52 @@ function isTransientPollError(error: unknown): boolean {
   );
 }
 
-export const seedance2VideoAdapter: VideoModelAdapter = {
-  id: 'seedance-2-video-adapter',
-  label: 'Seedance 2.0 Video',
-  kind: 'video',
-  docsUrl: 'https://tuzi-api.apifox.cn/418534831e0',
-  matchProtocols: ['openai.async.video'],
-  matchRequestSchemas: ['doubao.seedance-2.video.content-json'],
-  matchPredicate(modelConfig) {
-    return isSeedance2Model(modelConfig.id);
-  },
+function isTransientContentError(error: unknown): boolean {
+  if (error instanceof VideoContentHttpError) {
+    return (
+      error.status === 408 ||
+      error.status === 425 ||
+      error.status === 429 ||
+      error.status >= 500
+    );
+  }
+  return (
+    error instanceof Error &&
+    error.name !== 'AbortError' &&
+    (error instanceof TypeError ||
+      error.name === 'NetworkError' ||
+      error.name === 'TimeoutError')
+  );
+}
 
-  async generateVideo(
-    context: AdapterContext,
-    request: VideoGenerationRequest
-  ): Promise<VideoGenerationResult> {
+async function downloadCompletedVideo(
+  params: Parameters<typeof downloadVideoContentToLocalUrl>[0]
+): Promise<string> {
+  // Retry delivery only: a completed task must never be submitted again here.
+  for (let attempt = 1; ; attempt += 1) {
+    params.signal?.throwIfAborted();
+    try {
+      return await downloadVideoContentToLocalUrl(params);
+    } catch (error) {
+      if (
+        params.signal?.aborted ||
+        attempt >= MAX_CONTENT_DOWNLOAD_ATTEMPTS ||
+        !isTransientContentError(error)
+      ) {
+        throw error;
+      }
+      await sleep(
+        CONTENT_DOWNLOAD_RETRY_DELAY_MS * 2 ** (attempt - 1),
+        params.signal
+      );
+    }
+  }
+}
+
+export async function submitSeedance2Request(
+  context: AdapterContext,
+  request: VideoGenerationRequest
+) {
     const model = request.model || '';
     if (!isSeedance2Model(model)) {
       throw new Error(`不支持的 Seedance 2.0 模型：${model}`);
@@ -521,37 +561,50 @@ export const seedance2VideoAdapter: VideoModelAdapter = {
       ? parseOptionalInteger(request.params?.seed, '随机种子', modelLabel)
       : undefined;
     const cameraFixed = capabilities.supportsAdvancedControls
-      ? parseOptionalBoolean(
-          request.params?.camera_fixed,
-          '固定镜头',
-          modelLabel
-        )
+    ? parseOptionalBoolean(request.params?.camera_fixed, '固定镜头', modelLabel)
       : undefined;
-    const onProgress = request.params?.onProgress as
-      | ((progress: number, status?: string) => void)
-      | undefined;
-    const onSubmitted = request.params?.onSubmitted as
-      | ((taskId: string) => void)
-      | undefined;
-
+  const is25 = isSeedance25ModelId(model);
+  const extra: Record<string, unknown> = {};
+  if (is25) {
+    const draft = parseBoolean(
+      request.params?.draft,
+      false,
+      '样片模式',
+      modelLabel
+    );
+    const outputFormat = request.params?.output_format || 'mp4';
+    const priority =
+      parseOptionalInteger(request.params?.priority, '优先级', modelLabel) ?? 0;
+    if (outputFormat !== 'mp4' && outputFormat !== 'mov') {
+      throw new Error(`${modelLabel} 输出格式必须为 mp4 或 mov`);
+    }
+    if (priority < 0 || priority > 9)
+      throw new Error(`${modelLabel} 优先级必须为 0-9`);
+    if (draft && resolution !== '480p')
+      throw new Error(`${modelLabel} 样片模式仅支持 480p`);
+    Object.assign(extra, {
+      watermark: parseBoolean(
+        request.params?.watermark,
+        false,
+        '水印',
+        modelLabel
+      ),
+      output_format: outputFormat,
+      draft,
+      priority,
+    });
+  }
     const submitBody = {
       model,
       content: await buildContent(request, capabilities, modelLabel),
-      // Tuzi's current Seedance 2.5 endpoint does not declare resolution in
-      // its request schema. Keep the legacy field for Seedance 2.0 only.
-      ...(!isSeedance25ModelId(model) ? { resolution } : {}),
+    resolution,
+    ...extra,
       ratio,
       duration,
       generate_audio: parseBoolean(
         request.params?.generate_audio,
         true,
         '生成音频',
-        modelLabel
-      ),
-      watermark: parseBoolean(
-        request.params?.watermark,
-        false,
-        '水印',
         modelLabel
       ),
       ...(seed !== undefined ? { seed } : {}),
@@ -576,7 +629,34 @@ export const seedance2VideoAdapter: VideoModelAdapter = {
       throw new Error('Seedance 2.0 API 未返回任务 ID');
     }
 
-    onSubmitted?.(taskId);
+    return { taskId, submitted, model, provider, duration };
+}
+
+export const seedance2VideoAdapter: VideoModelAdapter = {
+  id: 'seedance-2-video-adapter',
+  label: 'Seedance 2.0 Video',
+  kind: 'video',
+  docsUrl: 'https://tuzi-api.apifox.cn/418534831e0',
+  matchProtocols: ['openai.async.video'],
+  matchRequestSchemas: ['doubao.seedance-2.video.content-json'],
+  matchPredicate(modelConfig) {
+    return isSeedance2Model(modelConfig.id);
+  },
+
+  async generateVideo(
+    context: AdapterContext,
+    request: VideoGenerationRequest
+  ): Promise<VideoGenerationResult> {
+    const onProgress = request.params?.onProgress as
+      | ((progress: number, status?: string) => void)
+      | undefined;
+    const onSubmitted = request.params?.onSubmitted as
+      | ((taskId: string) => void)
+      | undefined;
+
+    const { taskId, submitted, model, provider, duration } =
+      await submitSeedance2Request(context, request);
+    await notifyTaskSubmitted(taskId, onSubmitted);
     onProgress?.(5, submitted.status || 'queued');
 
     let consecutiveErrors = 0;
@@ -599,24 +679,43 @@ export const seedance2VideoAdapter: VideoModelAdapter = {
         const normalizedStatus = (status.status || '').toLowerCase();
         onProgress?.(status.progress ?? 0, normalizedStatus);
 
-        if (normalizedStatus === 'failed' || normalizedStatus === 'error') {
+        if (
+          ['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(
+            normalizedStatus
+          )
+        ) {
           businessFailure = true;
           throw new Error(extractErrorMessage(status.error));
         }
         if (
-          normalizedStatus === 'completed' ||
-          normalizedStatus === 'succeeded'
+          [
+            'completed',
+            'complete',
+            'succeeded',
+            'succeed',
+            'success',
+            'done',
+          ].includes(normalizedStatus)
         ) {
+          businessFailure = true;
           const inlineUrl = extractResultUrl(status);
           const url =
-            inlineUrl ||
-            (await downloadVideoContentToLocalUrl({
-              videoId: taskId,
-              provider,
-              binding: context.binding,
-              modelId: status.model || model,
-              cacheKey: taskId,
-            }));
+            inlineUrl &&
+            !shouldDownloadVideoContent(
+              status.model || model,
+              context.binding,
+              { ...status, video_url: inlineUrl }
+            )
+              ? inlineUrl
+              : await downloadCompletedVideo({
+                  videoId: taskId,
+                  provider,
+                  binding: context.binding,
+                  modelId: status.model || model,
+                  cacheKey: taskId,
+                  signal: context.signal,
+                  fetcher: context.fetcher,
+                });
           onProgress?.(100, normalizedStatus);
           return {
             url,

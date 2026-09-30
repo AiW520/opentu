@@ -127,7 +127,7 @@ function applyCommonGPTImageOptions(
     mode === 'edit'
       ? resolveOfficialGPTImageEditSize(request.model, requestedSize, params)
       : resolveOfficialGPTImageSize(request.model, requestedSize, params);
-  const quality = resolveOfficialGPTImageQuality(params);
+  const quality = resolveOfficialGPTImageQuality(params, request.model);
   const n = getNumberParam(params, 'n') ?? getNumberParam(params, 'count');
   const outputCompression = getNumberFieldOrParam(
     request.outputCompression,
@@ -603,7 +603,7 @@ export const gptImageAdapter: ImageModelAdapter = {
     }
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response));
+      throw Object.assign(new Error(await readErrorMessage(response)), { httpStatus: response.status });
     }
 
     const result = await readProviderResponseJson(response);

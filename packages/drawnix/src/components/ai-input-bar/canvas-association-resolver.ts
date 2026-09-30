@@ -37,6 +37,7 @@ import {
   getSeedance2Label,
   isSeedance2ModelId,
 } from '../../utils/seedance-model';
+import { isMiniMaxH3Model } from '../../services/video-binding-utils';
 
 const DEFAULT_RASTER_OUTPUT_RATIO = 2;
 const MAX_RASTER_OUTPUT_DIMENSION = 2048;
@@ -677,8 +678,12 @@ export function validateCanvasAssociationCapability({
     if (visualCount > 0 && videoImageInput && videoImageInput.maxCount === 0) {
       errors.push('当前视频模型不支持图片联想引用');
     }
-    if (videoCount > 0 && !isSeedance2 && !isHappyHorseEdit) {
+    const isMiniMaxH3 = isMiniMaxH3Model(modelId);
+    if (videoCount > 0 && !isSeedance2 && !isHappyHorseEdit && !isMiniMaxH3) {
       errors.push('当前视频模型不支持视频联想引用');
+    }
+    if (isMiniMaxH3 && videoCount > 3) {
+      errors.push('MiniMax-H3 最多支持 3 个视频联想引用');
     }
     if (isHappyHorseEdit && videoCount > 1) {
       errors.push('当前视频编辑模型最多支持 1 个视频联想引用');

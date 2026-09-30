@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+// @vitest-environment-options {"url":"http://localhost:3100"}
 import { describe, expect, it, vi } from 'vitest';
 import { readTuziEmbeddedConfig } from '../tuzi-embedded-config';
 import { TuziSessionApiClient, TuziSessionApiError } from '../tuzi-session-api';
@@ -218,6 +220,146 @@ describe('TuziSessionApiClient', () => {
     );
   });
 
+  it('limits managed provider creation to the selected groups', async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ success: true, data: { providers: [] } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+    );
+    const client = new TuziSessionApiClient(config, fetcher as typeof fetch);
+
+    await client.ensureManagedProviders(['vip', 'vip']);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      'http://localhost:3100/api/opentu/providers/ensure',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ groups: ['vip'] }),
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+        }),
+      })
+    );
+  });
+
+  it('filters legacy all-group responses to the requested allowlist', async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              providers: [
+                {
+                  id: 'tuzi-managed-default',
+                  group: 'default',
+                  display_name: 'default',
+                  api_key: 'sk-default',
+                  status: 1,
+                },
+                {
+                  id: 'tuzi-managed-vip',
+                  group: 'vip',
+                  display_name: 'VIP',
+                  api_key: 'sk-vip',
+                  status: 1,
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+    );
+    const client = new TuziSessionApiClient(config, fetcher as typeof fetch);
+
+    await expect(client.ensureManagedProviders(['default'])).resolves.toEqual([
+      expect.objectContaining({ group: 'default' }),
+    ]);
+    await expect(client.ensureManagedProviders([])).resolves.toEqual([]);
+  });
+
+  it('reads authorized provider groups without creating managed keys', async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: [
+              { group: 'default', display_name: '默认分组' },
+              { group: 'vip', display_name: 'VIP 分组' },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+    );
+    const client = new TuziSessionApiClient(config, fetcher as typeof fetch);
+
+    await expect(client.getProviderGroups()).resolves.toEqual([
+      { group: 'default', displayName: '默认分组' },
+      { group: 'vip', displayName: 'VIP 分组' },
+    ]);
+    expect(fetcher).toHaveBeenCalledWith(
+      'http://localhost:3100/api/opentu/provider-groups',
+      expect.objectContaining({ method: 'GET' })
+    );
+  });
+
+  it('retries one transient provider-group read failure', async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: [{ group: 'default', display_name: '默认分组' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    const client = new TuziSessionApiClient(config, fetcher as typeof fetch);
+
+    await expect(client.getProviderGroups()).resolves.toEqual([
+      { group: 'default', displayName: '默认分组' },
+    ]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a rejected provider-group authorization', async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: false,
+            error: { code: 'TOKEN_INVALID', message: '令牌无效' },
+          }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        )
+    );
+    const client = new TuziSessionApiClient(config, fetcher as typeof fetch);
+
+    await expect(client.getProviderGroups()).rejects.toMatchObject({
+      code: 'TOKEN_INVALID',
+      status: 401,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after one retry when provider-group reads keep failing', async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const client = new TuziSessionApiClient(config, fetcher as typeof fetch);
+
+    await expect(client.getProviderGroups()).rejects.toMatchObject({
+      code: 'REQUEST_FAILED',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it('rotates managed providers with an explicit old-token delete action', async () => {
     const fetcher = vi.fn(
       async () =>
@@ -345,6 +487,7 @@ describe('TuziSessionApiClient', () => {
           requestId: 'req-1',
           responseId: 'resp-1',
           upstreamRequestId: 'upstream-1',
+          generatedImageUrls: ['https://example.com/image.png'],
           other: {
             request_host: 'api.example.com',
             request_path: '/v1/images/generations',
@@ -379,5 +522,71 @@ describe('TuziSessionApiClient', () => {
       expect.stringContaining('/api/log/self?'),
       expect.anything()
     );
+  });
+});
+
+describe('account token inventory transport', () => {
+  const token = {
+    token_id: 1,
+    token_name: '我的令牌',
+    groups: ['default'],
+    usable: true,
+    fingerprint: 'a'.repeat(64),
+  };
+  it('loads metadata and imports only explicitly selected token IDs', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: { user_id: 40832, tokens: [token] },
+          })
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              user_id: 40832,
+              tokens: [{ ...token, api_key: 'sk-selected' }],
+            },
+          })
+        )
+      );
+    const client = new TuziSessionApiClient(config, fetcher);
+    const listed = await client.listAccountTokens();
+    expect(listed[0].api_key).toBeUndefined();
+    await client.importAccountTokens([1]);
+    expect(fetcher.mock.calls[1][0]).toBe(
+      'http://localhost:3100/api/opentu/tokens/import'
+    );
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ ids: [1] });
+  });
+  it('rejects responses for another account before exposing credentials', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: { user_id: 2, tokens: [{ ...token, api_key: 'sk-other' }] },
+          })
+        )
+      );
+    await expect(
+      new TuziSessionApiClient(config, fetcher).importAccountTokens([1])
+    ).rejects.toThrow('账户已变化');
+  });
+  it('does not retry a creation request after an ambiguous network failure', async () => {
+    const fetcher = vi.fn().mockRejectedValue(new Error('connection closed'));
+    await expect(
+      new TuziSessionApiClient(config, fetcher).createAccountTokens(
+        '我的令牌',
+        ['default']
+      )
+    ).rejects.toThrow('connection closed');
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

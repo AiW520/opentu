@@ -91,6 +91,11 @@ describe('generation queue context passthrough', () => {
       label: '产品主图',
     },
   ];
+  const workflowGenerationTarget = {
+    documentId: 'workflow-document-1',
+    frameId: 'workflow-frame-1',
+    inputReferences: [],
+  };
 
   beforeEach(() => {
     createdTasks.length = 0;
@@ -131,6 +136,42 @@ describe('generation queue context passthrough', () => {
         prompt: '生成品牌短片',
         knowledgeContextRefs: refs,
         canvasAssociations,
+      },
+    });
+  });
+
+  it('preserves MiniMax-H3 2K resolution on video queue tasks', async () => {
+    const { createVideoTask } = await import('./video-generation');
+
+    await createVideoTask({
+      prompt: '生成高清品牌短片',
+      model: 'MiniMax-H3',
+      size: '2k',
+    });
+
+    expect(createdTasks[0]).toMatchObject({
+      type: TaskType.VIDEO,
+      params: {
+        model: 'MiniMax-H3',
+        size: '2K',
+      },
+    });
+  });
+
+  it('uses MiniMax-H3 model defaults on video queue tasks', async () => {
+    const { createVideoTask } = await import('./video-generation');
+
+    await createVideoTask({
+      prompt: '生成默认规格品牌短片',
+      model: 'MiniMax-H3',
+    });
+
+    expect(createdTasks[0]).toMatchObject({
+      type: TaskType.VIDEO,
+      params: {
+        model: 'MiniMax-H3',
+        size: '768P',
+        duration: 5,
       },
     });
   });
@@ -177,6 +218,27 @@ describe('generation queue context passthrough', () => {
         },
       },
     });
+  });
+
+  it('keeps the workflow target in long-video chain metadata without exposing it on segment tasks', async () => {
+    const { createLongVideoTask } = await import('./long-video-generation');
+
+    await createLongVideoTask({
+      prompt: '生成连续的工作流长片',
+      totalDuration: 8,
+      segmentDuration: 8,
+      workflowGenerationTarget,
+    });
+
+    expect(createdTasks[0]).toMatchObject({
+      type: TaskType.VIDEO,
+      params: {
+        longVideoMeta: {
+          workflowGenerationTarget,
+        },
+      },
+    });
+    expect(createdTasks[0].params.workflowGenerationTarget).toBeUndefined();
   });
 
   it('keeps lightweight refs on audio queue tasks', async () => {

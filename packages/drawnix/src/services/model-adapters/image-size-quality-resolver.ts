@@ -1,7 +1,17 @@
-import { GPT_IMAGE_2_MODEL_IDS } from '../../constants/model-config';
+import {
+  GPT_IMAGE_25_EXTENDED_MODEL_IDS,
+  GPT_IMAGE_25_MODEL_IDS,
+  GPT_IMAGE_2_MODEL_IDS,
+} from '../../constants/model-config';
 
 export type ImageResolutionTier = '1k' | '2k' | '4k';
-export type OfficialGPTImageQuality = 'auto' | 'low' | 'medium' | 'high';
+export type OfficialGPTImageQuality =
+  | 'auto'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
 
 type GPTImageAspectRatioKey =
   | '1x1'
@@ -18,6 +28,13 @@ type GPTImageAspectRatioKey =
 type LegacyGPTImageAspectRatioKey = '1x1' | '2x3' | '3x2';
 
 const GPT_IMAGE_2_MODEL_ID_SET = new Set(GPT_IMAGE_2_MODEL_IDS);
+const GPT_IMAGE_25_MODEL_ID_SET = new Set(GPT_IMAGE_25_MODEL_IDS);
+const EXTENDED_GPT_IMAGE_QUALITY_MODEL_IDS = new Set([
+  'gpt-image-2.5',
+  'gpt-image-2.5-vip',
+  'gpt-image-2.5-sunburst',
+  'gpt-image-2.5-flare',
+]);
 const LEGACY_GPT_IMAGE_MODEL_IDS = new Set(['gpt-image-1', 'gpt-image-1.5']);
 
 const OFFICIAL_GPT_IMAGE_QUALITY_VALUES = new Set<OfficialGPTImageQuality>([
@@ -25,6 +42,8 @@ const OFFICIAL_GPT_IMAGE_QUALITY_VALUES = new Set<OfficialGPTImageQuality>([
   'low',
   'medium',
   'high',
+  'xhigh',
+  'max',
 ]);
 
 const LEGACY_RESOLUTION_VALUES = new Set<ImageResolutionTier>([
@@ -75,6 +94,20 @@ const GPT_IMAGE_2_SIZE_MATRIX: Record<
   },
 };
 
+// Keep Image 2 and 2.5 2K requests within the provider's pixel billing cap.
+const GPT_IMAGE_2K_BILLING_SIZES: Record<GPTImageAspectRatioKey, string> = {
+  '1x1': '1920x1920',
+  '2x3': '1536x2304',
+  '3x2': '2304x1536',
+  '3x4': '1632x2176',
+  '4x3': '2176x1632',
+  '4x5': '1664x2080',
+  '5x4': '2080x1664',
+  '9x16': '1440x2560',
+  '16x9': '2560x1440',
+  '21x9': '2912x1248',
+};
+
 const LEGACY_GPT_IMAGE_SIZE_BY_RATIO: Record<
   LegacyGPTImageAspectRatioKey,
   string
@@ -86,6 +119,9 @@ const LEGACY_GPT_IMAGE_SIZE_BY_RATIO: Record<
 
 const LEGACY_GPT_IMAGE_SIZES = new Set(
   Object.values(LEGACY_GPT_IMAGE_SIZE_BY_RATIO).concat('auto')
+);
+const GPT_IMAGE_25_SIZES = new Set(
+  Object.values(LEGACY_GPT_IMAGE_SIZE_BY_RATIO)
 );
 const OFFICIAL_GPT_IMAGE_EDIT_SIZES = new Set([
   'auto',
@@ -210,6 +246,13 @@ export function isGPTImage2Model(modelId?: string | null): boolean {
   );
 }
 
+function isGPTImage25Model(modelId?: string | null): boolean {
+  return (
+    typeof modelId === 'string' &&
+    GPT_IMAGE_25_MODEL_ID_SET.has(modelId.trim().toLowerCase())
+  );
+}
+
 export function isLegacyGPTImageModel(modelId?: string | null): boolean {
   return !!modelId && LEGACY_GPT_IMAGE_MODEL_IDS.has(modelId);
 }
@@ -250,9 +293,35 @@ export function normalizeOfficialGPTImageQuality(
 }
 
 export function resolveOfficialGPTImageQuality(
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  modelId?: string
 ): OfficialGPTImageQuality | undefined {
-  return normalizeOfficialGPTImageQuality(params?.quality);
+  const quality = normalizeOfficialGPTImageQuality(params?.quality);
+  if (quality !== 'xhigh' && quality !== 'max') {
+    return quality;
+  }
+
+  return modelId &&
+    EXTENDED_GPT_IMAGE_QUALITY_MODEL_IDS.has(modelId.trim().toLowerCase())
+    ? quality
+    : undefined;
+}
+
+export function normalizeGPTImage25ResolutionParams(
+  modelId: string,
+  params: Record<string, string>
+): Record<string, string> {
+  if (
+    !GPT_IMAGE_25_EXTENDED_MODEL_IDS.includes(modelId.trim().toLowerCase()) ||
+    !normalizeImageResolutionTier(params.resolution) ||
+    params.size?.trim().toLowerCase() === 'auto'
+  ) {
+    return params;
+  }
+  return {
+    ...params,
+    size: resolveKnownAspectRatio(params.size) || '1x1',
+  };
 }
 
 export function resolveOfficialGPTImageSize(
@@ -261,15 +330,48 @@ export function resolveOfficialGPTImageSize(
   params?: Record<string, unknown>
 ): string | undefined {
   const normalizedSize = size?.trim().toLowerCase().replace(':', 'x');
+  const useExtendedSizing =
+    typeof modelId === 'string' &&
+    GPT_IMAGE_25_EXTENDED_MODEL_IDS.includes(modelId.trim().toLowerCase());
+  // Business 1K retains the former automatic tier independently of UI auto.
+  const resolution = useExtendedSizing &&
+    (params?.resolution === 'auto' || params?.resolution === 'billing-1k')
+    ? undefined
+    : resolveImageResolutionTier(params);
+
+  // Explicit automatic aspect ratio remains independent of the selected tier.
+  if (normalizedSize === 'auto') {
+    return undefined;
+  }
+
+  // For concrete ratios or stale pixel sizes, apply the selected K tier.
+  if (useExtendedSizing && resolution) {
+    const aspectRatio =
+      !normalizedSize
+        ? '1x1'
+        : resolveKnownAspectRatio(normalizedSize);
+    if (aspectRatio) {
+      if (resolution === '2k') {
+        return GPT_IMAGE_2K_BILLING_SIZES[aspectRatio];
+      }
+      return GPT_IMAGE_2_SIZE_MATRIX[resolution][aspectRatio];
+    }
+  }
+
   if (!normalizedSize || normalizedSize === 'auto') {
     return undefined;
   }
 
   const parsedPixelSize = parsePixelSize(normalizedSize);
   const useLegacySizing = isLegacyGPTImageModel(modelId);
+  const useGPTImage25Sizing = isGPTImage25Model(modelId);
 
   if (parsedPixelSize && isPixelSize(normalizedSize)) {
-    if (isGPTImage2Model(modelId)) {
+    if (useGPTImage25Sizing) {
+      return GPT_IMAGE_25_SIZES.has(normalizedSize)
+        ? normalizedSize
+        : undefined;
+    } else if (isGPTImage2Model(modelId)) {
       if (
         isValidGPTImage2PixelSize(parsedPixelSize.width, parsedPixelSize.height)
       ) {
@@ -285,12 +387,15 @@ export function resolveOfficialGPTImageSize(
     return undefined;
   }
 
-  if (useLegacySizing) {
+  if (useLegacySizing || useGPTImage25Sizing) {
     return LEGACY_GPT_IMAGE_SIZE_BY_RATIO[toLegacyAspectRatio(aspectRatio)];
   }
 
-  const resolution = resolveImageResolutionTier(params) || '1k';
-  return GPT_IMAGE_2_SIZE_MATRIX[resolution][aspectRatio];
+  if (!useExtendedSizing && isGPTImage2Model(modelId) && resolution === '2k') {
+    return GPT_IMAGE_2K_BILLING_SIZES[aspectRatio];
+  }
+
+  return GPT_IMAGE_2_SIZE_MATRIX[resolution || '1k'][aspectRatio];
 }
 
 export function resolveOfficialGPTImageEditSize(
@@ -298,7 +403,7 @@ export function resolveOfficialGPTImageEditSize(
   size?: string,
   params?: Record<string, unknown>
 ): string | undefined {
-  if (isGPTImage2Model(modelId)) {
+  if (isGPTImage2Model(modelId) || isGPTImage25Model(modelId)) {
     return resolveOfficialGPTImageSize(modelId, size, params);
   }
 

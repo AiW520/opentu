@@ -20,12 +20,14 @@ import type {
 import { Task, TaskStatus, type TaskResult } from '../../types/task.types';
 import type { CacheWarning } from '../../types/cache-warning.types';
 import { taskStorageWriter } from './task-storage-writer';
+import { SubmissionPersistenceError } from '../submission-persistence';
 import { taskStorageReader } from '../task-storage-reader';
 import {
   resolveInvocationRoute,
   type ModelRef,
 } from '../../utils/settings-manager';
 import { getDefaultImageModel } from '../../constants/model-config';
+import { extractCompletionText, fetchTextCompletion, safeTextError, textCompletionPath, textRequestBody } from './text-response';
 import {
   providerTransport,
   readProviderResponseJson,
@@ -632,7 +634,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       await taskStorageWriter.failTask(
         taskId,
         {
-          code: 'IMAGE_GENERATION_ERROR',
+          code: error.code || 'IMAGE_GENERATION_ERROR',
           message: errorMessage,
         },
         requestId,
@@ -799,6 +801,8 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       const duration = Date.now() - logStartTime;
       const errorMessage = error.message || 'Async image generation failed';
 
+      if (error instanceof SubmissionPersistenceError) throw error;
+
       if (options?.isCurrentAttempt?.() === false) {
         failLLMApiLog(logId, { duration, errorMessage });
         throw error;
@@ -821,7 +825,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       await taskStorageWriter.failTask(
         taskId,
         {
-          code: 'ASYNC_IMAGE_GENERATION_ERROR',
+          code: error.code || 'ASYNC_IMAGE_GENERATION_ERROR',
           message: errorMessage,
         },
         submissionRequestId,
@@ -938,7 +942,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       const videoApiConfig = {
         ...config.videoConfig,
         params: params.params,
-        defaultModel: 'veo3' as const,
+        defaultModel: model,
       };
       const videoId = await submitVideoGeneration(
         {
@@ -994,7 +998,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         try {
           const result = await pollVideoStatus(
             videoId,
-            config.videoConfig,
+            videoApiConfig,
             (progress) => {
               if (!isCurrentPollingAttempt()) return;
               // progress 是 0-1 范围（来自 pollVideoStatus 的 progress/100）
@@ -1024,13 +1028,21 @@ export class FallbackMediaExecutor implements IMediaExecutor {
           options?.onProgress?.({ progress: 100 });
 
           // 缓存远程 URL 到本地
+          let cacheWarning: CacheWarning | undefined;
           const cachedVidUrl = await cacheRemoteUrl(
             result.url,
             taskId,
             'video',
             'mp4',
             undefined,
-            { resultVisibility: params.resultVisibility }
+            {
+              forceRemoteCache: true,
+              returnLocalCacheUrl: true,
+              resultVisibility: params.resultVisibility,
+              onCacheWarning: (warning) => {
+                cacheWarning ||= warning;
+              },
+            }
           );
           assertCurrentExecutionAttempt(options);
 
@@ -1042,6 +1054,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
               format: 'mp4',
               size: 0,
               duration: duration ? parseInt(duration, 10) : undefined,
+              ...(cacheWarning ? { cacheWarning } : {}),
             },
             undefined,
             createStorageWriteGuard(options)
@@ -1284,7 +1297,11 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       }
       assertCurrentExecutionAttempt(options);
     }
+    const history = params.messages || [];
+    const lastMessage = history[history.length - 1];
+    const contextMessages = lastMessage?.role === 'user' && lastMessage.content.trim() === normalizedPrompt ? history.slice(0, -1) : history;
     const messages: UnifiedGeminiMessage[] = [
+      ...contextMessages.map((message) => ({ role: message.role, content: [{ type: 'text' as const, text: message.content }] })),
       {
         role: 'user',
         content: [
@@ -1300,8 +1317,9 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       },
     ];
 
+    const textPath = textCompletionPath(config.textConfig.baseUrl, config.textConfig.binding?.submitPath, messages.some((message) => message.content.some((part) => part.type !== 'text')));
     const logId = startLLMApiLog({
-      endpoint: '/chat/completions',
+      endpoint: textPath,
       model: modelName,
       taskType: 'chat',
       prompt,
@@ -1451,13 +1469,14 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         : await providerTransport
             .send(buildProviderContext(config.textConfig), {
               path:
-                config.textConfig.binding?.submitPath || '/chat/completions',
+                textPath,
               baseUrlStrategy: config.textConfig.binding?.baseUrlStrategy,
               method: 'POST',
+              fetcher: fetchTextCompletion,
               headers: {
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
+              body: JSON.stringify(textRequestBody(textPath, {
                 model: modelName,
                 messages,
                 stream: false,
@@ -1473,7 +1492,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
                 ...(typeof extraParams?.response_format === 'object'
                   ? { response_format: extraParams.response_format }
                   : {}),
-              }),
+              })),
               signal: options?.signal,
             })
             .then(async (response) => {
@@ -1492,7 +1511,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
             });
       assertCurrentExecutionAttempt(options);
 
-      const fullResponse = data.choices?.[0]?.message?.content || '';
+      const fullResponse = extractCompletionText(data);
       options?.onProgress?.({ progress: 100 });
       assertCurrentExecutionAttempt(options);
       if (taskId) {
@@ -1541,7 +1560,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         duration: Date.now() - startTime,
         errorMessage: error?.message || 'Text generation failed',
       });
-      throw error;
+      throw safeTextError(error, [config.textConfig.apiKey, ...Object.values(config.textConfig.extraHeaders || {})]);
     }
   }
 
@@ -1707,6 +1726,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       if (!isCurrentPollingAttempt()) return;
 
       // 缓存远程 URL
+      let cacheWarning: CacheWarning | undefined;
       const cachedVidUrl = await cacheRemoteUrl(
         result.url,
         task.id,
@@ -1714,12 +1734,17 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         'mp4',
         undefined,
         {
+          forceRemoteCache: true,
+          returnLocalCacheUrl: true,
           resultVisibility:
             task.params.resultVisibility === 'internal'
               ? 'internal'
               : task.params.resultVisibility === 'user'
               ? 'user'
               : undefined,
+          onCacheWarning: (warning) => {
+            cacheWarning ||= warning;
+          },
         }
       );
       if (!isCurrentPollingAttempt()) return;
@@ -1737,6 +1762,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
             : task.params.resultVisibility === 'user'
             ? 'user'
             : undefined,
+        ...(cacheWarning ? { cacheWarning } : {}),
       };
 
       if (onTaskUpdate) {
@@ -1851,6 +1877,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       },
       videoConfig: {
         apiKey: videoRoute.apiKey,
+        model: videoRoute.modelId,
         // 规范化 baseUrl，移除尾部 / 或 /v1，便于拼接 /v1/videos
         baseUrl: this.normalizeApiBase(
           videoRoute.baseUrl || 'https://api.tu-zi.com'

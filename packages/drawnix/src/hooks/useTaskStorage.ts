@@ -79,6 +79,9 @@ export function useTaskStorage(): boolean {
 
         // Load tasks from IndexedDB (aitu-app)
         const storedTasks = await taskStorageReader.getAllTasks();
+        const inPageTaskIds = new Set(
+          taskQueueService.getAllTasks().map((task) => task.id)
+        );
         console.warn(
           `[useTaskStorage] Loaded ${storedTasks.length} tasks from IndexedDB`
         );
@@ -91,40 +94,42 @@ export function useTaskStorage(): boolean {
         }> = [];
 
         if (storedTasks.length > 0) {
-          const tasksForMemory = storedTasks.map((task) => {
-            if (
-              task.status !== TaskStatus.PROCESSING ||
-              task.type !== TaskType.IMAGE ||
-              task.remoteId ||
-              taskQueueService.isTaskExecutionActive(task.id) ||
-              (task.executionPhase !== TaskExecutionPhase.SUBMITTING &&
-                task.executionPhase !== TaskExecutionPhase.DOWNLOADING &&
-                task.executionPhase !== TaskExecutionPhase.POLLING)
-            ) {
-              return task;
-            }
+          const tasksForMemory = storedTasks
+            .filter((task) => !task.params.workflow && !inPageTaskIds.has(task.id))
+            .map((task) => {
+              if (
+                task.status !== TaskStatus.PROCESSING ||
+                task.type !== TaskType.IMAGE ||
+                task.remoteId ||
+                taskQueueService.isTaskExecutionActive(task.id) ||
+                (task.executionPhase !== TaskExecutionPhase.SUBMITTING &&
+                  task.executionPhase !== TaskExecutionPhase.DOWNLOADING &&
+                  task.executionPhase !== TaskExecutionPhase.POLLING)
+              ) {
+                return task;
+              }
 
-            const recoveryTask = {
-              ...task,
-              executionPhase: TaskExecutionPhase.POLLING,
-            };
-            if (!isImageRequestRecoveryCandidate(recoveryTask)) {
-              return task;
-            }
+              const recoveryTask = {
+                ...task,
+                executionPhase: TaskExecutionPhase.POLLING,
+              };
+              if (!isImageRequestRecoveryCandidate(recoveryTask)) {
+                return task;
+              }
 
-            const startedAt = task.startedAt ?? task.createdAt;
-            deferredImageRecoveryTasks.push({
-              taskId: task.id,
-              requestId: getImageSubmissionRequestId(recoveryTask),
-              startedAt,
-              deadline: startedAt + IMAGE_GENERATION_TIMEOUT_MS,
+              const startedAt = task.startedAt ?? task.createdAt;
+              deferredImageRecoveryTasks.push({
+                taskId: task.id,
+                requestId: getImageSubmissionRequestId(recoveryTask),
+                startedAt,
+                deadline: startedAt + IMAGE_GENERATION_TIMEOUT_MS,
+              });
+
+              return {
+                ...task,
+                executionPhase: TaskExecutionPhase.SUBMITTING,
+              };
             });
-
-            return {
-              ...task,
-              executionPhase: TaskExecutionPhase.SUBMITTING,
-            };
-          });
 
           await taskQueueService.restoreTasks(tasksForMemory);
           for (const deferredTask of deferredImageRecoveryTasks) {
@@ -132,13 +137,14 @@ export function useTaskStorage(): boolean {
               taskQueueService.getTaskExecutionToken(deferredTask.taskId);
           }
           console.warn(
-            `[useTaskStorage] Restored ${storedTasks.length} tasks to memory`
+            `[useTaskStorage] Restored ${tasksForMemory.length} tasks to memory`
           );
 
           // Handle interrupted processing tasks based on task type and remoteId
           const processingTasks = storedTasks.filter(
             (task) =>
               task.status === 'processing' &&
+              !inPageTaskIds.has(task.id) &&
               !taskQueueService.isTaskExecutionActive(task.id)
           );
 
@@ -148,6 +154,7 @@ export function useTaskStorage(): boolean {
             );
 
             for (const task of processingTasks) {
+              if (task.params.documentBatch || task.params.workflow) continue;
               const isAsyncImageResumable = isResumableAsyncImageTask(task);
               const isPptExplainer = isPptExplainerTask(task);
               const pptExplainerState = isPptExplainer
@@ -277,7 +284,7 @@ export function useTaskStorage(): boolean {
           // 视频任务有 remoteId 说明已提交到服务端，刷新后应始终尝试重新轮询
           const failedRemoteTasks = storedTasks.filter(
             (task) =>
-              task.status === 'failed' &&
+              !task.params.workflow && task.status === 'failed' &&
               task.remoteId &&
               !isPptExplainerTask(task) &&
               (task.type === TaskType.VIDEO ||

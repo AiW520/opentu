@@ -1,4 +1,13 @@
 import {
+  isCurrentTuziEndpoint,
+  isVerifiedTuziProvider,
+  TUZI_PROVIDER_REUSE_EVENT,
+} from '../services/tuzi-provider-reuse-state';
+import {
+  requestTuziParentContext,
+  TUZI_BRIDGE_EVENT,
+} from '../services/tuzi-postmessage-bridge';
+import {
   type ModelConfig,
   type ModelType,
   ModelVendor,
@@ -7,6 +16,8 @@ import {
   DEFAULT_AUDIO_MODEL_ID,
   DEFAULT_VIDEO_MODEL_ID,
   DEFAULT_TEXT_MODEL_ID,
+  GPT_IMAGE_25_MODEL_IDS,
+  GPT_IMAGE_2_MODEL_IDS,
   getStaticModelsByType,
   getStaticModelConfig,
   isDefaultModelHidden,
@@ -33,6 +44,7 @@ import { isTuziEmbeddedMode } from '../services/tuzi-embedded-config';
 import { hasTuziSystemToken } from '../services/tuzi-token-auth';
 
 const LEGACY_CACHE_KEY = 'drawnix-runtime-model-discovery';
+const MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 
 export interface RemoteModelListItem {
   id: string;
@@ -80,6 +92,20 @@ export interface ManualRuntimeModelInput {
   label?: string;
   description?: string;
   invocation?: ManualRuntimeModelInvocationInput;
+}
+
+export interface RuntimeModelDiscoveryOptions {
+  selectAll?: boolean;
+  signal?: AbortSignal;
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'aborted' in value &&
+    typeof (value as AbortSignal).addEventListener === 'function'
+  );
 }
 
 interface LegacyPersistedRuntimeModelDiscoveryState {
@@ -154,26 +180,77 @@ function extractDiscoveryErrorMessage(
 async function fetchRemoteModelList(
   baseUrl: string,
   apiKey: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  accountManaged = false
 ): Promise<string> {
-  const response = await fetch(`${baseUrl}/models`, {
-    signal,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
+  const controller =
+    typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), MODEL_DISCOVERY_TIMEOUT_MS)
+    : undefined;
+  const abortFromCaller = () => controller?.abort();
+  if (signal?.aborted) abortFromCaller();
+  signal?.addEventListener('abort', abortFromCaller, { once: true });
+  try {
+    const requestUrl = getModelListRequestUrl(baseUrl, accountManaged);
+    const response = await fetch(requestUrl, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
 
-  const rawText = await response.text();
-  if (!response.ok) {
-    throw new Error(
-      extractDiscoveryErrorMessage(
-        rawText,
-        `获取模型列表失败: HTTP ${response.status}`
-      )
-    );
+    const rawText = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        extractDiscoveryErrorMessage(
+          rawText,
+          `获取模型列表失败: HTTP ${response.status}`
+        )
+      );
+    }
+
+    return rawText;
+  } catch (error) {
+    if (controller?.signal.aborted && !signal?.aborted) {
+      throw new Error('模型列表请求超时，请稍后重试');
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', abortFromCaller);
+  }
+}
+
+function getModelListRequestUrl(
+  baseUrl: string,
+  accountManaged: boolean
+): string {
+  if (typeof window === 'undefined') {
+    return `${baseUrl}/models`;
   }
 
-  return rawText;
+  try {
+    const parsed = new URL(baseUrl);
+    if (
+      parsed.protocol === 'https:' &&
+      parsed.hostname.toLowerCase() === 'api.tu-zi.com'
+    ) {
+      const path = `${parsed.pathname.replace(/\/+$/, '')}/models`;
+      return new URL(
+        `${
+          accountManaged
+            ? '/__opentu_tuzi_session__'
+            : '/__opentu_tuzi_proxy__/api'
+        }${path.startsWith('/') ? path : `/${path}`}`,
+        window.location.origin
+      ).toString();
+    }
+  } catch {
+    // Fall back to the direct URL for incomplete custom addresses.
+  }
+
+  return `${baseUrl}/models`;
 }
 
 function buildModelDiscoveryBaseUrls(
@@ -196,7 +273,8 @@ async function fetchRemoteModelListWithFallback(
   primaryBaseUrl: string,
   apiKey: string,
   fallbackBaseUrls: string[] = [],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  accountManaged = false
 ): Promise<string> {
   const baseUrls = buildModelDiscoveryBaseUrls(
     primaryBaseUrl,
@@ -206,7 +284,12 @@ async function fetchRemoteModelListWithFallback(
 
   for (let index = 0; index < baseUrls.length; index += 1) {
     try {
-      return await fetchRemoteModelList(baseUrls[index], apiKey, signal);
+      return await fetchRemoteModelList(
+        baseUrls[index],
+        apiKey,
+        signal,
+        accountManaged
+      );
     } catch (error) {
       if (error instanceof Error && !/failed to fetch/i.test(error.message)) {
         throw error;
@@ -1127,6 +1210,12 @@ function adaptRuntimeModel(model: RemoteModelListItem): ModelConfig | null {
   const staticConfig = getStaticModelConfig(model.id);
   if (staticConfig) {
     const clonedConfig = cloneModelConfig(staticConfig);
+    if (
+      GPT_IMAGE_25_MODEL_IDS.includes(staticConfig.id) ||
+      GPT_IMAGE_2_MODEL_IDS.includes(staticConfig.id)
+    ) {
+      return clonedConfig;
+    }
     const categoryType = inferModelTypeFromCategory(model.category);
     if (!categoryType || categoryType === staticConfig.type) {
       return clonedConfig;
@@ -1214,11 +1303,30 @@ function getProfileById(profileId: string): ProviderProfile | null {
 }
 
 function isProfileEnabled(profileId: string): boolean {
-  if (profileId === LEGACY_DEFAULT_PROVIDER_PROFILE_ID) {
-    return !isTuziEmbeddedMode() || hasTuziSystemToken();
+  const profile = getProfileById(profileId);
+  if (
+    isTuziEmbeddedMode() &&
+    profile &&
+    isCurrentTuziEndpoint(profile.baseUrl)
+  ) {
+    return profile.id.startsWith('tuzi-managed-')
+      ? profile.enabled !== false && hasTuziSystemToken()
+      : profile.id.startsWith('tuzi-token-')
+      ? isVerifiedTuziProvider(profile)
+      : profile.enabled !== false;
   }
+  return profile?.enabled !== false;
+}
 
-  return getProfileById(profileId)?.enabled !== false;
+function canDiscoverProfileModels(profile: ProviderProfile | null): boolean {
+  return Boolean(
+    profile &&
+      isProfileEnabled(profile.id) &&
+      profile.enabled !== false &&
+      profile.capabilities?.supportsModelsEndpoint !== false &&
+      profile.baseUrl?.trim() &&
+      profile.apiKey?.trim()
+  );
 }
 
 function attachRuntimeSource(
@@ -1385,9 +1493,20 @@ function removeLegacyPersistedState(): void {
 class RuntimeModelDiscoveryStore {
   private catalogStates = new Map<string, RuntimeModelDiscoveryState>();
   private listeners = new Set<() => void>();
+  private inFlightDiscoveries = new Map<string, Promise<ModelConfig[]>>();
   private revision = 0;
 
   constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener?.(
+        TUZI_PROVIDER_REUSE_EVENT,
+        this.handleProfileSettingsChange
+      );
+      window.addEventListener?.(
+        TUZI_BRIDGE_EVENT,
+        this.handleProfileSettingsChange
+      );
+    }
     this.catalogStates = this.loadCatalogStatesFromSettings();
     this.migrateLegacyCacheIfNeeded();
     this.syncRuntimeModelConfigs();
@@ -1548,6 +1667,15 @@ class RuntimeModelDiscoveryStore {
     return this.revision;
   }
 
+  getInFlightDiscovery(profileId: string): Promise<ModelConfig[]> | null {
+    for (const [key, discovery] of this.inFlightDiscoveries) {
+      if (key.startsWith(`${profileId}::`)) {
+        return discovery;
+      }
+    }
+    return null;
+  }
+
   getState(
     profileId = LEGACY_DEFAULT_PROVIDER_PROFILE_ID
   ): RuntimeModelDiscoveryState {
@@ -1583,10 +1711,17 @@ class RuntimeModelDiscoveryStore {
   }
 
   getSelectableModels(type: ModelType): ModelConfig[] {
-    return sortModelsByDisplayPriority([
-      ...this.getConfiguredSelectableModels(type),
-      ...decorateStaticModels(getStaticModelsByType(type)),
-    ]);
+    if (
+      providerProfilesSettings
+        .get()
+        .some((profile) => canDiscoverProfileModels(profile))
+    ) {
+      return this.getConfiguredSelectableModels(type);
+    }
+
+    return sortModelsByDisplayPriority(
+      decorateStaticModels(getStaticModelsByType(type))
+    );
   }
 
   getConfiguredSelectableModels(type: ModelType): ModelConfig[] {
@@ -1695,6 +1830,9 @@ class RuntimeModelDiscoveryStore {
           isDefaultModelHidden(model.id)
         )
     );
+    if (canDiscoverProfileModels(getProfileById(profileId))) {
+      return sortModelsByDisplayPriority(runtimeModels);
+    }
     return mergeModels(getStaticModelsByType(type), runtimeModels);
   }
 
@@ -1868,16 +2006,82 @@ class RuntimeModelDiscoveryStore {
     baseUrl: string,
     apiKey: string,
     fallbackBaseUrls: string[] = [],
-    signal?: AbortSignal
+    optionsOrSignal: RuntimeModelDiscoveryOptions | AbortSignal = {}
   ): Promise<ModelConfig[]> {
     const trimmedApiKey = apiKey.trim();
     if (!trimmedApiKey) {
       throw new Error('缺少 API Key');
     }
 
-    const state = this.getCatalogState(profileId);
+    if (isCurrentTuziEndpoint(baseUrl)) {
+      if (
+        typeof window !== 'undefined' &&
+        window.parent &&
+        window.parent !== window
+      )
+        await requestTuziParentContext();
+      if (isTuziEmbeddedMode()) {
+        const profile = getProfileById(profileId);
+        if (
+          !profile ||
+          !isProfileEnabled(profileId) ||
+          profile.apiKey.trim() !== trimmedApiKey
+        )
+          throw new Error('请先关联账户并核验该供应商令牌');
+      }
+    }
     const normalizedBaseUrl = normalizeModelApiBaseUrl(baseUrl);
     const signature = buildDiscoverySignature(normalizedBaseUrl, trimmedApiKey);
+    const options = isAbortSignal(optionsOrSignal)
+      ? { signal: optionsOrSignal }
+      : optionsOrSignal;
+
+    if (options.signal) {
+      return this.discoverInternal(
+        profileId,
+        normalizedBaseUrl,
+        trimmedApiKey,
+        signature,
+        fallbackBaseUrls,
+        options
+      );
+    }
+
+    const discoveryKey = `${profileId}::${signature}::selectAll=${
+      options.selectAll === true ? '1' : '0'
+    }`;
+    const existingDiscovery = this.inFlightDiscoveries.get(discoveryKey);
+    if (existingDiscovery) {
+      return existingDiscovery;
+    }
+
+    const discovery = this.discoverInternal(
+      profileId,
+      normalizedBaseUrl,
+      trimmedApiKey,
+      signature,
+      fallbackBaseUrls,
+      options
+    );
+    this.inFlightDiscoveries.set(discoveryKey, discovery);
+    const clearInFlight = () => {
+      if (this.inFlightDiscoveries.get(discoveryKey) === discovery) {
+        this.inFlightDiscoveries.delete(discoveryKey);
+      }
+    };
+    void discovery.then(clearInFlight, clearInFlight);
+    return discovery;
+  }
+
+  private async discoverInternal(
+    profileId: string,
+    normalizedBaseUrl: string,
+    trimmedApiKey: string,
+    signature: string,
+    fallbackBaseUrls: string[],
+    options: RuntimeModelDiscoveryOptions
+  ): Promise<ModelConfig[]> {
+    const state = this.getCatalogState(profileId);
 
     this.setCatalogState(
       profileId,
@@ -1895,7 +2099,9 @@ class RuntimeModelDiscoveryStore {
       normalizedBaseUrl,
       trimmedApiKey,
       fallbackBaseUrls,
-      signal
+      options.signal,
+      profileId.startsWith('tuzi-managed-') ||
+        profileId.startsWith('tuzi-token-')
     );
 
     let parsed: unknown;
@@ -1934,15 +2140,16 @@ class RuntimeModelDiscoveryStore {
         .filter((model) => (model.tags || []).includes('manual'))
         .map((model) => model.id)
     );
-    const selectedModelIds =
-      state.signature === signature
-        ? normalizeSelectedModelIds(discoveredModels, state.selectedModelIds)
-        : normalizeSelectedModelIds(
-            discoveredModels,
-            state.selectedModelIds.filter((modelId) =>
-              manualModelIds.has(modelId)
-            )
-          );
+    const selectedModelIds = options.selectAll
+      ? discoveredModels.map((model) => model.id)
+      : state.signature === signature
+      ? normalizeSelectedModelIds(discoveredModels, state.selectedModelIds)
+      : normalizeSelectedModelIds(
+          discoveredModels,
+          state.selectedModelIds.filter((modelId) =>
+            manualModelIds.has(modelId)
+          )
+        );
     const models = buildSelectedModels(discoveredModels, selectedModelIds);
 
     this.setCatalogState(profileId, {

@@ -279,6 +279,7 @@ function matchesSelectionScope(
 }
 
 export function MediaLibraryGrid({
+  allowedTypes,
   selectedAssetId,
   onSelectAsset,
   onDoubleClick,
@@ -447,8 +448,15 @@ export function MediaLibraryGrid({
   // 应用筛选和排序
   const filteredResult = useMemo(() => {
     const result = filterAssets(assets, filters);
+    const allowedAssets = allowedTypes?.length
+      ? result.assets.filter((asset) => allowedTypes.includes(asset.type))
+      : result.assets;
     if (!selectedPlaylistId) {
-      return result;
+      return {
+        assets: allowedAssets,
+        count: allowedAssets.length,
+        isEmpty: allowedAssets.length === 0,
+      };
     }
 
     const playlistAssetIds = new Set(
@@ -459,7 +467,7 @@ export function MediaLibraryGrid({
         : getPlaylistAssetIds(selectedPlaylistId)
     );
 
-    const playlistAssets = result.assets.filter((asset) =>
+    const playlistAssets = allowedAssets.filter((asset) =>
       playlistAssetIds.has(asset.id)
     );
     return {
@@ -467,7 +475,7 @@ export function MediaLibraryGrid({
       count: playlistAssets.length,
       isEmpty: playlistAssets.length === 0,
     };
-  }, [assets, filters, selectedPlaylistId, getPlaylistAssetIds]);
+  }, [allowedTypes, assets, filters, selectedPlaylistId, getPlaylistAssetIds]);
 
   const currentPlaylistAssetIds = useMemo(
     () =>

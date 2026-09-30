@@ -24,7 +24,8 @@ export function isManagedProviderProfile(profileId: string): boolean {
 
 export function shouldShowProviderProfile(
   profileId: string,
-  showTuziProviders: boolean
+  showTuziProviders: boolean,
+  hasApiKey = false
 ): boolean {
   return showTuziProviders || !profileId.startsWith('tuzi-managed-');
 }
